@@ -1,0 +1,11 @@
+{
+  "name": "test-harness",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "npx http-server -p 5175"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

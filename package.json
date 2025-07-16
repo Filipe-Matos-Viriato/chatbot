@@ -1,0 +1,23 @@
+{
+  "name": "enterprise-rag-chatbot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise-grade RAG chatbot with a Node.js backend and React frontend.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=packages/frontend",
+    "start:backend": "npm start --workspace=packages/backend",
+    "start:harness": "npm start --workspace=packages/test-harness"
+  },
+  "keywords": [
+    "rag",
+    "chatbot",
+    "react",
+    "nodejs",
+    "monorepo"
+  ],
+  "author": "Kilo Code",
+  "license": "UNLICENSED"
+}

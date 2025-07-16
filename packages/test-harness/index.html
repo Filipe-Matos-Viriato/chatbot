@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chatbot Test Harness</title>
+  <style>
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+    #controls { border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 8px; }
+    .control-group { margin-bottom: 10px; }
+    iframe { width: 400px; height: 600px; border: 1px solid #ccc; }
+    label { margin-right: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Chatbot Test Harness</h1>
+  <div id="controls">
+    <div class="control-group">
+      <label for="context-type">Context Type:</label>
+      <select id="context-type">
+        <option value="context_id" selected>Application Context (context_id)</option>
+        <option value="url">Webpage URL (source_url)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label for="context-input">Context Value:</label>
+      <input type="text" id="context-input" placeholder="e.g., PRODUCT-123 or https://..." />
+      <button id="send-context-btn">Send Context</button>
+    </div>
+    <hr>
+    <div class="control-group">
+      <p><em>To test the general fallback, send an empty or non-existent context, or use this button:</em></p>
+      <button id="clear-context-btn">Clear Context (Send Null)</button>
+    </div>
+  </div>
+  <iframe src="http://localhost:5174" frameborder="0"></iframe>
+
+  <script src="main.js"></script>
+</body>
+</html>
