@@ -10,6 +10,8 @@ const pdf = require('pdf-parse');
 const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Pinecone } = require('@pinecone-database/pinecone');
+const supabase = require('../config/supabase'); // Import Supabase client
+const { getClientConfig } = require('./client-config-service'); // Import client config service
 
 // Initialize clients (ensure these are consistent with rag-service.js)
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
@@ -43,12 +45,25 @@ const extractText = async (buffer, originalname) => {
 /**
  * Extracts structured metadata from the document text.
  * @param {string} text The full text of the document.
+ * @param {string} originalname The original name of the file (to determine type).
+ * @param {object} clientConfig The client-specific configuration.
  * @returns {object} An object containing extracted metadata.
  */
-const extractStructuredMetadata = (text) => {
+const extractStructuredMetadata = (text, originalname, clientConfig) => {
   const metadata = {};
 
-  // Number of Bedrooms (T3, T4, or X quartos)
+  // Helper function to apply regex extraction
+  const applyRegexExtraction = (field, pattern, targetMetadataKey, parseFn = (val) => val) => {
+    if (clientConfig.documentExtraction && clientConfig.documentExtraction[field] && clientConfig.documentExtraction[field].pattern) {
+      const regex = new RegExp(clientConfig.documentExtraction[field].pattern, 'i');
+      const match = text.match(regex);
+      if (match && match[1]) { // Assuming the value to extract is in the first capturing group
+        metadata[targetMetadataKey] = parseFn(match[1]);
+      }
+    }
+  };
+
+  // Number of Bedrooms (T3, T4, or X quartos) - Keep existing logic for now, as it's not client-configurable yet
   let match = text.match(/T(\d+)/i);
   if (match) {
     metadata.num_bedrooms = parseInt(match[1], 10);
@@ -59,11 +74,55 @@ const extractStructuredMetadata = (text) => {
     }
   }
 
-  // Number of Bathrooms
-  match = text.match(/(\d+)\s*casas de banho/i);
-  if (match) {
-    metadata.num_bathrooms = parseInt(match[1], 10);
+  // Number of Bathrooms (client-configurable)
+  applyRegexExtraction('listingBaths', null, 'num_bathrooms', (val) => parseInt(val, 10));
+  if (metadata.num_bathrooms === undefined) { // Fallback to existing logic if not extracted by client config
+    match = text.match(/(\d+)\s*(?:casas de banho|WC|W\.C\.)/i);
+    if (match) {
+      metadata.num_bathrooms = parseInt(match[1], 10);
+    } else {
+      metadata.num_bathrooms = null;
+    }
   }
+  console.log(`Extracted num_bathrooms: ${metadata.num_bathrooms}`);
+
+  // Property Type (e.g., Apartamento, Moradia, Vivenda, Casa, Escritório, Loja, Terreno)
+  match = text.match(/(Apartamento|Moradia|Vivenda|Casa|Escritório|Loja|Terreno)/i);
+  if (match) {
+    metadata.type = match[1];
+  } else {
+    metadata.type = null;
+  }
+  console.log(`Extracted type: ${metadata.type}`);
+
+  // Address (more robust extraction)
+  // Look for "Localização:" or "Morada:" followed by text until a newline or specific delimiter
+  match = text.match(/(Localização|Morada):\s*([^\n,]+(?:,[^\n,]+){0,2})/i); // Capture up to 3 parts of an address
+  if (match) {
+    metadata.address = match[2].trim();
+  } else {
+    // Fallback: look for common address components like "Rua", "Avenida" followed by numbers/names
+    match = text.match(/(Rua|Avenida|Travessa|Praça)\s+[^.\n]+,\s*\d+/i);
+    if (match) {
+      metadata.address = match[0].trim();
+    } else {
+      metadata.address = null;
+    }
+  }
+  console.log(`Extracted address: ${metadata.address}`);
+
+  // Property Name (client-configurable)
+  applyRegexExtraction('listingName', null, 'property_name');
+  if (metadata.property_name === undefined) { // Fallback to existing logic if not extracted by client config
+    match = text.match(/^(.+?)\n\n/); // Capture text before first double newline
+    if (match) {
+      metadata.property_name = match[1].trim();
+    } else {
+      // Fallback to filename without extension if no clear title is found
+      metadata.property_name = originalname.replace(/\.pdf$/, '');
+    }
+  }
+  console.log(`Extracted property_name: ${metadata.property_name}`);
 
   // Total Area (m²)
   match = text.match(/Área:\s*([\d.,]+)\s*m²/i);
@@ -140,9 +199,57 @@ const processDocument = async ({
 
     // 2. Extract structured metadata
     console.log(`[${clientConfig.clientId}] Extracting structured metadata...`);
-    const structuredMetadata = extractStructuredMetadata(documentText);
+    const structuredMetadata = extractStructuredMetadata(documentText, originalname, clientConfig); // Pass originalname and clientConfig
     console.log(`[${clientConfig.clientId}] Extracted metadata:`, JSON.stringify(structuredMetadata, null, 2));
 
+    // Prepare amenities array from boolean flags
+    const amenitiesArray = Object.keys(structuredMetadata).filter(key =>
+      key.startsWith('has_') && structuredMetadata[key]
+    ).map(key => key.replace('has_', '').replace(/_/g, ' '));
+
+    // 2.5. Upsert listing data to Supabase 'listings' table if listing_id is present
+    if (metadata.listing_id) {
+      const { error: upsertError } = await supabase
+        .from('listings')
+        .upsert({
+          id: metadata.listing_id,
+          name: structuredMetadata.property_name || originalname, // Use extracted property_name
+          address: structuredMetadata.address || null,
+          type: structuredMetadata.type || null,
+          price: structuredMetadata.price_eur ? structuredMetadata.price_eur.toString() : null, // Convert number to string
+          beds: structuredMetadata.num_bedrooms || null,
+          baths: structuredMetadata.num_bathrooms || null,
+          amenities: amenitiesArray.length > 0 ? amenitiesArray : null,
+          // created_at will default on the database side
+        }, { onConflict: 'id' }); // Upsert based on 'id'
+
+      if (upsertError) {
+        console.error(`[${clientConfig.clientId}] Error upserting listing to Supabase:`, upsertError);
+      } else {
+        console.log(`[${clientConfig.clientId}] Listing ${metadata.listing_id} upserted to Supabase.`);
+      }
+
+      // Upsert listing metrics to Supabase 'listing_metrics' table
+      const { error: metricsUpsertError } = await supabase
+        .from('listing_metrics')
+        .upsert({
+          listing_id: metadata.listing_id,
+          chatbot_views: 0, // Initialize to 0
+          inquiries: 0,     // Initialize to 0
+          hot_leads: 0,     // Initialize to 0
+          conversion_rate: '0%', // Initialize to '0%'
+          lead_score_distribution_hot: 0,
+          lead_score_distribution_warm: 0,
+          lead_score_distribution_cold: 0,
+          // updated_at will default on the database side
+        }, { onConflict: 'listing_id' }); // Upsert based on 'listing_id'
+
+      if (metricsUpsertError) {
+        console.error(`[${clientConfig.clientId}] Error upserting listing metrics to Supabase:`, metricsUpsertError);
+      } else {
+        console.log(`[${clientConfig.clientId}] Listing metrics for ${metadata.listing_id} upserted to Supabase.`);
+      }
+    }
 
     // 3. Chunk the text based on client's configuration
     console.log(`[${clientConfig.clientId}] Chunking document with chunkSize: ${chunkSize}, chunkOverlap: ${chunkOverlap}...`);

@@ -36,6 +36,16 @@
       "requested_brochure": 10
     }
   },
+  "documentExtraction": {
+    "listingName": {
+      "pattern": "ap-\\d+\\s*[\\s\\W]*([^\\n]+)",
+      "type": "regex"
+    },
+    "listingBaths": {
+      "pattern": "Casas de banho:\\s*(\\d+)",
+      "type": "regex"
+    }
+  },
   "ingestionPipeline": [
     {
       "name": "template-chunker",

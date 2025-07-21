@@ -26,6 +26,7 @@ const getListingIdFromPdf = async (filePath) => {
   }
 };
 
+
 /**
  * Uploads a single file to the ingestion API.
  * @param {string} filePath - The full path to the file.

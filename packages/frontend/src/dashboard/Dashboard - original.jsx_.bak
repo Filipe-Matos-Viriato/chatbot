@@ -1,0 +1,989 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../config/supabaseClient';
+
+const Dashboard = () => {
+    const [activeTab, setActiveTab] = useState('overview');
+    const [selectedListing, setSelectedListing] = useState(null);
+    const [leadFilter, setLeadFilter] = useState('all');
+    const [selectedChatHistory, setSelectedChatHistory] = useState(null);
+    const [isManageCriteriaOpen, setIsManageCriteriaOpen] = useState(false);
+    const [isUnansweredQuestionsOpen, setIsUnansweredQuestionsOpen] = useState(false);
+
+    const [leads, setLeads] = useState([]);
+    const [listings, setListings] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        const fetchLeads = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('visitors') // Assuming 'visitors' is the table name for leads
+                    .select('*');
+                if (error) throw error;
+                setLeads(data);
+            } catch (err) {
+                setError(err.message);
+            }
+        };
+
+        const fetchListings = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('listings') // Assuming 'listings' is the table name for listings
+                    .select('*');
+                if (error) throw error;
+                setListings(data);
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchLeads();
+        fetchListings();
+    }, []);
+
+    useEffect(() => {
+        const fetchLeads = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('visitors') // Assuming 'visitors' is the table name for leads
+                    .select('*');
+                if (error) throw error;
+                setLeads(data);
+            } catch (err) {
+                setError(err.message);
+            }
+        };
+
+        const fetchListings = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('listings') // Assuming 'listings' is the table name for listings
+                    .select('*');
+                if (error) throw error;
+                setListings(data);
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchLeads();
+        fetchListings();
+    }, []);
+
+    const filteredLeads = leads.filter(lead => {
+        if (leadFilter === 'all') return true;
+        // Assuming 'status' field exists in your Supabase 'visitors' table
+        // You might need to map Supabase lead scores to 'Hot', 'Warm', 'Cold' categories
+        // For now, let's assume a 'status' field or derive it from 'lead_score'
+        // Example: if lead.lead_score >= 70 then 'Hot', etc.
+        const leadStatus = lead.lead_score >= 70 ? 'Hot' : (lead.lead_score >= 40 ? 'Warm' : 'Cold');
+        return leadStatus === leadFilter;
+    });
+
+
+    // Function to handle tab clicks
+    const handleTabClick = (tabId) => {
+        setActiveTab(tabId);
+        setSelectedListing(null); // Reset selected listing when changing tabs
+        setLeadFilter('all'); // Reset lead filter when changing tabs
+        setSelectedChatHistory(null); // Reset selected chat history
+        setIsManageCriteriaOpen(false); // Close manage criteria view
+        setIsUnansweredQuestionsOpen(false); // Close unanswered questions view
+    };
+
+    // Function to view listing details
+    const handleViewListingDetails = (listingId) => {
+        const listing = listings.find(l => l.id === listingId);
+        setSelectedListing(listing);
+    };
+
+    // Function to go back to listings table
+    const handleBackToAllListings = () => {
+        setSelectedListing(null);
+    };
+
+    // Function to handle "View Hot Leads" button click
+    const handleViewHotLeads = () => {
+        setActiveTab('lead-performance');
+        setLeadFilter('Hot');
+        setSelectedListing(null); // Ensure no listing detail view is active
+        setSelectedChatHistory(null);
+        setIsManageCriteriaOpen(false);
+        setIsUnansweredQuestionsOpen(false);
+    };
+
+    // Function to handle "Manage Criteria" button click
+    const handleManageCriteria = () => {
+        setIsManageCriteriaOpen(true);
+    };
+
+    // Function to handle "Review Unanswered Questions" button click
+    const handleReviewUnansweredQuestions = (listingId = null) => {
+        setActiveTab('chatbot-analytics'); // Ensure we are on the correct tab
+        setIsUnansweredQuestionsOpen(true);
+        setSelectedListing(null); // IMPORTANT: Clear selectedListing to allow UnansweredQuestionsView to render
+        // If a listingId is provided, you could filter unanswered questions specific to that listing here
+        // For now, it will show all unanswered questions.
+    };
+
+    // Function to view full chat history
+    const handleViewFullChat = (chatHistoryContent) => {
+        setSelectedChatHistory(chatHistoryContent);
+    };
+
+    // Shadcn-inspired Button component
+    const Button = ({ children, variant = 'default', size = 'default', className = '', ...props }) => {
+        let baseClasses = 'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
+        let variantClasses = '';
+        let sizeClasses = '';
+
+        switch (variant) {
+            case 'default':
+                variantClasses = 'bg-blue-600 text-white hover:bg-blue-700';
+                break;
+            case 'secondary':
+                variantClasses = 'bg-gray-200 text-gray-800 hover:bg-gray-300';
+                break;
+            case 'ghost':
+                variantClasses = 'hover:bg-gray-100 hover:text-gray-900';
+                break;
+            case 'destructive':
+                variantClasses = 'bg-red-600 text-white hover:bg-red-700';
+                break;
+            default:
+                variantClasses = 'bg-blue-600 text-white hover:bg-blue-700';
+        }
+
+        switch (size) {
+            case 'default':
+                sizeClasses = 'h-10 px-4 py-2';
+                break;
+            case 'sm':
+                sizeClasses = 'h-9 rounded-md px-3';
+                break;
+            case 'lg':
+                sizeClasses = 'h-11 rounded-md px-8';
+                break;
+            case 'icon':
+                sizeClasses = 'h-10 w-10';
+                break;
+            default:
+                sizeClasses = 'h-10 px-4 py-2';
+        }
+
+        return (
+            <button className={`${baseClasses} ${variantClasses} ${sizeClasses} ${className}`} {...props}>
+                {children}
+            </button>
+        );
+    };
+
+    // Shadcn-inspired Card component
+    const Card = ({ children, className = '', ...props }) => (
+        <div className={`rounded-lg border bg-card text-card-foreground shadow-sm ${className}`} {...props}>
+            {children}
+        </div>
+    );
+
+    // Shadcn-inspired Card Header component
+    const CardHeader = ({ children, className = '', ...props }) => (
+        <div className={`flex flex-col space-y-1.5 p-6 ${className}`} {...props}>
+            {children}
+        </div>
+    );
+
+    // Shadcn-inspired Card Title component
+    const CardTitle = ({ children, className = '', ...props }) => (
+        <h3 className={`text-2xl font-semibold leading-none tracking-tight ${className}`} {...props}>
+            {children}
+        </h3>
+    );
+
+    // Shadcn-inspired Card Description component
+    const CardDescription = ({ children, className = '', ...props }) => (
+        <p className={`text-sm text-muted-foreground ${className}`} {...props}>
+            {children}
+        </p>
+    );
+
+    // Shadcn-inspired Card Content component
+    const CardContent = ({ children, className = '', ...props }) => (
+        <div className={`p-6 pt-0 ${className}`} {...props}>
+            {children}
+        </div>
+    );
+
+    // Shadcn-inspired Tabs component wrapper
+    const Tabs = ({ children, className = '', ...props }) => (
+        <div className={`flex space-x-1 bg-gray-100 p-1 rounded-lg mb-6 ${className}`} {...props}>
+            {children}
+        </div>
+    );
+
+    // Shadcn-inspired TabsList component (for tab buttons)
+    const TabsList = ({ children, className = '', ...props }) => (
+        <div className={`flex items-center justify-center ${className}`} {...props}>
+            {children}
+        </div>
+    );
+
+    // Shadcn-inspired TabsTrigger component (individual tab button)
+    const TabsTrigger = ({ children, value, active, onClick, className = '', ...props }) => {
+        const activeClasses = active ? 'bg-white text-gray-900 shadow' : 'hover:bg-gray-200 hover:text-gray-700';
+        return (
+            <button
+                className={`inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow ${activeClasses} ${className}`}
+                onClick={() => onClick(value)}
+                {...props}
+            >
+                {children}
+            </button>
+        );
+    };
+
+    // Shadcn-inspired Table components (simplified for styling)
+    const Table = ({ children, className = '', ...props }) => (
+        <div className="relative w-full overflow-auto">
+            <table className={`w-full caption-bottom text-sm ${className}`} {...props}>
+                {children}
+            </table>
+        </div>
+    );
+
+    const TableHeader = ({ children, className = '', ...props }) => (
+        <thead className={`[&_tr]:border-b ${className}`} {...props}>
+            {children}
+        </thead>
+    );
+
+    const TableBody = ({ children, className = '', ...props }) => (
+        <tbody className={`[&_tr:last-child]:border-0 ${className}`} {...props}>
+            {children}
+        </tbody>
+    );
+
+    const TableRow = ({ children, className = '', ...props }) => (
+        <tr className={`border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted ${className}`} {...props}>
+            {children}
+        </tr>
+    );
+
+    const TableHead = ({ children, className = '', ...props }) => (
+        <th className={`h-12 px-4 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 ${className}`} {...props}>
+            {children}
+        </th>
+    );
+
+    const TableCell = ({ children, className = '', ...props }) => (
+        <td className={`p-4 align-middle [&:has([role=checkbox])]:pr-0 ${className}`} {...props}>
+            {children}
+        </td>
+    );
+
+    // Shadcn-inspired Alert component
+    const Alert = ({ children, variant = 'default', className = '', ...props }) => {
+        let variantClasses = '';
+        switch (variant) {
+            case 'default':
+                variantClasses = 'bg-blue-50 border-blue-200 text-blue-800';
+                break;
+            case 'destructive':
+                variantClasses = 'bg-red-50 border-red-200 text-red-800';
+                break;
+            default:
+                variantClasses = 'bg-blue-50 border-blue-200 text-blue-800';
+        }
+        return (
+            <div className={`relative w-full rounded-lg border p-4 ${variantClasses} ${className}`} {...props}>
+                {children}
+            </div>
+        );
+    };
+
+    const AlertDescription = ({ children, className = '', ...props }) => (
+        <div className={`text-sm [&_p]:leading-relaxed ${className}`} {...props}>
+            {children}
+        </div>
+    );
+
+    const AlertTitle = ({ children, className = '', ...props }) => (
+        <h5 className={`mb-1 font-medium leading-none tracking-tight ${className}`} {...props}>
+            {children}
+        </h5>
+    );
+
+    // Component for displaying a single chat history
+    const ChatHistoryView = ({ chatHistoryContent, onBack }) => (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-800">Chat History</h2>
+                <Button variant="secondary" onClick={onBack}>Back to Leads</Button>
+            </div>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Conversation Transcript</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p className="whitespace-pre-wrap text-gray-700">{chatHistoryContent}</p>
+                </CardContent>
+            </Card>
+        </div>
+    );
+
+    // Component for "Manage Criteria" view/modal
+    const ManageCriteriaView = ({ onBack }) => (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-800">Manage Lead Qualification Criteria</h2>
+                <Button variant="secondary" onClick={onBack}>Back to Lead Performance</Button>
+            </div>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Define Your Custom Lead Qualification Rules</CardTitle>
+                    <CardDescription>Set parameters for what constitutes a "Qualified Lead" for your business.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Minimum Lead Score</label>
+                        <input type="number" defaultValue="70" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Required Conversion Actions</label>
+                        <select multiple className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-24">
+                            <option>Submitted Contact Info</option>
+                            <option>Booked a Property Viewing</option>
+                            <option>Asked to be contacted by an agent</option>
+                            <option>Requested a brochure or floor plan</option>
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">Select one or more actions a lead must have taken.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Property Type Preference (Optional)</label>
+                        <input type="text" placeholder="e.g., Apartment, Villa, Commercial" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+                    </div>
+                    <Button>Save Criteria</Button>
+                </CardContent>
+            </Card>
+        </div>
+    );
+
+    // Component for "Unanswered Questions" detail view
+    const UnansweredQuestionsView = ({ onBack }) => {
+        // Dummy data for unanswered questions (could be filtered by listing if passed)
+        const allUnansweredQuestions = [
+            { id: 1, question: 'What are the specific zoning laws for this rural plot?', listing: 'Rural Plot, Alentejo', date: '2025-07-14' },
+            { id: 2, question: 'Can I get a detailed breakdown of the service charges for the Lisbon apartment?', listing: 'Downtown Apt, Lisbon', date: '2025-07-13' },
+            { id: 3, question: 'Are there any hidden fees associated with purchasing the Cascais villa?', listing: 'Luxury Villa, Cascais', date: '2025-07-12' },
+            { id: 4, question: 'What is the exact square footage of the garden in the family home?', listing: 'Family Home, Porto', date: '2025-07-11' },
+            { id: 5, question: 'Is the commercial space suitable for a restaurant with outdoor seating?', listing: 'Commercial Space, Faro', date: '2025-07-10' },
+        ];
+
+        return (
+            <div className="space-y-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-gray-800">Unanswered Questions Details</h2>
+                    <Button variant="secondary" onClick={onBack}>Back to Chatbot Analytics</Button>
+                </div>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>List of Unanswered Questions</CardTitle>
+                        <CardDescription>These are questions the chatbot could not fully answer. Review to improve knowledge base.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Question</TableHead>
+                                    <TableHead>Related Listing</TableHead>
+                                    <TableHead>Date Asked</TableHead>
+                                    <TableHead className="text-right">Action</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {allUnansweredQuestions.map(q => (
+                                    <TableRow key={q.id}>
+                                        <TableCell className="font-medium">{q.question}</TableCell>
+                                        <TableCell>{q.listing}</TableCell>
+                                        <TableCell>{q.date}</TableCell>
+                                        <TableCell className="text-right">
+                                            <Button variant="ghost" size="sm">Add Answer</Button>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    };
+
+
+    // New ListingDetailView component
+    const ListingDetailView = ({ listing, onBack, onReviewUnansweredQuestions }) => {
+        if (!listing) return null; // Should not happen if called correctly
+
+        const { id, name, chatbotViews, inquiries, hotLeads, conversionRate, details } = listing;
+
+        return (
+            <div className="space-y-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-gray-800">Listing Details: {name} ({id})</h2>
+                    <Button variant="secondary" onClick={onBack}>Back to All Listings</Button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                    <Card className="text-center">
+                        <CardHeader>
+                            <CardTitle className="text-4xl">{chatbotViews}</CardTitle>
+                            <CardDescription>Chatbot Views</CardDescription>
+                        </CardHeader>
+                    </Card>
+                    <Card className="text-center">
+                        <CardHeader>
+                            <CardTitle className="text-4xl">{inquiries}</CardTitle>
+                            <CardDescription>Total Inquiries</CardDescription>
+                        </CardHeader>
+                    </Card>
+                    <Card className="text-center">
+                        <CardHeader>
+                            <CardTitle className="text-4xl">{hotLeads}</CardTitle>
+                            <CardDescription>Hot Leads Generated</CardDescription>
+                        </CardHeader>
+                    </Card>
+                    <Card className="text-center">
+                        <CardHeader>
+                            <CardTitle className="text-4xl">{conversionRate}</CardTitle>
+                            <CardDescription>Lead Conversion Rate</CardDescription>
+                        </CardHeader>
+                    </Card>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Property Information</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <p className="text-sm text-gray-700 mb-2"><span className="font-semibold">Address:</span> {details.address}</p>
+                            <p className="text-sm text-gray-700 mb-2"><span className="font-semibold">Type:</span> {details.type}</p>
+                            <p className="text-sm text-gray-700 mb-2"><span className="font-semibold">Price:</span> {details.price}</p>
+                            <p className="text-sm text-gray-700 mb-2"><span className="font-semibold">Bedrooms:</span> {details.beds}</p>
+                            <p className="text-sm text-gray-700 mb-2"><span className="font-semibold">Bathrooms:</span> {details.baths}</p>
+                            <p className="text-sm text-gray-700"><span className="font-semibold">Amenities:</span> {details.amenities.join(', ')}</p>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Lead Score Distribution for this Listing</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="chart-placeholder h-40">Pie Chart Placeholder for Lead Score Distribution</div>
+                            <p className="text-sm text-gray-600 mt-4">Hot: {details.leadScoreDistribution.hot}%, Warm: {details.leadScoreDistribution.warm}%, Cold: {details.leadScoreDistribution.cold}%</p>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Common Questions about this Listing</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <ul className="list-disc list-inside text-gray-700 space-y-1">
+                                {details.commonQuestions.map((q, index) => (
+                                    <li key={index}>{q.question} ({q.count} times)</li>
+                                ))}
+                            </ul>
+                        </CardContent>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Unanswered Questions for this Listing</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <ul className="list-disc list-inside text-gray-700 space-y-1">
+                                {details.unansweredQuestions.map((q, index) => (
+                                    <li key={index}>{q}</li>
+                                ))}
+                            </ul>
+                            <Button variant="secondary" size="sm" className="mt-4" onClick={() => onReviewUnansweredQuestions(listing.id)}>Review All Unanswered Questions</Button>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Chat Handoffs for this Listing</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <ul className="list-disc list-inside text-gray-700 space-y-1">
+                            {details.handoffs.map((h, index) => (
+                                <li key={index}>{h.reason} ({h.count} times)</li>
+                            ))}
+                        </ul>
+                        <p className="text-sm text-gray-600 mt-4">Understanding reasons for human intervention specific to this property.</p>
+                    </CardContent>
+                </Card>
+
+                {/* Placeholder for Individual Leads interested in THIS Listing - would require more complex data filtering */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Individual Leads Interested in This Listing</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="chart-placeholder h-40">Table Placeholder for Leads related to {name}</div>
+                        <p className="text-sm text-gray-600 mt-4">This table would show specific leads who engaged with the chatbot about this property, their scores, and links to their full chat histories.</p>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    };
+
+
+    return (
+        <div className="min-h-screen flex flex-col bg-gray-50 font-sans text-gray-900">
+            {/* Header */}
+            <header className="bg-white shadow-sm py-4 px-6 md:px-8">
+                <div className="max-w-7xl mx-auto flex justify-between items-center">
+                    <h1 className="text-2xl font-bold text-gray-800">Real Estate Chatbot Dashboard</h1>
+                    <div className="flex items-center space-x-4">
+                        <span className="text-gray-600 text-sm">Welcome, Client Name</span>
+                        <div className="w-8 h-8 bg-blue-200 rounded-full flex items-center justify-center text-blue-800 font-semibold">CN</div>
+                    </div>
+                </div>
+            </header>
+
+            {/* Main Content Area */}
+            <div className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                {/* Tabs Navigation - Only show if no listing is selected, no chat history is open, and no special views are open */}
+                {!selectedListing && !selectedChatHistory && !isManageCriteriaOpen && !isUnansweredQuestionsOpen && (
+                    <Tabs>
+                        <TabsList className="grid w-full grid-cols-5">
+                            <TabsTrigger value="overview" active={activeTab === 'overview'} onClick={handleTabClick}>Overview</TabsTrigger>
+                            <TabsTrigger value="lead-performance" active={activeTab === 'lead-performance'} onClick={handleTabClick}>Lead Performance</TabsTrigger>
+                            <TabsTrigger value="chatbot-analytics" active={activeTab === 'chatbot-analytics'} onClick={handleTabClick}>Chatbot Analytics</TabsTrigger>
+                            <TabsTrigger value="listing-performance" active={activeTab === 'listing-performance'} onClick={handleTabClick}>Listing Performance</TabsTrigger>
+                            <TabsTrigger value="user-insights" active={activeTab === 'user-insights'} onClick={handleTabClick}>User Insights</TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                )}
+
+                {/* Conditional Rendering for specific views */}
+                {selectedListing ? (
+                    <ListingDetailView listing={selectedListing} onBack={handleBackToAllListings} onReviewUnansweredQuestions={handleReviewUnansweredQuestions} />
+                ) : selectedChatHistory ? (
+                    <ChatHistoryView chatHistoryContent={selectedChatHistory} onBack={() => setSelectedChatHistory(null)} />
+                ) : isManageCriteriaOpen ? (
+                    <ManageCriteriaView onBack={() => setIsManageCriteriaOpen(false)} />
+                ) : ( // This is the main conditional block for tab content
+                    <div id="tab-content">
+                        {/* Overview Tab */}
+                        {activeTab === 'overview' && (
+                            <div id="overview" className="space-y-6">
+                                <h2 className="text-xl font-semibold text-gray-800">Dashboard Overview</h2>
+
+                                {/* Hot Leads Alert */}
+                                <Alert variant="destructive" className="flex items-center justify-between">
+                                    <div>
+                                        <AlertTitle className="text-lg font-semibold">🔥 {leads.filter(l => l.status === 'Hot').length} New Hot Leads Identified!</AlertTitle>
+                                        <AlertDescription className="text-sm">These leads scored 70+ points and are ready for immediate agent follow-up.</AlertDescription>
+                                    </div>
+                                    <Button variant="destructive" size="sm" onClick={handleViewHotLeads}>View Hot Leads</Button>
+                                </Alert>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    <Card className="text-center">
+                                        <CardHeader>
+                                            <CardTitle className="text-4xl">{leads.length}</CardTitle>
+                                            <CardDescription>Total Leads Generated</CardDescription>
+                                        </CardHeader>
+                                    </Card>
+                                    <Card className="text-center">
+                                        <CardHeader>
+                                            <CardTitle className="text-4xl">78%</CardTitle>
+                                            <CardDescription>Chatbot Resolution Rate</CardDescription>
+                                        </CardHeader>
+                                    </Card>
+                                    <Card className="text-center">
+                                        <CardHeader>
+                                            <CardTitle className="text-4xl">{leads.filter(l => l.status === 'Hot').length}</CardTitle>
+                                            <CardDescription>New Hot Leads (70+ Pts)</CardDescription>
+                                        </CardHeader>
+                                    </Card>
+                                    <Card className="text-center">
+                                        <CardHeader>
+                                            <CardTitle className="text-4xl">5.2 min</CardTitle>
+                                            <CardDescription>Avg. Chat Duration</CardDescription>
+                                        </CardHeader>
+                                    </Card>
+                                    <Card className="text-center">
+                                        <CardHeader>
+                                            <CardTitle className="text-4xl">18</CardTitle>
+                                            <CardDescription>Property Viewings Booked</CardDescription>
+                                        </CardHeader>
+                                    </Card>
+                                    <Card className="text-center">
+                                        <CardHeader>
+                                            <CardTitle className="text-4xl">3</CardTitle>
+                                            <CardDescription>Unanswered Questions</CardDescription>
+                                        </CardHeader>
+                                    </Card>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Lead Score Distribution</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="chart-placeholder">Bar Chart Placeholder for Lead Score Distribution</div>
+                                            <p className="text-sm text-gray-600 mt-4">Shows the percentage of leads in Hot, Warm, and Cold categories.</p>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Top 5 Most Inquired-About Listings</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <ul className="space-y-2">
+                                                <li className="flex justify-between items-center text-gray-700">
+                                                    <span>1. Luxury Villa, Cascais</span>
+                                                    <span className="font-medium">85 inquiries</span>
+                                                </li>
+                                                <li className="flex justify-between items-center text-gray-700">
+                                                    <span>2. Downtown Apartment, Lisbon</span>
+                                                    <span className="font-medium">72 inquiries</span>
+                                                </li>
+                                                <li className="flex justify-between items-center text-gray-700">
+                                                    <span>3. Family Home, Porto</span>
+                                                    <span className="font-medium">60 inquiries</span>
+                                                </li>
+                                                <li className="flex justify-between items-center text-gray-700">
+                                                    <span>4. Commercial Space, Faro</span>
+                                                    <span className="font-medium">45 inquiries</span>
+                                                </li>
+                                                <li className="flex justify-between items-center text-gray-700">
+                                                    <span>5. Beachfront Condo, Algarve</span>
+                                                    <span className="font-medium">38 inquiries</span>
+                                                </li>
+                                            </ul>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Lead Performance Tab */}
+                        {activeTab === 'lead-performance' && (
+                            <div id="lead-performance" className="space-y-6">
+                                <h2 className="text-xl font-semibold text-gray-800">Lead Performance Analysis</h2>
+
+                                <div className="flex space-x-4 mb-4">
+                                    <Button variant={leadFilter === 'all' ? 'default' : 'secondary'} onClick={() => setLeadFilter('all')}>All Leads</Button>
+                                    <Button variant={leadFilter === 'Hot' ? 'destructive' : 'secondary'} onClick={() => setLeadFilter('Hot')}>Hot Leads</Button>
+                                    <Button variant={leadFilter === 'Warm' ? 'default' : 'secondary'} onClick={() => setLeadFilter('Warm')}>Warm Leads</Button>
+                                    <Button variant={leadFilter === 'Cold' ? 'default' : 'secondary'} onClick={() => setLeadFilter('Cold')}>Cold Leads</Button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Lead Score Distribution (Detailed)</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="chart-placeholder">Detailed Histogram for Lead Score Ranges (e.g., 10-point bins)</div>
+                                            <p className="text-sm text-gray-600 mt-4">Granular view of lead quality across all scores.</p>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Conversion Rate by Lead Score Threshold</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="chart-placeholder">Line Chart: Conversion Rate vs. Lead Score</div>
+                                            <p className="text-sm text-gray-600 mt-4">Shows how higher lead scores correlate with conversion success.</p>
+                                            <div className="mt-4">
+                                                <label htmlFor="conversion-metric-select" className="block text-sm font-medium text-gray-700 mb-2">Select Conversion Metric:</label>
+                                                <select id="conversion-metric-select" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
+                                                    <option>Booked Viewing</option>
+                                                    <option>Submitted Contact Info</option>
+                                                    <option>Requested Agent Contact</option>
+                                                    <option>Requested Brochure</option>
+                                                </select>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Lead Qualification Metrics</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div>
+                                                <div className="text-2xl font-bold">85</div>
+                                                <div className="text-sm text-gray-600">Qualified Leads (Custom Criteria)</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-2xl font-bold">{leads.filter(l => l.status === 'Hot').length}</div>
+                                                <div className="text-sm text-gray-600">"Hot" Leads (70+ Pts)</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-2xl font-bold">1.5 days</div>
+                                                <div className="text-sm text-gray-600">Avg. Time to Qualify</div>
+                                            </div>
+                                        </div>
+                                        <div className="mt-6">
+                                            <h4 className="font-medium text-gray-700 mb-2">Define Custom Qualification Criteria:</h4>
+                                            <p className="text-sm text-gray-600">
+                                                <span className="font-semibold">Example:</span> Budget {'>'} €500k AND Location = Lisbon AND Property Type = Apartment
+                                            </p>
+                                            <Button variant="secondary" size="sm" className="mt-3" onClick={handleManageCriteria}>Manage Criteria</Button>
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Individual Lead Progression</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Lead ID</TableHead>
+                                                    <TableHead>Current Score</TableHead>
+                                                    <TableHead>Last Activity</TableHead>
+                                                    <TableHead>Score Trend</TableHead>
+                                                    <TableHead className="text-right">Actions</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {filteredLeads.map(lead => (
+                                                    <TableRow key={lead.id}>
+                                                        <TableCell className="font-medium">{lead.id} ({lead.name})</TableCell>
+                                                        <TableCell>{lead.currentScore} {lead.scoreTrend === 'up' ? <span className="text-green-500">▲</span> : lead.scoreTrend === 'down' ? <span className="text-red-500">▼</span> : <span className="text-yellow-500">↔</span>}</TableCell>
+                                                        <TableCell>{lead.lastActivity}</TableCell>
+                                                        <TableCell>
+                                                            <div className="chart-placeholder h-10 w-24">Mini Trend</div>
+                                                        </TableCell>
+                                                        <TableCell className="text-right">
+                                                            <Button variant="ghost" size="sm" onClick={() => handleViewFullChat(lead.chatHistory)}>View Chat</Button>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        )}
+
+                        {/* Chatbot Analytics Tab */}
+                        {activeTab === 'chatbot-analytics' && (
+                            <div id="chatbot-analytics" className="space-y-6">
+                                <h2 className="text-xl font-semibold text-gray-800">Chatbot Analytics</h2>
+
+                                {isUnansweredQuestionsOpen ? (
+                                    <UnansweredQuestionsView onBack={() => setIsUnansweredQuestionsOpen(false)} />
+                                ) : (
+                                    <>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <Card>
+                                                <CardHeader>
+                                                    <CardTitle>Chatbot Performance Over Time</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="chart-placeholder">Line Chart: Total Chats, Resolution Rate, Handoffs</div>
+                                                    <p className="text-sm text-gray-600 mt-4">Trends in chatbot engagement and efficiency.</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardHeader>
+                                                    <CardTitle>Unanswered Questions Analysis</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="chart-placeholder">Bar Chart: Top Unanswered Question Categories</div>
+                                                    <p className="text-sm text-gray-600 mt-4">Identify common knowledge gaps in the chatbot.</p>
+                                                    <Button className="mt-4" onClick={handleReviewUnansweredQuestions}>Review Unanswered Questions</Button>
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                            <Card>
+                                                <CardHeader>
+                                                    <CardTitle>Common User Intentions / Topics</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="chart-placeholder">Word Cloud or Bar Chart of Top Topics</div>
+                                                    <p className="text-sm text-gray-600 mt-4">Understanding what users are most interested in.</p>
+                                                </CardContent>
+                                            </Card>
+                                            <Card>
+                                                <CardHeader>
+                                                    <CardTitle>Chat Handoffs to Human Agents</CardTitle>
+                                                </CardHeader>
+                                                <CardContent>
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <div className="text-2xl font-bold">25</div>
+                                                            <div className="text-sm text-gray-600">Total Handoffs</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-2xl font-bold">10%</div>
+                                                            <div className="text-sm text-gray-600">Handoff Rate</div>
+                                                        </div>
+                                                    </div>
+                                                    <ul className="list-disc list-inside text-gray-700 space-y-1">
+                                                        <li>50% - Complex Query</li>
+                                                        <li>30% - User Requested Agent</li>
+                                                        <li>20% - Specific Property Detail</li>
+                                                    </ul>
+                                                    <p className="text-sm text-gray-600 mt-4">Reasons for escalation and success rate post-handoff.</p>
+                                                    <div className="mt-4">
+                                                        <div className="text-xl font-bold">75%</div>
+                                                        <div className="text-sm text-gray-600">Handoff Conversion Rate (e.g., led to viewing/contact)</div>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Listing Performance Tab */}
+                        {activeTab === 'listing-performance' && (
+                            <div id="listing-performance" className="space-y-6">
+                                <h2 className="text-xl font-semibold text-gray-800">Listing Performance</h2>
+
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Overall Listing Performance by Chatbot Engagement</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Listing ID</TableHead>
+                                                    <TableHead>Property Name</TableHead>
+                                                    <TableHead>Chatbot Views</TableHead>
+                                                    <TableHead>Inquiries</TableHead>
+                                                    <TableHead>Hot Leads</TableHead>
+                                                    <TableHead>Conversion Rate</TableHead>
+                                                    <TableHead className="text-right">Actions</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {listings.map(listing => (
+                                                    <TableRow key={listing.id}>
+                                                        <TableCell className="font-medium">{listing.id}</TableCell>
+                                                        <TableCell>{listing.name}</TableCell>
+                                                        <TableCell>{listing.chatbotViews}</TableCell>
+                                                        <TableCell>{listing.inquiries}</TableCell>
+                                                        <TableCell>{listing.hotLeads}</TableCell>
+                                                        <TableCell>{listing.conversionRate}</TableCell>
+                                                        <TableCell className="text-right">
+                                                            <Button variant="ghost" size="sm" onClick={() => handleViewListingDetails(listing.id)}>View Details</Button>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </CardContent>
+                                </Card>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Property Type & Feature Interest</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="chart-placeholder">Bar Chart: Interest by Property Type (e.g., Apartment, Villa, Commercial)</div>
+                                            <p className="text-sm text-gray-600 mt-4">Insights into popular property types and desired features based on chatbot inquiries.</p>
+                                        </CardContent>
+                                    </Card>
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Listings with Unanswered Questions</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <ul className="space-y-2 text-gray-700">
+                                                <li>Luxury Villa, Cascais (3 unanswered)</li>
+                                                <li>Beachfront Condo, Algarve (2 unanswered)</li>
+                                                <li>Rural Plot, Alentejo (1 unanswered)</li>
+                                            </ul>
+                                            <p className="text-sm text-gray-600 mt-4">Indicates areas where chatbot knowledge base needs expansion for specific properties.</p>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* User Insights Tab */}
+                        {activeTab === 'user-insights' && (
+                            <div id="user-insights" className="space-y-6">
+                                <h2 className="text-xl font-semibold text-gray-800">User Insights</h2>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>New vs. Returning Users</CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="chart-placeholder">Pie Chart: New vs. Returning Users</div>
+                                            <p className="text-sm text-gray-600 mt-4">Understanding user loyalty and engagement patterns.</p>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>Recent Chat Histories</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>User ID</TableHead>
+                                                    <TableHead>Last Chat Date</TableHead>
+                                                    <TableHead>Lead Score</TableHead>
+                                                    <TableHead>Summary</TableHead>
+                                                    <TableHead className="text-right">Actions</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {leads.map(lead => (
+                                                    <TableRow key={lead.id}>
+                                                        <TableCell className="font-medium">{lead.id} ({lead.name})</TableCell>
+                                                        <TableCell>2025-07-15 14:30</TableCell>
+                                                        <TableCell>{lead.currentScore} ({lead.status})</TableCell>
+                                                        <TableCell>{lead.chatHistory.substring(0, 50)}...</TableCell> {/* Truncate for summary */}
+                                                        <TableCell className="text-right">
+                                                            <Button variant="ghost" size="sm" onClick={() => handleViewFullChat(lead.chatHistory)}>View Full Chat</Button>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+export default Dashboard;

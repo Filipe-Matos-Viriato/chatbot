@@ -4,9 +4,12 @@ import react from '@vitejs/plugin-react';
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  css: {
+    postcss: './postcss.config.js', // Explicitly point to postcss.config.js
+  },
   server: {
     host: '0.0.0.0', // Listen on all network interfaces
-    port: 5173,      // Explicitly set the port
+    port: 5174,      // Explicitly set the port to 5174
     allowedHosts: ['.ngrok-free.app'],
   },
 });

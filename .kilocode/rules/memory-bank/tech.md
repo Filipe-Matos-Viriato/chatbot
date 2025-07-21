@@ -9,6 +9,7 @@
   - `cors`: To enable Cross-Origin Resource Sharing.
   - `dotenv`: To manage environment variables from a `.env` file.
   - `express`: Web server framework.
+  - **Regex for Data Extraction:** Used in the ingestion pipeline for flexible, client-configurable metadata extraction (e.g., `listings.name`, `listings.baths`).
 
 ## Frontend Technologies
 - **Framework:** React

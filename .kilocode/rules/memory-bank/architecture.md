@@ -4,7 +4,7 @@
 The application is a multi-tenant, enterprise-grade RAG (Retrieval-Augmented Generation) system designed to be sold as a service to different clients. It is architected as a monorepo with a Node.js backend and a React frontend.
 
 - **Backend:** `packages/backend`
-- **Frontend:** `packages/frontend`
+- **Frontend:** `packages/frontend` (includes the embeddable chat widget and will house the client dashboard)
 - **Test Harness:** `packages/test-harness`
 
 ## Multi-Tenant Backend Architecture
@@ -21,6 +21,7 @@ The backend is a Node.js application using Express.js. Its primary responsibilit
 - **`src/rag-service.js` (RAG Service):** Executes the RAG pipeline.
   - **Context-Filtered Retrieval:** It performs a **Hybrid Search** that is strictly filtered by `client_id` and, when available, `listing_id` or other context-specific tags.
   - **Dynamic Prompt Construction:** Creates a detailed prompt using instructions and templates defined in the client's configuration file.
+- **Future: Chat History for RAG:** Embeddings of chat history turns can be stored in Pinecone for RAG context, referencing full text in Supabase.
 - **Asynchronous Document Ingestion Pipeline:** A separate, configurable service responsible for:
   - **Source Processing:** Applying client-specific rules for chunking and tagging documents. This includes structured metadata ingestion, template-based chunking, and NLP-based analysis.
   - **Embedding & Upserting:** Generating vector embeddings and writing the data to the vector database with rich metadata (`client_id`, `listing_id`, etc.).
@@ -61,11 +62,19 @@ This system tracks visitor interactions and assigns a lead score to prioritize h
 -   **Warm Lead (40–69 pts):** Nurture with follow-up content or offers.
 -   **Cold Lead (<40 pts):** Keep in CRM for future re-engagement.
 
-- **Visitor Data Storage:** A new `visitors` collection/table stores `visitor_id`, `client_id`, `lead_score`, timestamps, and an array of interaction `events`.
+- **Visitor Data Storage:** Visitor data, including `visitor_id`, `client_id`, `lead_score`, timestamps, and interaction `events`, is now persistently stored in **Supabase** (PostgreSQL database).
 - **Lead Scoring Rules:** Defined in client JSON configuration files (`leadScoringRules`).
 - **API Endpoints:**
     - `POST /v1/sessions`: Creates a new visitor record and returns a unique `visitor_id`.
     - `POST /v1/events`: Logs an interaction event and updates the corresponding visitor's lead score.
+
+### Visitor Interaction Data Updates:
+Tables updated based on real visitor interactions include:
+- **Visitors Database (Supabase):** Stores `visitor_id`, `client_id`, `lead_score`, timestamps, and interaction `events`. Updated via `POST /v1/sessions` (new visitor records) and `POST /v1/events` (logging events and updating lead scores).
+- **Events:** Records specific visitor actions and chatbot responses.
+- **Questions:** Tracks user queries for analysis and lead scoring.
+- **Handoffs (if applicable):** Records instances where a conversation is escalated or handed off to a human agent.
+- **Listing Metrics:** Tracks engagement and performance metrics per listing, updated as visitors interact with specific listings.
 
 ### Data Flow & Logic:
 ```mermaid
@@ -87,7 +96,7 @@ graph TD
         B -- "POST /v1/events (visitorId, eventType, scoreImpact)" --> C;
         C -- "Create Visitor" --> H[Visitor Service];
         C -- "Log Event / Update Score" --> H;
-        H -- "Stores/Updates" --> I[(Visitors Database)];
+        H -- "Stores/Updates" --> I[(Visitors Database <br> Supabase)];
     end
 
     subgraph Data & Ingestion
@@ -162,6 +171,8 @@ The ingestion pipeline is designed to support a multi-tiered approach to automat
 
 - **Premium LLM-based Tagging (Future):** The architecture is designed to accommodate a premium tier for automated tagging using a Large Language Model (LLM). When enabled, this feature would send document chunks to an LLM with a specialized prompt to perform sophisticated NLP tasks, such as named entity recognition (extracting amenities, locations) and topic modeling, returning a rich set of structured tags. This will be offered as an opt-in, premium feature due to its higher computational cost.
 
+- **Flexible Metadata Extraction:** To handle varied client document structures, the ingestion pipeline now supports flexible metadata extraction for fields like `listings.name` and `listings.baths`. This leverages client-specific configurations (regex patterns) defined in their JSON configuration files (`documentExtraction` section).
+
 ## Frontend Architecture
 The frontend remains a React/Vite SPA, but it will be enhanced to:
 - Pass a hardcoded or dynamically retrieved `client_id` with every backend request.
@@ -175,6 +186,9 @@ A dedicated dashboard for each client to provide actionable insights into chatbo
 - **Content Insights:** Reports on the most common unanswered questions to identify gaps in the knowledge base.
 - **Performance Metrics:** Tracking the most frequently asked topics per listing.
 - **Conversation History:** Access to full conversation transcripts for quality assurance.
+- **User Roles & Data Access (Future):**
+  - **Administrator:** Access to all data for their client (`client_id` filtered).
+  - **Agent:** Access to data filtered by `client_id` and `agent_id`.
 
 ### Admin Controls & Feature Flags
 The system is designed to be managed by the service provider through the "configuration-as-code" principle.

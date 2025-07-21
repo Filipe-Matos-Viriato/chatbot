@@ -130,13 +130,13 @@ app.post('/api/ingest/file', upload.single('file'), async (req, res) => {
 });
 
 // API endpoint to create a new visitor session
-app.post('/v1/sessions', (req, res) => {
+app.post('/v1/sessions', async (req, res) => {
   try {
-    const { clientId } = req.body;
+    const { clientId, listingId } = req.body; // Add listingId
     if (!clientId) {
       return res.status(400).json({ error: 'Client ID is required' });
     }
-    const newVisitor = visitorService.createVisitor(clientId);
+    const newVisitor = await visitorService.createVisitor(clientId, listingId); // Pass listingId
     res.status(201).json({ visitor_id: newVisitor.visitor_id });
   } catch (error) {
     console.error('Error creating visitor session:', error);
@@ -147,7 +147,7 @@ app.post('/v1/sessions', (req, res) => {
 // API endpoint to log a visitor event
 app.post('/v1/events', async (req, res) => {
   try {
-    const { visitorId, eventType } = req.body;
+    const { visitorId, eventType, listingId } = req.body; // Add listingId
     const clientId = req.body.clientId || req.headers['x-client-id'];
 
     if (!visitorId || !eventType || !clientId) {
@@ -163,7 +163,7 @@ app.post('/v1/events', async (req, res) => {
       return res.status(404).json({ error: `Configuration not found for client: ${clientId}` });
     }
 
-    const updatedVisitor = await visitorService.logEvent(visitorId, eventType, clientId);
+    const updatedVisitor = await visitorService.logEvent(visitorId, eventType, clientId, listingId); // Pass listingId
     if (!updatedVisitor) {
       return res.status(404).json({ error: 'Visitor not found' });
     }

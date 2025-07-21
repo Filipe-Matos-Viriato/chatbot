@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+import './index.css';
+
 function App() {
   const [message, setMessage] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
