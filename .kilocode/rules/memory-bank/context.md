@@ -19,6 +19,8 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
     - Modifying `visitor-service.js` to use Supabase for `createVisitor`, `logEvent`, and `getVisitor` operations.
     - Troubleshooting issues related to environment variable loading, Supabase table schema (`updated_at` column), and Row Level Security (RLS) policies.
     - Correcting asynchronous handling in `index.js` for the `/v1/sessions` endpoint.
+- **Dashboard Overview Tab Refactoring:** The `OverviewTab` component and its sub-components (`MetricCard`, `HotLeadsAlert`, `ChartPlaceholder`, `TopListings`) have been refactored into separate files within `packages/frontend/src/dashboard/overview-tab` for better maintainability.
+- **Dashboard Overview Tab Metrics Refactoring:** The individual metric components (`TotalLeadsGeneratedMetric`, `ChatbotResolutionRateMetric`, `NewHotLeadsMetric`, `AvgChatDurationMetric`, `PropertyViewingsBookedMetric`, `UnansweredQuestionsMetric`) have been refactored into separate files within `packages/frontend/src/dashboard/overview-tab/metrics` for better organization and maintainability.
 
 ## Next Steps
 - **Client Dashboard Implementation:**
@@ -59,10 +61,12 @@ Tailwind CSS utility classes are still not being processed and applied to the fr
 ### Current Todo List for New Dashboard Implementation:
 - [x] Plan new client dashboard implementation from scratch
 - [x] Create new dashboard component file (e.g., `packages/frontend/src/dashboard/NewDashboard.jsx`)
-- [-] Implement basic structure and layout based on reference image
+- [x] Implement basic structure and layout based on reference image
+- [x] Refactor `OverviewTab` and its sub-components into separate files.
+- [x] Refactor individual metric components into separate files within `packages/frontend/src/dashboard/overview-tab/metrics`.
 - [ ] Integrate Supabase data fetching for visitors, listings, and metrics
 - [ ] Populate dashboard fields with actual data
 - [ ] Implement dynamic styling based on client configuration
 - [ ] Implement dynamic content per tab based on client configuration
 - [x] Update routing in `packages/frontend/src/main.jsx` to use the new dashboard component
-- [-] Verify new dashboard functionality and appearance
+- [x] Verify new dashboard functionality and appearance
