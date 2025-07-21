@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   css: {
-    postcss: './postcss.config.js', // Explicitly point to postcss.config.js
+    postcss: './postcss.config.cjs', // Point to the .cjs file
   },
   server: {
     host: '0.0.0.0', // Listen on all network interfaces
