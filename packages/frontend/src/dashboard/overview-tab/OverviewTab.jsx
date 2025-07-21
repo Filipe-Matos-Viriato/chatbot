@@ -9,14 +9,7 @@ import AvgChatDurationMetric from './metrics/AvgChatDurationMetric';
 import PropertyViewingsBookedMetric from './metrics/PropertyViewingsBookedMetric';
 import UnansweredQuestionsMetric from './metrics/UnansweredQuestionsMetric';
 
-const OverviewTab = ({ onViewHotLeads }) => {
-    const topListings = [
-        { name: 'Luxury Villa, Cascais', inquiries: 85 },
-        { name: 'Downtown Apartment, Lisbon', inquiries: 72 },
-        { name: 'Family Home, Porto', inquiries: 60 },
-        { name: 'Commercial Space, Faro', inquiries: 45 },
-        { name: 'Beachfront Condo, Algarve', inquiries: 38 }
-    ];
+const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
 
     return (
         <div className="space-y-6">
@@ -38,7 +31,7 @@ const OverviewTab = ({ onViewHotLeads }) => {
                     title="Lead Score Distribution"
                     description="Shows the percentage of leads in Hot, Warm, and Cold categories."
                 />
-                <TopListings listings={topListings} />
+                <TopListings listings={topInquiredListings} />
             </div>
         </div>
     );

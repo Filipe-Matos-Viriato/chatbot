@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../config/supabaseClient';
 import OverviewTab from './overview-tab/OverviewTab';
+import LeadPerformanceTab from './lead-performance-tab/LeadPerformanceTab';
 import NavigationTabs from './NavigationTabs';
+import ChatbotAnalyticsTab from './chatbot-analytics-tab/ChatbotAnalyticsTab';
+import UserInsightsTab from './user-insights-tab/UserInsightsTab';
 import DashboardHeader from './DashboardHeader';
+import ListingPerformanceTab from './listing-performance-tab/ListingPerformanceTab';
 
 
 // Main Dashboard Component
@@ -11,6 +15,7 @@ const Dashboard = () => {
     const [visitors, setVisitors] = useState([]);
     const [listings, setListings] = useState([]);
     const [listingMetrics, setListingMetrics] = useState([]);
+    const [topInquiredListings, setTopInquiredListings] = useState([]);
 
     // Fetch data from Supabase
     useEffect(() => {
@@ -24,7 +29,20 @@ const Dashboard = () => {
 
                 if (!visitorsResult.error) setVisitors(visitorsResult.data || []);
                 if (!listingsResult.error) setListings(listingsResult.data || []);
-                if (!metricsResult.error) setListingMetrics(metricsResult.data || []);
+                if (!metricsResult.error) {
+                    setListingMetrics(metricsResult.data || []);
+                    // Calculate top 5 inquired-about listings
+                    const combinedListings = (listingsResult.data || []).map(listing => {
+                        const metrics = (metricsResult.data || []).find(m => m.listing_id === listing.id);
+                        return {
+                            ...listing,
+                            inquiries: metrics ? metrics.inquiries : 0
+                        };
+                    });
+
+                    const sortedListings = combinedListings.sort((a, b) => b.inquiries - a.inquiries);
+                    setTopInquiredListings(sortedListings.slice(0, 5));
+                }
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }
@@ -49,10 +67,26 @@ const Dashboard = () => {
                 <NavigationTabs activeTab={activeTab} onTabClick={handleTabClick} />
 
                 {activeTab === 'overview' && (
-                    <OverviewTab onViewHotLeads={handleViewHotLeads} />
+                    <OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />
                 )}
 
-                {activeTab !== 'overview' && (
+                {activeTab === 'lead-performance' && (
+                    <LeadPerformanceTab visitors={visitors} listings={listings} listingMetrics={listingMetrics} />
+                )}
+
+                {activeTab === 'chatbot-analytics' && (
+                    <ChatbotAnalyticsTab />
+                )}
+
+                {activeTab === 'listing-performance' && (
+                    <ListingPerformanceTab listings={listings} listingMetrics={listingMetrics} />
+                )}
+
+                {activeTab === 'user-insights' && (
+                    <UserInsightsTab visitors={visitors} />
+                )}
+
+                {activeTab !== 'overview' && activeTab !== 'lead-performance' && activeTab !== 'chatbot-analytics' && activeTab !== 'listing-performance' && activeTab !== 'user-insights' && (
                     <div className="text-center py-12">
                         <h3 className="text-lg font-medium text-gray-600">
                             This tab is under development
