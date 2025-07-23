@@ -1,10 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { generateResponse, generateSuggestedQuestions } = require('./rag-service');
+const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('./rag-service');
+const cron = require('node-cron');
+const { clusterQuestions } = require('../scripts/cluster-questions');
 const { getClientConfig } = require('./services/client-config-service');
 const { processDocument } = require('./services/ingestion-service');
 const visitorService = require('./services/visitor-service');
+const supabase = require('./config/supabase'); // Import Supabase client
 const multer = require('multer');
 
 // Configure multer for in-memory file storage
@@ -18,7 +21,7 @@ app.use(express.json());
 
 // Middleware to load client configuration an attach it to the request
 const clientConfigMiddleware = async (req, res, next) => {
- const clientId = req.body.clientId || req.headers['x-client-id'];
+ const clientId = req.body.clientId || req.headers['x-client-id'] || req.query.clientId;
 
  if (!clientId) {
    return res.status(400).json({ error: 'Client ID is required' });
@@ -34,14 +37,13 @@ const clientConfigMiddleware = async (req, res, next) => {
 };
 
 // Load client configuration for all API routes
-app.use('/api', clientConfigMiddleware);
 
 app.get('/', (req, res) => {
   res.send('Backend server is running!');
 });
 
 // API endpoint to handle chat requests
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
   try {
     const { query, sessionId, context } = req.body;
     const { clientConfig } = req; // Config is attached by middleware
@@ -54,6 +56,51 @@ app.post('/api/chat', async (req, res) => {
     console.log(`[${clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
 
     const responseText = await generateResponse(query, clientConfig, context);
+
+    // Log the user's question and its embedding to the questions and question_embeddings tables
+    try {
+      const { data: insertedQuestion, error: insertQuestionError } = await supabase
+        .from('questions')
+        .insert([
+          {
+            question_text: query,
+            listing_id: context?.listingId || null, // Assuming listingId is passed in context
+            status: 'answered', // Mark as answered since a response is generated
+            visitor_id: req.body.sessionId, // Assuming sessionId is visitor_id
+          },
+        ])
+        .select('id'); // Select the ID of the newly inserted question
+
+      if (insertQuestionError) {
+        console.error('Error inserting question into Supabase:', insertQuestionError);
+      } else if (insertedQuestion && insertedQuestion.length > 0) {
+        const questionId = insertedQuestion[0].id;
+
+        // Generate embedding for the question
+        const embeddingResult = await embeddingModel.embedContent({
+          content: { parts: [{ text: query }] },
+          taskType: "RETRIEVAL_QUERY",
+        });
+
+        // Insert embedding into question_embeddings table
+        const { error: insertEmbeddingError } = await supabase
+          .from('question_embeddings')
+          .insert([
+            {
+              question_id: questionId,
+              listing_id: context?.listingId || null,
+              embedding: embeddingResult.embedding.values,
+            },
+          ]);
+
+        if (insertEmbeddingError) {
+          console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
+        }
+      }
+    } catch (logError) {
+      console.error('Error logging question or embedding:', logError);
+    }
+
     res.json({ response: responseText });
   } catch (error) {
     console.error('Error processing chat request:', error);
@@ -65,7 +112,7 @@ app.post('/api/chat', async (req, res) => {
 });
 
 // API endpoint to generate suggested questions
-app.post('/api/suggested-questions', async (req, res) => {
+app.post('/api/suggested-questions', clientConfigMiddleware, async (req, res) => {
   try {
     const { context, chatHistory } = req.body;
     const { clientConfig } = req; // Config is attached by middleware
@@ -80,8 +127,41 @@ app.post('/api/suggested-questions', async (req, res) => {
   }
 });
 
+// API endpoint to retrieve pre-clustered common questions
+app.get('/api/common-questions', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { clientConfig } = req;
+    const listingId = req.query.listingId || null; // listingId is optional
+
+    let query = supabase
+      .from('clustered_questions')
+      .select('question_text, count')
+      .eq('client_id', clientConfig.clientId);
+
+    if (listingId) {
+      query = query.eq('listing_id', listingId);
+    } else {
+      query = query.is('listing_id', null); // For general common questions
+    }
+
+    query = query.order('count', { ascending: false }).limit(5); // Get top 5 common questions
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching clustered questions:', error);
+      return res.status(500).json({ error: 'Failed to fetch common questions.' });
+    }
+
+    res.json({ commonQuestions: data || [] });
+  } catch (error) {
+    console.error('Error in /api/common-questions endpoint:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // API endpoint to handle file ingestion
-app.post('/api/ingest/file', upload.single('file'), async (req, res) => {
+app.post('/api/ingest/file', clientConfigMiddleware, upload.single('file'), async (req, res) => {
   try {
     const { clientConfig, file, body } = req;
     const { ingestionType, listingId, listingUrl } = body;
@@ -175,13 +255,13 @@ app.post('/v1/events', async (req, res) => {
 });
  
 // API endpoint to get a visitor by ID
-app.post('/v1/visitor', (req, res) => {
+app.post('/v1/visitor', async (req, res) => {
   try {
     const { visitorId } = req.body;
     if (!visitorId) {
       return res.status(400).json({ error: 'Visitor ID is required' });
     }
-    const visitor = visitorService.getVisitor(visitorId);
+    const visitor = await visitorService.getVisitor(visitorId);
     if (!visitor) {
       return res.status(404).json({ error: 'Visitor not found' });
     }
@@ -192,6 +272,104 @@ app.post('/v1/visitor', (req, res) => {
   }
 });
 
+// API endpoint to acknowledge leads
+app.post('/v1/leads/acknowledge', async (req, res) => {
+  try {
+    const { visitorIds } = req.body;
+    if (!visitorIds || !Array.isArray(visitorIds) || visitorIds.length === 0) {
+      return res.status(400).json({ error: 'An array of visitor IDs is required' });
+    }
+
+    await visitorService.acknowledgeLeads(visitorIds);
+    res.json({ success: true, message: 'Leads acknowledged successfully' });
+  } catch (error) {
+    console.error('Error acknowledging leads:', error);
+    res.status(500).json({ error: 'Failed to acknowledge leads.' });
+  }
+});
+
+// API endpoint to get listing details and metrics by ID
+app.get('/api/listing/:id', async (req, res) => {
+  console.log(`[Backend] Received request for listing ID: ${req.params.id}`);
+  try {
+    const { id } = req.params;
+    console.log(`[Backend] Fetching listing details for ID: ${id}`);
+
+    // Fetch listing details, metrics, unanswered questions, and handoffs concurrently
+    const [
+      { data: listing, error: listingError },
+      { data: metrics, error: metricsError },
+      { data: unansweredQuestions, error: unansweredQuestionsError },
+      { data: handoffs, error: handoffsError },
+    ] = await Promise.all([
+      supabase.from('listings').select('*').eq('id', id).single(),
+      supabase.from('listing_metrics').select('*').eq('listing_id', id).single(),
+      supabase.from('questions').select('question_text').eq('listing_id', id).eq('status', 'unanswered'),
+      supabase.from('handoffs').select('reason').eq('listing_id', id),
+    ]);
+
+    if (listingError && listingError.code !== 'PGRST116') {
+      console.error(`[Backend] Error fetching listing:`, listingError);
+      throw listingError;
+    }
+    console.log(`[Backend] Listing data:`, listing);
+
+    if (metricsError && metricsError.code !== 'PGRST116') {
+      console.error(`[Backend] Error fetching metrics:`, metricsError);
+      throw metricsError;
+    }
+    console.log(`[Backend] Metrics data:`, metrics);
+
+    if (unansweredQuestionsError) {
+      console.error(`[Backend] Error fetching unanswered questions:`, unansweredQuestionsError);
+      throw unansweredQuestionsError;
+    }
+    console.log(`[Backend] Unanswered questions:`, unansweredQuestions);
+
+    if (handoffsError) {
+      console.error(`[Backend] Error fetching handoffs:`, handoffsError);
+      throw handoffsError;
+    }
+    console.log(`[Backend] Handoffs:`, handoffs);
+
+
+    // Aggregate handoffs by reason
+    const aggregatedHandoffs = handoffs.reduce((acc, curr) => {
+      acc[curr.reason] = (acc[curr.reason] || 0) + 1;
+      return acc;
+    }, {});
+
+    const formattedHandoffs = Object.entries(aggregatedHandoffs).map(([reason, count]) => ({
+      reason,
+      count,
+    }));
+
+    res.json({
+      listing: listing || null,
+      metrics: metrics || null,
+      commonQuestions: [], // Common questions are now fetched via a separate API
+      unansweredQuestions: unansweredQuestions.map(q => q.question_text) || [],
+      chatHandoffs: formattedHandoffs || [],
+    });
+  } catch (error) {
+    console.error(`Error fetching listing details for ID ${req.params.id}:`, error);
+    res.status(500).json({ error: 'Failed to fetch listing details.' });
+  }
+});
+
  app.listen(port, () => {
    console.log(`Server listening at http://localhost:${port}`);
+
+   // Schedule the clustering job to run every hour
+   // In a production environment, consider a more robust scheduling solution
+   // or a less frequent interval (e.g., daily, weekly)
+   cron.schedule('0 * * * *', async () => {
+     console.log('Running scheduled question clustering job...');
+     try {
+       await clusterQuestions();
+       console.log('Scheduled question clustering job completed successfully.');
+     } catch (error) {
+       console.error('Error running scheduled question clustering job:', error);
+     }
+   });
  });

@@ -15,7 +15,6 @@ class VisitorService {
       lead_score: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      listing_id: listingId, // Add listing_id
     };
 
     console.log('Attempting to insert new visitor into Supabase:', newVisitor);
@@ -32,43 +31,6 @@ class VisitorService {
     }
 
     console.log(`Visitor created: ${visitorId} for client ${clientId}`);
-
-    // Increment chatbot_views for the listing if listingId is provided
-    if (listingId) {
-      // Fetch current chatbot_views and increment
-      const { data: currentMetrics, error: fetchMetricsError } = await supabase
-        .from('listing_metrics')
-        .select('chatbot_views')
-        .eq('listing_id', listingId)
-        .single();
-
-      if (fetchMetricsError && fetchMetricsError.code !== 'PGRST116') { // PGRST116 means no rows found
-        console.error('Error fetching current listing_metrics:', fetchMetricsError);
-        return;
-      }
-
-      const newChatbotViews = currentMetrics ? currentMetrics.chatbot_views + 1 : 1;
-
-      const { error: updateMetricsError } = await supabase
-        .from('listing_metrics')
-        .upsert(
-          {
-            listing_id: listingId,
-            chatbot_views: newChatbotViews,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: 'listing_id',
-            ignoreDuplicates: false,
-          }
-        );
-
-      if (updateMetricsError) {
-        console.error('Error updating listing_metrics (chatbot_views):', updateMetricsError);
-      } else {
-        console.log(`Incremented chatbot_views for listing: ${listingId}`);
-      }
-    }
 
     return data[0];
   }
@@ -167,7 +129,8 @@ class VisitorService {
         visitor_id: visitorId,
         event_type: eventType,
         timestamp: new Date().toISOString(),
-        score_impact: scoreImpact
+        score_impact: scoreImpact,
+        listing_id: listingId
       }]);
 
     if (eventInsertError) {
@@ -175,73 +138,130 @@ class VisitorService {
       throw new Error('Failed to log event');
     }
 
-    // Increment inquiries for the listing if listingId is provided and event is question-related
-    if (listingId && eventType.startsWith('ASKED_')) {
-      const { data: currentMetrics, error: fetchMetricsError } = await supabase
-        .from('listing_metrics')
-        .select('inquiries')
-        .eq('listing_id', listingId)
-        .single();
+    // --- NEW LOGIC FOR ENGAGED_USERS AND TOTAL_CONVERSIONS ---
+    if (listingId) {
+      // Check if this is the first event for this visitor on this listing
+      const { count: existingEventsCount, error: countError } = await supabase
+        .from('events')
+        .select('id', { count: 'exact' })
+        .eq('visitor_id', visitorId)
+        .eq('listing_id', listingId);
 
-      if (fetchMetricsError && fetchMetricsError.code !== 'PGRST116') {
-        console.error('Error fetching current listing_metrics (inquiries):', fetchMetricsError);
+      if (countError) {
+        console.error('Error checking existing events for visitor:', countError);
         return;
       }
 
-      const newInquiries = currentMetrics ? currentMetrics.inquiries + 1 : 1;
+      let metricsToUpdate = {};
 
-      const { error: updateMetricsError } = await supabase
-        .from('listing_metrics')
-        .upsert(
-          {
-            listing_id: listingId,
-            inquiries: newInquiries,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: 'listing_id',
-            ignoreDuplicates: false,
-          }
-        );
-
-      if (updateMetricsError) {
-        console.error('Error updating listing_metrics (inquiries):', updateMetricsError);
-      } else {
-        console.log(`Incremented inquiries for listing: ${listingId}`);
-
-        // Update conversion_rate
-        const { data: updatedMetrics, error: fetchUpdatedMetricsError } = await supabase
+      // Increment engaged_users if this is the first event for this visitor on this listing
+      if (existingEventsCount === 0) { // This is the first event being logged for this visitor/listing combination
+        const { data: currentMetrics, error: fetchMetricsError } = await supabase
           .from('listing_metrics')
-          .select('chatbot_views, inquiries')
+          .select('engaged_users') // Select the new column name
           .eq('listing_id', listingId)
           .single();
 
-        if (fetchUpdatedMetricsError) {
-          console.error('Error fetching updated metrics for conversion rate:', fetchUpdatedMetricsError);
+        if (fetchMetricsError && fetchMetricsError.code !== 'PGRST116') {
+          console.error('Error fetching current listing_metrics (engaged_users):', fetchMetricsError);
+          return;
+        }
+        metricsToUpdate.engaged_users = currentMetrics ? currentMetrics.engaged_users + 1 : 1;
+        console.log(`Incremented engaged_users for listing: ${listingId}`);
+      }
+
+      // Increment total_conversions if the event is a conversion action
+      const conversionEventTypes = [
+        'SUBMITTED_CONTACT',
+        'BOOKED_VIEWING',
+        'ASKED_CONTACT_AGENT',
+        'REQUESTED_BROCHURE'
+      ];
+      if (conversionEventTypes.includes(eventType)) {
+        const { data: currentMetrics, error: fetchMetricsError } = await supabase
+          .from('listing_metrics')
+          .select('total_conversions')
+          .eq('listing_id', listingId)
+          .single();
+
+        if (fetchMetricsError && fetchMetricsError.code !== 'PGRST116') {
+          console.error('Error fetching current listing_metrics (total_conversions):', fetchMetricsError);
+          return;
+        }
+        metricsToUpdate.total_conversions = currentMetrics ? currentMetrics.total_conversions + 1 : 1;
+        console.log(`Incremented total_conversions for listing: ${listingId}`);
+      }
+
+      // Update inquiries (existing logic, but ensure it's separate from new metrics)
+      if (eventType.startsWith('ASKED_')) {
+        const { data: currentMetrics, error: fetchMetricsError } = await supabase
+          .from('listing_metrics')
+          .select('inquiries')
+          .eq('listing_id', listingId)
+          .single();
+
+        if (fetchMetricsError && fetchMetricsError.code !== 'PGRST116') {
+          console.error('Error fetching current listing_metrics (inquiries):', fetchMetricsError);
+          return;
+        }
+        metricsToUpdate.inquiries = currentMetrics ? currentMetrics.inquiries + 1 : 1;
+        console.log(`Incremented inquiries for listing: ${listingId}`);
+      }
+
+      // Perform the upsert for all metrics to update
+      if (Object.keys(metricsToUpdate).length > 0) {
+        metricsToUpdate.listing_id = listingId;
+        metricsToUpdate.updated_at = new Date().toISOString();
+
+        const { error: updateMetricsError } = await supabase
+          .from('listing_metrics')
+          .upsert(
+            metricsToUpdate,
+            {
+              onConflict: 'listing_id',
+              ignoreDuplicates: false,
+            }
+          );
+
+        if (updateMetricsError) {
+          console.error('Error updating listing_metrics:', updateMetricsError);
         } else {
-          const newConversionRate = updatedMetrics.chatbot_views > 0
-            ? `${((updatedMetrics.inquiries / updatedMetrics.chatbot_views) * 100).toFixed(2)}%`
-            : '0%';
+          console.log(`Updated listing_metrics for listing: ${listingId}`);
+        }
+      }
 
-          const { error: updateConversionError } = await supabase
-            .from('listing_metrics')
-            .upsert(
-              {
-                listing_id: listingId,
-                conversion_rate: newConversionRate,
-                updated_at: new Date().toISOString(),
-              },
-              {
-                onConflict: 'listing_id',
-                ignoreDuplicates: false,
-              }
-            );
+      // Recalculate and update conversion_rate
+      const { data: updatedMetrics, error: fetchUpdatedMetricsError } = await supabase
+        .from('listing_metrics')
+        .select('engaged_users, total_conversions') // Select new columns
+        .eq('listing_id', listingId)
+        .single();
 
-          if (updateConversionError) {
-            console.error('Error updating listing_metrics (conversion_rate):', updateConversionError);
-          } else {
-            console.log(`Updated conversion_rate for listing: ${listingId} to ${newConversionRate}`);
-          }
+      if (fetchUpdatedMetricsError) {
+        console.error('Error fetching updated metrics for conversion rate:', fetchUpdatedMetricsError);
+      } else {
+        const newConversionRate = updatedMetrics.engaged_users > 0
+          ? (updatedMetrics.total_conversions / updatedMetrics.engaged_users) * 100
+          : 0; // Store as number, not string with '%'
+
+        const { error: updateConversionError } = await supabase
+          .from('listing_metrics')
+          .upsert(
+            {
+              listing_id: listingId,
+              conversion_rate: newConversionRate,
+              updated_at: new Date().toISOString(),
+            },
+            {
+              onConflict: 'listing_id',
+              ignoreDuplicates: false,
+            }
+          );
+
+        if (updateConversionError) {
+          console.error('Error updating listing_metrics (conversion_rate):', updateConversionError);
+        } else {
+          console.log(`Updated conversion_rate for listing: ${listingId} to ${newConversionRate}`);
         }
       }
     }
@@ -263,23 +283,23 @@ class VisitorService {
     if (listingId && newLeadScore >= 70 && visitorData.lead_score < 70) { // Check if they just crossed the threshold
       const { data: currentMetrics, error: fetchMetricsError } = await supabase
         .from('listing_metrics')
-        .select('hot_leads')
+        .select('unacknowledged_hot_leads')
         .eq('listing_id', listingId)
         .single();
 
       if (fetchMetricsError && fetchMetricsError.code !== 'PGRST116') {
-        console.error('Error fetching current listing_metrics (hot_leads):', fetchMetricsError);
+        console.error('Error fetching current listing_metrics (unacknowledged_hot_leads):', fetchMetricsError);
         return;
       }
 
-      const newHotLeads = currentMetrics ? currentMetrics.hot_leads + 1 : 1;
+      const newHotLeads = currentMetrics ? currentMetrics.unacknowledged_hot_leads + 1 : 1;
 
       const { error: updateMetricsError } = await supabase
         .from('listing_metrics')
         .upsert(
           {
             listing_id: listingId,
-            hot_leads: newHotLeads,
+            unacknowledged_hot_leads: newHotLeads,
             updated_at: new Date().toISOString(),
           },
           {
@@ -289,9 +309,9 @@ class VisitorService {
         );
 
       if (updateMetricsError) {
-        console.error('Error updating listing_metrics (hot_leads):', updateMetricsError);
+        console.error('Error updating listing_metrics (unacknowledged_hot_leads):', updateMetricsError);
       } else {
-        console.log(`Incremented hot_leads for listing: ${listingId}`);
+        console.log(`Incremented unacknowledged_hot_leads for listing: ${listingId}`);
       }
     }
 
@@ -374,6 +394,17 @@ class VisitorService {
     }
     return data;
   }
-}
+async acknowledgeLeads(visitorIds) {
+    const { error } = await supabase
+      .from('visitors')
+      .update({ is_acknowledged: true, updated_at: new Date().toISOString() })
+      .in('visitor_id', visitorIds);
 
+    if (error) {
+      console.error('Error acknowledging leads in Supabase:', error);
+      throw new Error('Failed to acknowledge leads');
+    }
+    console.log(`Acknowledged leads: ${visitorIds.join(', ')}`);
+  }
+}
 module.exports = new VisitorService();

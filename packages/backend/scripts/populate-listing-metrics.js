@@ -42,7 +42,7 @@ async function populateListingMetrics() {
       listing_id: listingId,
       chatbot_views: chatbotViews,
       inquiries: inquiries,
-      hot_leads: hotLeads,
+      unacknowledged_hot_leads: hotLeads,
       conversion_rate: conversionRate,
       lead_score_distribution_hot: leadScoreDistributionHot,
       lead_score_distribution_warm: leadScoreDistributionWarm,

@@ -16,9 +16,12 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "form-data": "^4.0.3",
+    "k-means": "^1.0.0",
     "langchain": "^0.3.29",
     "mammoth": "^1.9.1",
+    "ml-kmeans": "^6.0.0",
     "multer": "^2.0.1",
+    "node-cron": "^4.2.1",
     "pdf-parse": "^1.1.1"
   },
   "devDependencies": {

@@ -381,4 +381,4 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
   }
 }
 
-module.exports = { generateResponse, generateSuggestedQuestions };
+module.exports = { generateResponse, generateSuggestedQuestions, embeddingModel };

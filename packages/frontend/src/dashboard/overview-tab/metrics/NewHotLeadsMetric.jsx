@@ -1,13 +1,12 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import MetricCard from '../MetricCard';
+import { supabase } from '../../../config/supabaseClient';
 
-const NewHotLeadsMetric = () => {
-    // This value will eventually come from Supabase
-    const value = '3'; 
+const NewHotLeadsMetric = ({ newHotLeadsCount }) => {
     const label = 'New Hot Leads (70+ Pts)';
 
     return (
-        <MetricCard value={value} label={label} />
+        <MetricCard value={newHotLeadsCount} label={label} />
     );
 };
 

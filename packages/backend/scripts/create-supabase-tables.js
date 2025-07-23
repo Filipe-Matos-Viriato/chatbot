@@ -1,17 +1,18 @@
 const dotenv = require('dotenv');
-dotenv.config({ path: './.env' }); // Load environment variables from packages/backend/.env
+const path = require('path'); // Add path module
+dotenv.config({ path: path.resolve(__dirname, '../.env') }); // Use absolute path
 
 const { createClient } = require('@supabase/supabase-js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Use service role key
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Supabase URL or Anon Key is missing in environment variables. Please ensure your .env file is correctly configured.');
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  console.error('Supabase URL or Service Role Key is missing in environment variables. Please ensure your .env file is correctly configured.');
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey); // Use service role key
 
 async function createTables() {
   try {
@@ -41,7 +42,7 @@ async function createTables() {
           listing_id TEXT PRIMARY KEY REFERENCES listings(id),
           chatbot_views INTEGER DEFAULT 0,
           inquiries INTEGER DEFAULT 0,
-          hot_leads INTEGER DEFAULT 0,
+          unacknowledged_hot_leads INTEGER DEFAULT 0,
           conversion_rate TEXT DEFAULT '0%',
           lead_score_distribution_hot INTEGER DEFAULT 0,
           lead_score_distribution_warm INTEGER DEFAULT 0,
@@ -60,10 +61,9 @@ async function createTables() {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           listing_id TEXT REFERENCES listings(id),
           question_text TEXT,
-          is_unanswered BOOLEAN,
-          count INTEGER,
-          asked_at TIMESTAMP WITH TIME ZONE,
-          client_id TEXT
+          status TEXT, -- Changed from is_unanswered BOOLEAN to status TEXT
+          timestamp TIMESTAMP WITH TIME ZONE DEFAULT now(), -- Added timestamp with default
+          visitor_id TEXT -- Changed from client_id to visitor_id
         );
       `
     });
@@ -86,12 +86,27 @@ async function createTables() {
     if (handoffsError) throw handoffsError;
     console.log('Table "handoffs" created or already exists.');
 
-    // Alter 'visitors' table to add 'chat_history' column
+    // Create 'events' table
+    const { error: eventsError } = await supabase.rpc('execute_sql', {
+      sql: `
+        CREATE TABLE IF NOT EXISTS events (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          visitor_id TEXT,
+          event_type TEXT NOT NULL,
+          score_impact INTEGER DEFAULT 0,
+          listing_id TEXT REFERENCES listings(id),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );
+      `
+    });
+    if (eventsError) throw eventsError;
+    console.log('Table "events" created or already exists.');
+
+    // Alter 'visitors' table to add 'chat_history' column and remove listing_id
     const { error: alterVisitorsError } = await supabase.rpc('execute_sql', {
       sql: `
         ALTER TABLE visitors
-        ADD COLUMN IF NOT EXISTS chat_history TEXT,
-        ADD COLUMN IF NOT EXISTS listing_id TEXT REFERENCES listings(id);
+        ADD COLUMN IF NOT EXISTS chat_history TEXT;
       `
     });
     if (alterVisitorsError) throw alterVisitorsError;

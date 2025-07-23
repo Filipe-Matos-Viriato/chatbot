@@ -70,11 +70,11 @@ This system tracks visitor interactions and assigns a lead score to prioritize h
 
 ### Visitor Interaction Data Updates:
 Tables updated based on real visitor interactions include:
-- **Visitors Database (Supabase):** Stores `visitor_id`, `client_id`, `lead_score`, timestamps, and interaction `events`. Updated via `POST /v1/sessions` (new visitor records) and `POST /v1/events` (logging events and updating lead scores).
-- **Events:** Records specific visitor actions and chatbot responses.
+- **Visitors Database (Supabase):** Stores `visitor_id`, `client_id`, `lead_score`, timestamps, and `is_acknowledged` (for new hot leads tracking). Updated via `POST /v1/sessions` (new visitor records), `POST /v1/events` (logging events and updating lead scores), and `POST /v1/leads/acknowledge` (marking hot leads as acknowledged).
+- **Events:** Records specific visitor actions and chatbot responses, including associated `listing_id`.
 - **Questions:** Tracks user queries for analysis and lead scoring.
 - **Handoffs (if applicable):** Records instances where a conversation is escalated or handed off to a human agent.
-- **Listing Metrics:** Tracks engagement and performance metrics per listing, updated as visitors interact with specific listings.
+- **Listing Metrics:** Tracks engagement and performance metrics per listing, updated as visitors interact with specific listings. Now includes `engaged_users` (unique visitors who interacted with the chatbot), `total_conversions` (sum of conversion actions), `conversion_rate` (`total_conversions / engaged_users`), `unacknowledged_hot_leads`, `lead_score_distribution_hot`, `lead_score_distribution_warm`, and `lead_score_distribution_cold`.
 
 ### Data Flow & Logic:
 ```mermaid

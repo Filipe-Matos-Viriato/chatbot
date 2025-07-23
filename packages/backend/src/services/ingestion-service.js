@@ -236,7 +236,7 @@ const processDocument = async ({
           listing_id: metadata.listing_id,
           chatbot_views: 0, // Initialize to 0
           inquiries: 0,     // Initialize to 0
-          hot_leads: 0,     // Initialize to 0
+          unacknowledged_hot_leads: 0,     // Initialize to 0
           conversion_rate: '0%', // Initialize to '0%'
           lead_score_distribution_hot: 0,
           lead_score_distribution_warm: 0,

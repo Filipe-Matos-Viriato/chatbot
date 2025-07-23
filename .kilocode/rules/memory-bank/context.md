@@ -3,7 +3,13 @@
 ## Current Work Focus
 The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeline to ensure accurate and complete answers for both general and context-specific queries, particularly for attribute-based and comparative questions. The Supabase integration for persistent visitor data storage has been successfully completed.
 
+- **Common Questions Feature Status:** The "Common Questions about this Listing" feature now leverages pre-calculated and pre-clustered questions for improved performance and accuracy. The in-process K-Means clustering algorithm has been implemented to group semantically similar questions, and a dedicated API endpoint serves these pre-calculated common questions.
+
 ## Recent Changes
+- **Common Questions Pre-calculation & API:** Implemented an in-process K-Means clustering algorithm in `packages/backend/scripts/cluster-questions.js` to pre-calculate and pre-cluster common questions. A new API endpoint `/api/common-questions` in `packages/backend/src/index.js` now serves this pre-calculated data, and the frontend (`packages/frontend/src/dashboard/listing-performance-tab/components/ListingDetailsPage.jsx`) has been updated to consume it. The old on-the-fly clustering logic has been removed from the `/api/listing/:id` endpoint.
+- **Optimized Listing Details Page Data Fetching:** Implemented `Promise.all` for concurrent Supabase fetches (`listings`, `listing_metrics`, `unansweredQuestions`, `handoffs`) in `packages/backend/src/index.js` to improve page load performance.
+- **Reduced Backend Console Verbosity:** Removed excessive `console.log` statements from the common questions grouping logic in `packages/backend/src/index.js` to prevent console flooding.
+- **Improved Common Questions Aggregation (Initial Fix):** Adjusted the `SIMILARITY_THRESHOLD` to 0.7 and added an embedding type check in `packages/backend/src/index.js` to enhance the semantic grouping and correct the quantity display for common questions (this was a temporary fix before full pre-calculation).
 - **Resolved `ap-01` Price Accuracy:** The chatbot now correctly provides price information for specific listings.
 - **Enhanced `extractQueryFilters`:** `extractQueryFilters` in `rag-service.js` now correctly handles comparative queries for `num_bedrooms` (e.g., "mais de X quartos").
 - **Improved RAG Strategy in `rag-service.js`:**
@@ -21,6 +27,18 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
     - Correcting asynchronous handling in `index.js` for the `/v1/sessions` endpoint.
 - **Dashboard Overview Tab Refactoring:** The `OverviewTab` component and its sub-components (`MetricCard`, `HotLeadsAlert`, `ChartPlaceholder`, `TopListings`) have been refactored into separate files within `packages/frontend/src/dashboard/overview-tab` for better maintainability.
 - **Dashboard Overview Tab Metrics Refactoring:** The individual metric components (`TotalLeadsGeneratedMetric`, `ChatbotResolutionRateMetric`, `NewHotLeadsMetric`, `AvgChatDurationMetric`, `PropertyViewingsBookedMetric`, `UnansweredQuestionsMetric`) have been refactored into separate files within `packages/frontend/src/dashboard/overview-tab/metrics` for better organization and maintainability.
+- **Lead Score Distribution Chart Implemented:** A Pie chart displaying the percentage of Hot, Warm, and Cold leads is now integrated into the dashboard, fetching data from the `listing_metrics` table.
+- **Total Leads Generated Metric Populated:** The `TotalLeadsGeneratedMetric` component now dynamically displays the sum of all hot, warm, and cold leads from the `listing_metrics` table.
+- **"New Hot Leads" Tracking Implemented:**
+    - `is_acknowledged` column added to the `visitors` table.
+    - `unacknowledged_hot_leads` column in `listing_metrics` table tracks new hot leads.
+    - Backend API (`POST /v1/leads/acknowledge`) and `visitor-service.js` logic implemented to mark hot leads as acknowledged.
+    - Frontend components (`NewHotLeadsMetric.jsx`, `HotLeadsAlert.jsx`, `OverviewTab.jsx`) count and display unacknowledged hot leads, and trigger acknowledgment.
+    - `listing_id` column removed from `visitors` table and added to `events` table for granular tracking of interactions.
+- **Conversion Rate Metric Implemented:**
+    - Backend logic in `visitor-service.js` updated to track `engaged_users` (unique visitors per listing) and `total_conversions` (sum of conversion actions).
+    - `conversion_rate` calculation updated to `total_conversions / engaged_users`.
+    - Frontend component `packages/frontend/src/dashboard/listing-performance-tab/components/OverallListingPerformance.jsx` updated to display these new metrics in a sortable, paginated table.
 
 ## Next Steps
 - **Client Dashboard Implementation:**
@@ -43,20 +61,10 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
     - URL-to-listing_id Validation: Still on hold, detailed plan in `tasks.md`.
 - **General Improvements:**
     - Ensure Consistent Context Passing: Further debug the frontend-to-iframe `postMessage` mechanism to guarantee consistent context delivery, as some inconsistencies were observed.
+- **Future Enhancements:**
 
 ## Current Dashboard Implementation Status
-We are currently facing persistent issues with Tailwind CSS not applying styles to the client dashboard, despite extensive troubleshooting. The `postcss` error persists, and the layout is not rendering correctly. We have decided to rebuild the dashboard from scratch to ensure a clean and functional implementation.
-
-### Persistent Tailwind CSS Issue
-Despite numerous attempts to resolve the issue, including:
-- Correcting `postcss.config.js` syntax (`module.exports` vs `export default`).
-- Ensuring `index.css` is imported in `main.jsx`.
-- Installing `@tailwindcss/vite` plugin.
-- Performing clean `npm install` operations.
-- Verifying `tailwind.config.js` content paths.
-- Testing with simplified components.
-
-Tailwind CSS utility classes are still not being processed and applied to the frontend components. The `index.css` file itself is being loaded (as evidenced by global CSS rules applying), but the `@tailwind` directives are not being transformed into functional CSS. This indicates a deeper, unresolved issue with Vite's PostCSS integration or a conflict within the build pipeline.
+The dashboard is now correctly displaying the "New Hot Leads" metric. The previous issues with Tailwind CSS and Supabase schema have been resolved.
 
 ### Current Todo List for New Dashboard Implementation:
 - [x] Plan new client dashboard implementation from scratch
@@ -64,8 +72,8 @@ Tailwind CSS utility classes are still not being processed and applied to the fr
 - [x] Implement basic structure and layout based on reference image
 - [x] Refactor `OverviewTab` and its sub-components into separate files.
 - [x] Refactor individual metric components into separate files within `packages/frontend/src/dashboard/overview-tab/metrics`.
-- [ ] Integrate Supabase data fetching for visitors, listings, and metrics
-- [ ] Populate dashboard fields with actual data
+- [x] Integrate Supabase data fetching for visitors, listings, and metrics
+- [x] Populate dashboard fields with actual data
 - [ ] Implement dynamic styling based on client configuration
 - [ ] Implement dynamic content per tab based on client configuration
 - [x] Update routing in `packages/frontend/src/main.jsx` to use the new dashboard component

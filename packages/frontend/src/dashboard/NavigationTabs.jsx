@@ -15,11 +15,11 @@ const NavigationTabs = ({ activeTab, onTabClick }) => {
                 <button
                     key={tab.id}
                     className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                        activeTab === tab.id 
-                            ? 'bg-white text-gray-900 shadow' 
+                        activeTab === tab.id
+                            ? 'bg-white text-gray-900 shadow'
                             : 'text-gray-600 hover:text-gray-800'
                     }`}
-                    onClick={() => onTabClick(tab.id)}
+                    onClick={() => onTabClick(tab.id)} // onTabClick now handles navigation
                 >
                     {tab.label}
                 </button>
