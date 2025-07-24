@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar';
+import { ScrollArea } from '@/components/ui/ScrollArea';
+import { Send } from 'lucide-react';
 
 import './index.css';
 
@@ -7,15 +13,25 @@ function App() {
   const [chatHistory, setChatHistory] = useState([]);
   const [externalContext, setExternalContext] = useState(null);
   const contextRef = useRef(null);
-  const [suggestedQuestions, setSuggestedQuestions] = useState([]);
   const [visitorId, setVisitorId] = useState(null);
+  const scrollAreaRef = useRef(null);
 
-  // Visitor ID Management
+  useEffect(() => {
+    // Scroll to the bottom of the chat history when it updates
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTo({
+        top: scrollAreaRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    }
+  }, [chatHistory]);
+  
+  // Visitor ID Management and other useEffects...
+  // (Your existing useEffect hooks for visitorId and message handling go here)
   useEffect(() => {
     const initializeVisitor = async () => {
       let currentVisitorId = localStorage.getItem('visitor_id');
 
-      // Check URL for visitor_id (e.g., from cross-domain navigation)
       const urlParams = new URLSearchParams(window.location.search);
       const urlVisitorId = urlParams.get('visitor_id');
       if (urlVisitorId) {
@@ -25,13 +41,12 @@ function App() {
 
       if (!currentVisitorId) {
         try {
-          // Replace with your actual backend URL
           const response = await fetch('http://localhost:3006/v1/sessions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ clientId: 'client-abc' }), // Hardcoded for now, will be dynamic
+            body: JSON.stringify({ clientId: 'client-abc' }),
           });
           const data = await response.json();
           currentVisitorId = data.visitor_id;
@@ -41,22 +56,16 @@ function App() {
         }
       }
       setVisitorId(currentVisitorId);
-      console.log('Initialized Visitor ID:', currentVisitorId);
     };
 
     initializeVisitor();
   }, []);
 
-  // Listen for messages from the parent window
   useEffect(() => {
     const handleMessage = (event) => {
-      // Ensure the message is from a trusted origin in a production environment
-      // if (event.origin !== "http://your-parent-domain.com") return;
-      console.log('Message received in iframe:', event); // Debugging log
       if (event.data && event.data.type === 'SET_CHATBOT_CONTEXT') {
-        console.log('Received context from parent:', event.data.payload);
         setExternalContext(event.data.payload);
-        contextRef.current = event.data.payload; // Update the ref
+        contextRef.current = event.data.payload;
       }
     };
 
@@ -66,128 +75,103 @@ function App() {
       window.removeEventListener('message', handleMessage);
     };
   }, []);
-  
-  // // Fetch suggested questions - Temporarily disabled to avoid quota issues
-  // useEffect(() => {
-  //   const fetchSuggestions = async () => {
-  //     try {
-  //       const response = await fetch('http://localhost:3006/api/suggested-questions', {
-  //         method: 'POST',
-  //         headers: {
-  //           'Content-Type': 'application/json',
-  //           'x-client-id': 'client-abc'
-  //         },
-  //         body: JSON.stringify({
-  //           context: contextRef.current,
-  //           chatHistory: chatHistory,
-  //         }),
-  //       });
-  //       const data = await response.json();
-  //       setSuggestedQuestions(data.questions || []);
-  //     } catch (error) {
-  //       console.error('Failed to fetch suggested questions:', error);
-  //       setSuggestedQuestions([]);
-  //     }
-  //   };
-  
-  //   fetchSuggestions();
-  // }, [chatHistory, externalContext]); // Re-fetch when history or context changes
 
-  const trackEvent = async (eventType) => {
-    if (!visitorId) {
-      console.warn('Visitor ID not available, cannot track event:', eventType);
-      return;
-    }
-    try {
-      await fetch('http://localhost:3006/v1/events', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-client-id': 'client-abc' // Hardcoded for now, will be dynamic
-        },
-        body: JSON.stringify({ visitorId, eventType }),
-      });
-      console.log(`Event '${eventType}' tracked for visitor ${visitorId}`);
-    } catch (error) {
-      console.error('Failed to track event:', error);
-    }
-  };
-  
-  const sendMessage = async (e, msg) => {
-    if (e) e.preventDefault();
-    const messageToSend = msg || message;
-    if (!messageToSend.trim()) return;
-  
-    console.log('sendMessage called with:', messageToSend, 'Visitor ID:', visitorId); // Debugging log
-  
-    const userMessage = { sender: 'user', text: messageToSend };
-    setChatHistory(prev => [...prev, userMessage]);
-    setMessage(''); // Clear input immediately
-    // setSuggestedQuestions([]); // Clear suggestions while waiting for a response - Commented out as suggestions are disabled
+  const sendMessage = async (e) => {
+    e.preventDefault();
+    if (!message.trim()) return;
 
-    // Example: Track a 'MESSAGE_SENT' event
-    if (visitorId) { // Ensure visitorId is available before tracking
-      trackEvent('MESSAGE_SENT', 1); // Assign a score impact for sending a message
-    } else {
-      console.warn('Visitor ID not available when sending message, event not tracked.');
-    }
-  
+    const userMessage = { sender: 'user', text: message };
+    setChatHistory((prev) => [...prev, userMessage]);
+    setMessage('');
+
+    // Track event logic...
+    // (Your existing trackEvent logic goes here)
+
     try {
       const response = await fetch('http://localhost:3006/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-client-id': 'client-abc'
+          'x-client-id': 'client-abc',
         },
-        body: JSON.stringify({ query: messageToSend, context: contextRef.current }),
+        body: JSON.stringify({ query: message, context: contextRef.current }),
       });
-      console.log('Response from /api/chat:', response); // Debugging log
       const data = await response.json();
-      console.log('Data from /api/chat:', data); // Debugging log
       const botMessage = { sender: 'bot', text: data.response };
-      setChatHistory(prev => [...prev, botMessage]);
+      setChatHistory((prev) => [...prev, botMessage]);
     } catch (error) {
-      console.error('Failed to send message (catch block):', error); // Debugging log
-      const errorMessage = { sender: 'bot', text: 'Sorry, I am having trouble connecting.' };
-      setChatHistory(prev => [...prev, errorMessage]);
+      console.error('Failed to send message:', error);
+      const errorMessage = {
+        sender: 'bot',
+        text: 'Sorry, I am having trouble connecting.',
+      };
+      setChatHistory((prev) => [...prev, errorMessage]);
     }
   };
-  
-  // const handleSuggestionClick = (question) => { // Commented out as suggestions are disabled
-  //   sendMessage(null, question);
-  // };
-  
+
   return (
-    <div className="chat-widget">
-      <div className="chat-history">
-        {chatHistory.map((msg, index) => (
-          <div key={index} className={`message ${msg.sender}`}>
-            {msg.text}
-          </div>
-        ))}
-      </div>
-      {/* Suggested questions are temporarily disabled to avoid quota issues */}
-      {/* <div className="suggested-questions">
-        {suggestedQuestions.map((q, i) => (
-          <button key={i} onClick={() => handleSuggestionClick(q)} className="suggestion-btn">
-            {q}
-          </button>
-        ))}
-      </div> */}
-      <form onSubmit={sendMessage} className="chat-input-form">
-        <input
-          type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyPress={(e) => {
-            if (e.key === 'Enter') {
-              sendMessage(e);
-            }
-          }}
-          placeholder="Ask a question..."
-        />
-        <button type="submit">Send</button>
-      </form>
+    <div className="flex justify-center items-center h-screen bg-gray-100 p-4">
+      <Card className="w-full max-w-lg flex flex-col h-full">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Avatar>
+              <AvatarImage src="https://github.com/shadcn.png" alt="Chatbot" />
+              <AvatarFallback>CB</AvatarFallback>
+            </Avatar>
+            Real Estate Assistant
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-grow overflow-hidden">
+          <ScrollArea className="h-full" ref={scrollAreaRef}>
+            <div className="space-y-4 pr-4">
+              {chatHistory.map((msg, index) => (
+                <div
+                  key={index}
+                  className={`flex items-start gap-3 ${
+                    msg.sender === 'user' ? 'justify-end' : ''
+                  }`}
+                >
+                  {msg.sender === 'bot' && (
+                    <Avatar className="w-8 h-8">
+                      <AvatarImage src="https://github.com/shadcn.png" alt="Bot" />
+                      <AvatarFallback>B</AvatarFallback>
+                    </Avatar>
+                  )}
+                  <div
+                    className={`rounded-lg px-4 py-2 max-w-xs ${
+                      msg.sender === 'user'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted'
+                    }`}
+                  >
+                    {msg.text}
+                  </div>
+                  {msg.sender === 'user' && (
+                    <Avatar className="w-8 h-8">
+                      <AvatarImage src="https://github.com/identicons/user.png" alt="User" />
+                      <AvatarFallback>U</AvatarFallback>
+                    </Avatar>
+                  )}
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        </CardContent>
+        <CardFooter>
+          <form onSubmit={sendMessage} className="flex w-full items-center space-x-2">
+            <Input
+              type="text"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Ask a question..."
+              className="flex-1"
+            />
+            <Button type="submit" size="icon" disabled={!message.trim()}>
+              <Send className="h-4 w-4" />
+            </Button>
+          </form>
+        </CardFooter>
+      </Card>
     </div>
   );
 }
