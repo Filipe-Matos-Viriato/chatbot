@@ -4,10 +4,15 @@ const cors = require('cors');
 const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('./rag-service');
 const cron = require('node-cron');
 const { clusterQuestions } = require('../scripts/cluster-questions');
-const { getClientConfig } = require('./services/client-config-service');
+const { getClientConfig, createClientConfig, updateClientConfig, deleteClientConfig } = require('./services/client-config-service');
 const { processDocument } = require('./services/ingestion-service');
 const visitorService = require('./services/visitor-service');
 const supabase = require('./config/supabase'); // Import Supabase client
+const ChatHistoryService = require('./services/chat-history-service').default; // Import ChatHistoryService
+const developmentService = require('./services/development-service'); // Import Development Service
+const userService = require('./services/user-service'); // Import User Service
+
+const chatHistoryService = new ChatHistoryService();
 const multer = require('multer');
 
 // Configure multer for in-memory file storage
@@ -19,21 +24,27 @@ const port = process.env.PORT || 3006;
 app.use(cors());
 app.use(express.json());
 
-// Middleware to load client configuration an attach it to the request
+// Middleware to load client configuration and attach it to the request, along with a placeholder user context
 const clientConfigMiddleware = async (req, res, next) => {
- const clientId = req.body.clientId || req.headers['x-client-id'] || req.query.clientId;
+  const clientId = req.body.clientId || req.headers['x-client-id'] || req.query.clientId;
+  // Placeholder for user authentication. In a real scenario, this would come from an auth system.
+  // For now, we'll assume a default admin user for testing purposes if no user ID is provided.
+  const userId = req.headers['x-user-id'] || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'; // Example UUID for a placeholder user
+  const userRole = req.headers['x-user-role'] || 'admin'; // Example role: 'admin' or 'promoter'
 
- if (!clientId) {
-   return res.status(400).json({ error: 'Client ID is required' });
- }
+  if (!clientId) {
+    return res.status(400).json({ error: 'Client ID is required' });
+  }
 
- try {
-   req.clientConfig = await getClientConfig(clientId);
-   next();
- } catch (error) {
-   console.error(`Failed to load configuration for client: ${clientId}`, error);
-   return res.status(404).json({ error: `Configuration not found for client: ${clientId}` });
- }
+  try {
+    req.clientConfig = await getClientConfig(clientId);
+    // Attach user context to the request
+    req.userContext = { userId, role: userRole };
+    next();
+  } catch (error) {
+    console.error(`Failed to load configuration for client: ${clientId} (Name: ${req.clientConfig?.clientName || 'N/A'})`, error);
+    return res.status(404).json({ error: `Configuration not found for client: ${clientId}` });
+  }
 };
 
 // Load client configuration for all API routes
@@ -46,16 +57,29 @@ app.get('/', (req, res) => {
 app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
   try {
     const { query, sessionId, context } = req.body;
-    const { clientConfig } = req; // Config is attached by middleware
+    const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
+    const timestamp = new Date().toISOString();
+    const turnId = Date.now().toString(); // Simple unique ID for this turn
+
+    // Upsert user message to Pinecone
+    await chatHistoryService.upsertMessage({
+      text: query,
+      role: 'user',
+      client_id: clientConfig.clientId,
+      visitor_id: sessionId,
+      session_id: sessionId,
+      timestamp: timestamp,
+      turn_id: `${turnId}-user`,
+    }, clientConfig);
 
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });
     }
 
-    console.log(`[${clientConfig.clientId}] Received query: ${query}`);
-    console.log(`[${clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received query: ${query}`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
 
-    const responseText = await generateResponse(query, clientConfig, context);
+    const responseText = await generateResponse(query, clientConfig, context, userContext);
 
     // Log the user's question and its embedding to the questions and question_embeddings tables
     try {
@@ -64,6 +88,7 @@ app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
         .insert([
           {
             question_text: query,
+            chatbot_response: responseText,
             listing_id: context?.listingId || null, // Assuming listingId is passed in context
             status: 'answered', // Mark as answered since a response is generated
             visitor_id: req.body.sessionId, // Assuming sessionId is visitor_id
@@ -101,6 +126,17 @@ app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
       console.error('Error logging question or embedding:', logError);
     }
 
+    // Upsert chatbot response to Pinecone
+    await chatHistoryService.upsertMessage({
+      text: responseText,
+      role: 'assistant',
+      client_id: clientConfig.clientId,
+      visitor_id: sessionId,
+      session_id: sessionId,
+      timestamp: new Date().toISOString(), // Use a new timestamp for the response
+      turn_id: `${turnId}-assistant`,
+    }, clientConfig);
+
     res.json({ response: responseText });
   } catch (error) {
     console.error('Error processing chat request:', error);
@@ -115,11 +151,11 @@ app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
 app.post('/api/suggested-questions', clientConfigMiddleware, async (req, res) => {
   try {
     const { context, chatHistory } = req.body;
-    const { clientConfig } = req; // Config is attached by middleware
+    const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
 
-    console.log(`[${clientConfig.clientId}] Generating suggested questions.`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generating suggested questions.`);
 
-    const questions = await generateSuggestedQuestions(clientConfig, context, chatHistory);
+    const questions = await generateSuggestedQuestions(clientConfig, context, chatHistory, userContext);
     res.json({ questions });
   } catch (error) {
     console.error('Error generating suggested questions:', error);
@@ -239,7 +275,7 @@ app.post('/v1/events', async (req, res) => {
     try {
       clientConfig = await getClientConfig(clientId);
     } catch (error) {
-      console.error(`Failed to load configuration for client: ${clientId}`, error);
+      console.error(`Failed to load configuration for client: ${clientId} (Name: ${clientConfig?.clientName || 'N/A'})`, error);
       return res.status(404).json({ error: `Configuration not found for client: ${clientId}` });
     }
 
@@ -288,6 +324,294 @@ app.post('/v1/leads/acknowledge', async (req, res) => {
   }
 });
 
+// API endpoints for Developments
+app.post('/v1/developments', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { clientConfig } = req;
+    const developmentData = { ...req.body, client_id: clientConfig.clientId };
+    const newDevelopment = await developmentService.createDevelopment(developmentData);
+    res.status(201).json(newDevelopment);
+  } catch (error) {
+    console.error('Error creating development:', error);
+    res.status(500).json({ error: 'Failed to create development.' });
+  }
+});
+
+app.get('/v1/developments/:id', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const development = await developmentService.getDevelopmentById(id);
+    if (!development || development.client_id !== req.clientConfig.clientId) {
+      return res.status(404).json({ error: 'Development not found or unauthorized.' });
+    }
+    res.json(development);
+  } catch (error) {
+    console.error('Error fetching development:', error);
+    res.status(500).json({ error: 'Failed to fetch development.' });
+  }
+});
+
+app.get('/v1/developments', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { clientConfig } = req;
+    const developments = await developmentService.getDevelopmentsByClientId(clientConfig.clientId);
+    res.json(developments);
+  } catch (error) {
+    console.error('Error fetching developments by client ID:', error);
+    res.status(500).json({ error: 'Failed to fetch developments.' });
+  }
+});
+
+app.put('/v1/developments/:id', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { clientConfig } = req;
+    const existingDevelopment = await developmentService.getDevelopmentById(id);
+
+    if (!existingDevelopment || existingDevelopment.client_id !== clientConfig.clientId) {
+      return res.status(404).json({ error: 'Development not found or unauthorized.' });
+    }
+
+    const updatedDevelopment = await developmentService.updateDevelopment(id, req.body);
+    res.json(updatedDevelopment);
+  } catch (error) {
+    console.error('Error updating development:', error);
+    res.status(500).json({ error: 'Failed to update development.' });
+  }
+});
+
+app.delete('/v1/developments/:id', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { clientConfig } = req;
+    const existingDevelopment = await developmentService.getDevelopmentById(id);
+
+    if (!existingDevelopment || existingDevelopment.client_id !== clientConfig.clientId) {
+      return res.status(404).json({ error: 'Development not found or unauthorized.' });
+    }
+
+    await developmentService.deleteDevelopment(id);
+    res.json({ success: true, message: 'Development deleted successfully.' });
+  } catch (error) {
+    console.error('Error deleting development:', error);
+    res.status(500).json({ error: 'Failed to delete development.' });
+  }
+});
+
+// API endpoints for Client Management
+app.post('/v1/clients', async (req, res) => {
+  try {
+    const newClient = await createClientConfig(req.body);
+    res.status(201).json(newClient);
+  } catch (error) {
+    console.error('Error creating client:', error);
+    res.status(500).json({ error: 'Failed to create client.' });
+  }
+});
+
+app.get('/v1/clients', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*');
+
+    if (error) {
+      console.error('Error fetching clients:', error);
+      return res.status(500).json({ error: 'Failed to fetch clients.' });
+    }
+    res.json(data);
+  } catch (error) {
+    console.error('Error in /v1/clients endpoint:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
+app.get('/v1/clients/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const client = await getClientConfig(id);
+    res.json(client);
+  } catch (error) {
+    console.error('Error fetching client:', error);
+    res.status(500).json({ error: 'Failed to fetch client.' });
+  }
+});
+
+app.put('/v1/clients/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updatedClient = await updateClientConfig(id, req.body);
+    res.json(updatedClient);
+  } catch (error) {
+    console.error('Error updating client:', error);
+    res.status(500).json({ error: 'Failed to update client.' });
+  }
+});
+
+app.delete('/v1/clients/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteClientConfig(id);
+    res.json({ success: true, message: 'Client deleted successfully.' });
+  } catch (error) {
+    console.error('Error deleting client:', error);
+    res.status(500).json({ error: 'Failed to delete client.' });
+  }
+});
+
+// API endpoints for User Management
+app.post('/v1/users', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { clientConfig } = req;
+    const userData = { ...req.body, client_id: clientConfig.clientId };
+    const newUser = await userService.createUser(userData);
+    res.status(201).json(newUser);
+  } catch (error) {
+    console.error('Error creating user:', error);
+    res.status(500).json({ error: 'Failed to create user.' });
+  }
+});
+
+app.get('/v1/users/:id', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await userService.getUserById(id);
+    if (!user || user.client_id !== req.clientConfig.clientId) {
+      return res.status(404).json({ error: 'User not found or unauthorized.' });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Failed to fetch user.' });
+  }
+});
+
+app.put('/v1/users/:id', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { clientConfig } = req;
+    const existingUser = await userService.getUserById(id);
+
+    if (!existingUser || existingUser.client_id !== clientConfig.clientId) {
+      return res.status(404).json({ error: 'User not found or unauthorized.' });
+    }
+
+    const updatedUser = await userService.updateUser(id, req.body);
+    res.json(updatedUser);
+  } catch (error) {
+    console.error('Error updating user:', error);
+    res.status(500).json({ error: 'Failed to update user.' });
+  }
+});
+
+app.delete('/v1/users/:id', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { clientConfig } = req;
+    const existingUser = await userService.getUserById(id);
+
+    if (!existingUser || existingUser.client_id !== clientConfig.clientId) {
+      return res.status(404).json({ error: 'User not found or unauthorized.' });
+    }
+
+    await userService.deleteUser(id);
+    res.json({ success: true, message: 'User deleted successfully.' });
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ error: 'Failed to delete user.' });
+  }
+});
+
+app.get('/v1/clients/:clientId/users', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    if (clientId !== req.clientConfig.clientId) {
+      return res.status(403).json({ error: 'Unauthorized access to client users.' });
+    }
+    const users = await userService.getAllUsersByClientId(clientId);
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users by client ID:', error);
+    res.status(500).json({ error: 'Failed to fetch users.' });
+  }
+});
+
+app.get('/v1/clients/:clientId/agents', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    if (clientId !== req.clientConfig.clientId) {
+      return res.status(403).json({ error: 'Unauthorized access to client agents.' });
+    }
+    const agents = await userService.getAgentsByClientId(clientId);
+    res.json(agents);
+  } catch (error) {
+    console.error('Error fetching agents by client ID:', error);
+    res.status(500).json({ error: 'Failed to fetch agents.' });
+  }
+});
+
+app.post('/v1/users/:userId/listings/:listingId', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { userId, listingId } = req.params;
+    const { clientConfig } = req;
+
+    // Ensure the user belongs to the client
+    const user = await userService.getUserById(userId);
+    if (!user || user.client_id !== clientConfig.clientId) {
+      return res.status(404).json({ error: 'User not found or unauthorized for this client.' });
+    }
+
+    // Ensure the user is a promoter
+    if (user.role !== 'promoter') {
+      return res.status(403).json({ error: 'Only promoters can be assigned listings.' });
+    }
+
+    await userService.assignListingToAgent(userId, listingId);
+    res.json({ success: true, message: 'Listing assigned to agent successfully.' });
+  } catch (error) {
+    console.error('Error assigning listing to agent:', error);
+    res.status(500).json({ error: 'Failed to assign listing to agent.' });
+  }
+});
+
+app.delete('/v1/users/:userId/listings/:listingId', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { userId, listingId } = req.params;
+    const { clientConfig } = req;
+
+    // Ensure the user belongs to the client
+    const user = await userService.getUserById(userId);
+    if (!user || user.client_id !== clientConfig.clientId) {
+      return res.status(404).json({ error: 'User not found or unauthorized for this client.' });
+    }
+
+    await userService.removeListingFromAgent(userId, listingId);
+    res.json({ success: true, message: 'Listing removed from agent successfully.' });
+  } catch (error) {
+    console.error('Error removing listing from agent:', error);
+    res.status(500).json({ error: 'Failed to remove listing from agent.' });
+  }
+});
+
+app.get('/v1/users/:userId/listings', clientConfigMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { clientConfig } = req;
+
+    // Ensure the user belongs to the client
+    const user = await userService.getUserById(userId);
+    if (!user || user.client_id !== clientConfig.clientId) {
+      return res.status(404).json({ error: 'User not found or unauthorized for this client.' });
+    }
+
+    const listings = await userService.getListingsByAgentId(userId);
+    res.json(listings);
+  } catch (error) {
+    console.error('Error fetching listings for agent:', error);
+    res.status(500).json({ error: 'Failed to fetch listings for agent.' });
+  }
+});
+
 // API endpoint to get listing details and metrics by ID
 app.get('/api/listing/:id', async (req, res) => {
   console.log(`[Backend] Received request for listing ID: ${req.params.id}`);
@@ -301,11 +625,13 @@ app.get('/api/listing/:id', async (req, res) => {
       { data: metrics, error: metricsError },
       { data: unansweredQuestions, error: unansweredQuestionsError },
       { data: handoffs, error: handoffsError },
+      { data: fullChatHistory, error: fullChatHistoryError }, // New line for full chat history
     ] = await Promise.all([
       supabase.from('listings').select('*').eq('id', id).single(),
       supabase.from('listing_metrics').select('*').eq('listing_id', id).single(),
       supabase.from('questions').select('question_text').eq('listing_id', id).eq('status', 'unanswered'),
       supabase.from('handoffs').select('reason').eq('listing_id', id),
+      supabase.from('questions').select('question_text, chatbot_response, asked_at').eq('listing_id', id).order('asked_at', { ascending: true }),
     ]);
 
     if (listingError && listingError.code !== 'PGRST116') {
@@ -325,6 +651,12 @@ app.get('/api/listing/:id', async (req, res) => {
       throw unansweredQuestionsError;
     }
     console.log(`[Backend] Unanswered questions:`, unansweredQuestions);
+
+    if (fullChatHistoryError) {
+      console.error(`[Backend] Error fetching full chat history:`, fullChatHistoryError);
+      throw fullChatHistoryError;
+    }
+    console.log(`[Backend] Full chat history:`, fullChatHistory);
 
     if (handoffsError) {
       console.error(`[Backend] Error fetching handoffs:`, handoffsError);
@@ -350,6 +682,7 @@ app.get('/api/listing/:id', async (req, res) => {
       commonQuestions: [], // Common questions are now fetched via a separate API
       unansweredQuestions: unansweredQuestions.map(q => q.question_text) || [],
       chatHandoffs: formattedHandoffs || [],
+      fullChatHistory: fullChatHistory || [], // New line for full chat history
     });
   } catch (error) {
     console.error(`Error fetching listing details for ID ${req.params.id}:`, error);

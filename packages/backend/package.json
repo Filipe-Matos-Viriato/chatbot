@@ -4,8 +4,9 @@
   "private": true,
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "ingest-test-data": "node scripts/ingest-test-data.js"
+    "start": "node -r dotenv/config src/index.js",
+    "ingest-test-data": "node -r dotenv/config scripts/ingest-test-data.js",
+    "migrate-configs": "node -r dotenv/config scripts/migrate-client-configs-to-db.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.12.0",

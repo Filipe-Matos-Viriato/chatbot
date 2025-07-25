@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import App from './App';
 import './index.css';
 import Dashboard from './dashboard/Dashboard';
-import ListingDetailsPage from './dashboard/listing-performance-tab/components/ListingDetailsPage';
+import AdminDashboard from './dashboard/AdminDashboard';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -12,7 +12,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/dashboard/*" element={<Dashboard />} /> {/* Use /* for nested routes */}
-        {/* This route is now handled inside the Dashboard component */}
+        <Route path="/admin/*" element={<AdminDashboard />} /> {/* Admin dashboard routes */}
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

@@ -1,5 +1,6 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Pinecone } = require('@pinecone-database/pinecone');
+const userService = require('./services/user-service'); // Import user service
 
 // Initialize clients
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
@@ -153,17 +154,38 @@ function extractQueryFilters(query, currentListingPrice = null) {
  * @param {object} clientConfig The client-specific configuration.
  * @param {object} externalContext The external context for filtering (e.g., { type: 'listing', value: 'ap-01' }).
  * @param {string} originalQuery The original user query string.
+ * @param {object} userContext The context of the authenticated user (e.g., { userId: '...', role: 'admin' | 'promoter' }).
  * @returns {Promise<object>} The Pinecone query response with re-ranked matches.
  */
-async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "") {
+async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null) {
   const baseFilter = {
     client_id: clientConfig.clientId,
   };
 
+  // Apply user-specific filtering if userContext is provided and role is 'promoter'
+  if (userContext && userContext.role === 'promoter') {
+    try {
+      const assignedListings = await userService.getListingsByAgentId(userContext.userId);
+      if (assignedListings.length > 0) {
+        // If the promoter has assigned listings, restrict search to only those listings
+        baseFilter.listing_id = { "$in": assignedListings };
+      } else {
+        // If promoter has no assigned listings, return no results to prevent unauthorized access
+        return { matches: [] };
+      }
+    } catch (error) {
+      console.error(`Error applying agent filtering for user ${userContext.userId}:`, error);
+      // In case of error, deny access to prevent data leakage
+      return { matches: [] };
+    }
+  }
+
   let currentListingPrice = null;
   const contextListingId = externalContext?.type === 'listing' ? externalContext.value : null;
+  const contextDevelopmentId = externalContext?.type === 'development' ? externalContext.value : null; // New: Extract development_id
   let matches = [];
   let broadMatches = [];
+  let developmentMatches = []; // New: To store development-specific matches
 
   // 1. Perform targeted search if contextListingId is present
   if (contextListingId) {
@@ -188,7 +210,23 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     }
   }
 
-  // 2. Always perform broad search
+  // 2. Perform targeted search if contextDevelopmentId is present (New)
+  if (contextDevelopmentId) {
+    console.log(`Performing targeted query for development_id: ${contextDevelopmentId}`);
+    const developmentQueryResponse = await pineconeIndex
+      .namespace(process.env.PINECONE_NAMESPACE)
+      .query({
+        vector: searchVector,
+        topK: 10, // Smaller topK for targeted search
+        includeMetadata: true,
+        filter: { ...baseFilter, development_id: contextDevelopmentId },
+      });
+
+    developmentMatches = developmentQueryResponse.matches || [];
+    console.log(`Found ${developmentMatches.length} matches in targeted search for development_id: ${contextDevelopmentId}.`);
+  }
+
+  // 3. Always perform broad search
   console.log("Performing broad query.");
   const queryFilters = extractQueryFilters(originalQuery, currentListingPrice);
   console.log("Extracted query filters:", JSON.stringify(queryFilters, null, 2));
@@ -206,9 +244,9 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
   broadMatches = broadQueryResponse.matches || [];
 
-  // 3. Combine results from targeted and broad searches, avoiding duplicates
-  const combinedMatches = [...matches]; // Start with targeted matches
-  const existingIds = new Set(matches.map(m => m.id));
+  // 4. Combine results from targeted, development, and broad searches, avoiding duplicates
+  const combinedMatches = [...matches, ...developmentMatches]; // Start with listing and development matches
+  const existingIds = new Set(combinedMatches.map(m => m.id));
 
   broadMatches.forEach(bm => {
     if (!existingIds.has(bm.id)) {
@@ -236,6 +274,11 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       // Boost if listing_id is explicitly mentioned in the query
       if (queryListingId && match.metadata.listing_id === queryListingId) {
         score += 1.5; // Even higher boost for explicit query mention
+      }
+
+      // Boost if development_id matches the external context (current page) (New)
+      if (contextDevelopmentId && match.metadata.development_id === contextDevelopmentId) {
+        score += 0.8; // Boost for development context, slightly less than direct listing
       }
 
       // Boost if the document has structured metadata that matches query filters
@@ -270,15 +313,15 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   return { matches };
 }
 
-async function generateResponse(query, clientConfig, externalContext = null) {
+async function generateResponse(query, clientConfig, externalContext = null, userContext = null) {
   // 1. Generate embedding for the user's query
   const queryEmbedding = await embeddingModel.embedContent({
     content: { parts: [{ text: query }] },
     taskType: "RETRIEVAL_QUERY",
   });
 
-  // 2. Perform Hybrid Search with re-ranking
-  const queryResponse = await performHybridSearch(queryEmbedding.embedding.values, clientConfig, externalContext, query);
+  // 2. Perform Hybrid Search with re-ranking, passing userContext
+  const queryResponse = await performHybridSearch(queryEmbedding.embedding.values, clientConfig, externalContext, query, userContext);
 
   // If there are no matches at all, use the client's configured fallback.
   if (!queryResponse || queryResponse.matches.length === 0) {
@@ -331,7 +374,7 @@ async function generateResponse(query, clientConfig, externalContext = null) {
   }
 }
 
-async function generateSuggestedQuestions(clientConfig, externalContext = null, chatHistory = []) {
+async function generateSuggestedQuestions(clientConfig, externalContext = null, chatHistory = [], userContext = null) {
   // 1. Create a search query from the context or history
   let searchQuery = "general information"; // Default search
   if (externalContext && externalContext.type === 'listing' && externalContext.value) {
@@ -346,8 +389,8 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
     taskType: "RETRIEVAL_QUERY",
   });
 
-  // 2. Perform Hybrid Search to find relevant context, now client-aware
-  const queryResponse = await performHybridSearch(queryEmbedding.embedding.values, clientConfig, externalContext, searchQuery);
+  // 2. Perform Hybrid Search to find relevant context, now client-aware, passing userContext
+  const queryResponse = await performHybridSearch(queryEmbedding.embedding.values, clientConfig, externalContext, searchQuery, userContext);
 
   if (!queryResponse || queryResponse.matches.length === 0) {
     return []; // No context found, no questions to suggest

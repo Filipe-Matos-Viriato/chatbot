@@ -51,6 +51,40 @@ const sampleQuestions = [
   "What is the urgency to sell this property?"
 ];
 
+const sampleResponses = [
+  "The price of this property is $500,000.",
+  "It has 3 bedrooms.",
+  "Yes, there is a spacious garden.",
+  "The nearest schools are ABC Elementary and XYZ High School.",
+  "Yes, you can book a viewing by contacting our agent.",
+  "Property taxes are approximately $2,500 per year.",
+  "Yes, this property is pet-friendly.",
+  "The total area is 150 square meters.",
+  "It was recently renovated last year.",
+  "The average utility cost is around $200 per month.",
+  "Yes, it's conveniently located near public transport.",
+  "The neighborhood is quiet and family-friendly.",
+  "No open houses are scheduled at the moment, but private viewings are available.",
+  "Our team will guide you through the closing process step-by-step.",
+  "Yes, a virtual tour is available on our website.",
+  "It has an energy efficiency rating of B.",
+  "Yes, there is a dedicated parking space.",
+  "The building was constructed in 1990.",
+  "Amenities include a swimming pool and a gym.",
+  "No, the property is unfurnished.",
+  "Our office operates from 9 AM to 5 PM, Monday to Friday.",
+  "We offer various financing options, please contact us for details.",
+  "The return on investment for this property is estimated at 7% annually.",
+  "Please consult with a legal professional for specific legal considerations.",
+  "Yes, remote buying options are available, we can assist you with the process.",
+  "This area is known for its strong rental market and potential for appreciation.",
+  "The property is in excellent condition, well-maintained by the current owners.",
+  "The specific amenities include a modern kitchen, built-in wardrobes, and a balcony.",
+  "The layout is open-plan with a large living area and separate dining space.",
+  "Yes, the property is currently available for sale.",
+  "What is the urgency to sell this property?"
+];
+
 async function populateQuestionsTable() {
   console.log('Populating questions table with simulated data...');
 
@@ -96,6 +130,7 @@ async function populateQuestionsTable() {
           visitor_id: visitor.visitor_id,
           listing_id: listing.id,
           question_text: randomQuestion,
+          chatbot_response: isUnanswered ? null : sampleResponses[Math.floor(Math.random() * sampleResponses.length)],
           asked_at: new Date().toISOString(), // Use 'asked_at' column
           status: isUnanswered ? 'unanswered' : 'answered', // Use 'status' column
           visitor_id: visitor.visitor_id // Use visitor_id

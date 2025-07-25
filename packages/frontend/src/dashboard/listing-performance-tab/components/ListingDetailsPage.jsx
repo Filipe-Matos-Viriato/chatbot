@@ -5,9 +5,10 @@ import ListingMetricsCards from './listing-details/ListingMetricsCards';
 import PropertyInformation from './listing-details/PropertyInformation';
 import LeadScoreDistributionChart from './listing-details/LeadScoreDistributionChart';
 import CommonQuestions from './listing-details/CommonQuestions';
-import UnansweredQuestions from './listing-details/UnansweredQuestions';
+import UnansweredQuestions from './listing-details/UnansweredQuestions'; // Re-import UnansweredQuestions
 import ChatHandoffs from './listing-details/ChatHandoffs';
 import IndividualLeadsTable from './listing-details/IndividualLeadsTable';
+import ChatHistory from './listing-details/ChatHistory'; // Import the new component
 
 const ListingDetailsPage = () => {
     const { id } = useParams();
@@ -16,7 +17,8 @@ const ListingDetailsPage = () => {
     const [listingMetrics, setListingMetrics] = useState(null);
     const [leadDistributionData, setLeadDistributionData] = useState(null);
     const [commonQuestions, setCommonQuestions] = useState([]);
-    const [unansweredQuestions, setUnansweredQuestions] = useState([]);
+    const [unansweredQuestions, setUnansweredQuestions] = useState([]); // Keep unansweredQuestions
+    const [chatHistory, setChatHistory] = useState([]); // New state for full chat history
     const [chatHandoffs, setChatHandoffs] = useState([]);
 
     useEffect(() => {
@@ -24,7 +26,7 @@ const ListingDetailsPage = () => {
             try {
                 const [listingResponse, commonQuestionsResponse] = await Promise.all([
                     fetch(`http://localhost:3006/api/listing/${id}`),
-                    fetch(`http://localhost:3006/api/common-questions?listingId=${id}&clientId=client-abc`) // Assuming client-abc for now
+                    fetch(`http://localhost:3006/api/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
                 ]);
 
                 if (!listingResponse.ok) {
@@ -33,7 +35,8 @@ const ListingDetailsPage = () => {
                 const listingData = await listingResponse.json();
                 setListingData(listingData.listing);
                 setListingMetrics(listingData.metrics);
-                setUnansweredQuestions(listingData.unansweredQuestions);
+                setUnansweredQuestions(listingData.unansweredQuestions); // Set unanswered questions
+                setChatHistory(listingData.fullChatHistory); // Set full chat history
                 setChatHandoffs(listingData.chatHandoffs);
 
                 if (!commonQuestionsResponse.ok) {
@@ -41,6 +44,7 @@ const ListingDetailsPage = () => {
                     setCommonQuestions([]); // Set to empty array on error
                 } else {
                     const commonQuestionsData = await commonQuestionsResponse.json();
+                    console.log("Fetched common questions data:", commonQuestionsData); // Add this line
                     setCommonQuestions(commonQuestionsData.commonQuestions);
                 }
 
@@ -63,7 +67,8 @@ const ListingDetailsPage = () => {
                 setListingMetrics(null);
                 setLeadDistributionData(null);
                 setCommonQuestions([]);
-                setUnansweredQuestions([]);
+                setUnansweredQuestions([]); // Reset unanswered questions
+                setChatHistory([]); // Reset full chat history
                 setChatHandoffs([]);
             }
         };
@@ -99,7 +104,11 @@ const ListingDetailsPage = () => {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
                     <CommonQuestions questions={commonQuestions} />
-                    <UnansweredQuestions questions={unansweredQuestions} />
+                    <UnansweredQuestions questions={unansweredQuestions} /> {/* Keep UnansweredQuestions */}
+                </div>
+
+                <div className="mt-8"> {/* New div for ChatHistory */}
+                    <ChatHistory chatHistory={chatHistory} />
                 </div>
 
                 <ChatHandoffs handoffs={chatHandoffs} />

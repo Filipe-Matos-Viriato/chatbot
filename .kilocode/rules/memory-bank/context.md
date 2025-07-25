@@ -15,16 +15,21 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
 - **Improved RAG Strategy in `rag-service.js`:**
     - Implemented a strategy to **always perform both targeted and broad searches** when a `listing_id` context is present.
     - Results from both searches are combined and re-ranked to ensure comprehensive context for the LLM. This allows comparative queries and general information requests to be answered correctly even on specific listing pages.
+- **Developments Feature Implemented:**
+   - **Database Schema:** Created the `developments` table in Supabase and added a nullable `development_id` column to the `listings` table, referencing `developments`.
+   - **Backend API:** Implemented API endpoints for managing developments (e.g., `POST /v1/developments`, `GET /v1/developments`).
+   - **Ingestion Pipeline:** Modified `ingestion-service.js` to accept `development_id` as metadata, upsert development content to Pinecone with `development_id` and `client_id`, and ensure `development_id` is included in Pinecone entries for associated listings.
+   - **RAG Service:** Updated `rag-service.js` to consider `development_id` during retrieval, performing targeted searches for developments and combining results with listing-specific and broad searches, with adjusted re-ranking.
 - **Flexible, Client-Configurable Metadata Extraction Implemented:** `ingestion-service.js` now uses client-defined regex patterns from `client-abc.json` to accurately extract `listings.name` and `listings.baths` from document content during ingestion.
 - **Structured Metadata Extraction Implemented:** `ingestion-service.js` extracts and stores structured metadata (e.g., `num_bedrooms`, `total_area_sqm`, `price_eur`, boolean features) from documents during ingestion.
 - **Chatbot System Instruction Refined:** `client-abc.json`'s `systemInstruction` was updated for more direct and professional chatbot responses.
 - **Context Passing Mechanism Updated:** The HTML snippet for iframe context injection was updated with a `setTimeout` to improve reliability.
 - **Supabase Integration for Visitor Data:** Replaced in-memory visitor data storage with persistent storage in Supabase. This involved:
-    - Installing `@supabase/supabase-js` in the backend.
-    - Configuring Supabase client with environment variables (`SUPABASE_URL`, `SUPABASE_ANON_KEY`).
-    - Modifying `visitor-service.js` to use Supabase for `createVisitor`, `logEvent`, and `getVisitor` operations.
-    - Troubleshooting issues related to environment variable loading, Supabase table schema (`updated_at` column), and Row Level Security (RLS) policies.
-    - Correcting asynchronous handling in `index.js` for the `/v1/sessions` endpoint.
+   - Installing `@supabase/supabase-js` in the backend.
+   - Configuring Supabase client with environment variables (`SUPABASE_URL`, `SUPABASE_ANON_KEY`).
+   - Modifying `visitor-service.js` to use Supabase for `createVisitor`, `logEvent`, and `getVisitor` operations.
+   - Troubleshooting issues related to environment variable loading, Supabase table schema (`updated_at` column), and Row Level Security (RLS) policies.
+   - Correcting asynchronous handling in `index.js` for the `/v1/sessions` endpoint.
 - **Dashboard Overview Tab Refactoring:** The `OverviewTab` component and its sub-components (`MetricCard`, `HotLeadsAlert`, `ChartPlaceholder`, `TopListings`) have been refactored into separate files within `packages/frontend/src/dashboard/overview-tab` for better maintainability.
 - **Dashboard Overview Tab Metrics Refactoring:** The individual metric components (`TotalLeadsGeneratedMetric`, `ChatbotResolutionRateMetric`, `NewHotLeadsMetric`, `AvgChatDurationMetric`, `PropertyViewingsBookedMetric`, `UnansweredQuestionsMetric`) have been refactored into separate files within `packages/frontend/src/dashboard/overview-tab/metrics` for better organization and maintainability.
 - **Lead Score Distribution Chart Implemented:** A Pie chart displaying the percentage of Hot, Warm, and Cold leads is now integrated into the dashboard, fetching data from the `listing_metrics` table.
@@ -40,6 +45,15 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
     - `conversion_rate` calculation updated to `total_conversions / engaged_users`.
     - Frontend component `packages/frontend/src/dashboard/listing-performance-tab/components/OverallListingPerformance.jsx` updated to display these new metrics in a sortable, paginated table.
 
+- **Client and User Management Implementation:**
+    - **Database Schema:** Created `clients` table (for client configurations), `users` table (for admins/promoters), and `agent_listings` table (to link promoters to specific listings).
+    - **Client Configuration Migration:** Implemented and executed `packages/backend/scripts/migrate-client-configs-to-db.js` to migrate client configurations from JSON files to the new `clients` table in the database.
+    - **Backend Services Update:**
+        - Modified `packages/backend/src/services/client-config-service.js` to fetch client configurations from the `clients` table.
+        - Created `packages/backend/src/services/user-service.js` for user management (CRUD operations, agent-listing assignments).
+        - Added new API endpoints in `packages/backend/src/index.js` for user management.
+        - Modified `packages/backend/src/rag-service.js` to support user/agent filtering during Pinecone retrieval, ensuring agents only access their assigned listings.
+
 ## Next Steps
 - **Client Dashboard Implementation:**
     - **Phase 1 (Current Focus):**
@@ -49,6 +63,7 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
         - Populate `listing_metrics` table: **COMPLETED**
         - Implement mechanism to update `listing_metrics` based on real visitor interactions: **COMPLETED**
     - **Phase 2 (Future):** Backend API Development: Develop new backend API endpoints in `packages/backend` for aggregated and filtered dashboard data, ensuring client-specific and agent-specific filtering.
+    - **Future Client Dashboard Enhancement:** When inserting or updating a listing, the dashboard will include dropdowns for `listing_status` (options: 'available', 'reserved', 'sold') and `current_state` (options: 'project', 'building', 'finished') to populate these columns in the `listings` table.
     - **Phase 3 (Future):** Refine Frontend Data Fetching: Update the frontend to consume data from the new backend APIs.
     - **Phase 4 (Future):** Implement Authentication/Authorization: Implement robust authentication for dashboard users (agents) and authorization (admin user can access all agent data, agent user filtered by client_id and agent_id).
     - **Phase 5 (Future):** Implement Dynamic Language Switching: Integrate i18n for PT-PT and EN language support.
@@ -62,6 +77,7 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
 - **General Improvements:**
     - Ensure Consistent Context Passing: Further debug the frontend-to-iframe `postMessage` mechanism to guarantee consistent context delivery, as some inconsistencies were observed.
 - **Future Enhancements:**
+    - **NLP Analysis for Chat History Tagging:** Implement advanced NLP techniques (e.g., named entity recognition, topic modeling) to automatically generate richer, more granular tags for chat messages, enhancing context-aware retrieval.
 
 ## Current Dashboard Implementation Status
 The dashboard is now correctly displaying the "New Hot Leads" metric. The previous issues with Tailwind CSS and Supabase schema have been resolved.

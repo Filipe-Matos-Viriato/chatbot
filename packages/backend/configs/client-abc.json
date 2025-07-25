@@ -1,5 +1,6 @@
 {
   "clientId": "client-abc",
+  "clientName": "ImoPrime Client",
   "chatbotName": "PropertyBot",
   "theme": {
     "primaryColor": "#007bff",
@@ -46,6 +47,23 @@
       "type": "regex"
     }
   },
+  "chatHistoryTaggingRules": [
+    {
+      "pattern": "price|cost|value|how much",
+      "flags": "i",
+      "tagName": "price_query"
+    },
+    {
+      "pattern": "location|address|where is it",
+      "flags": "i",
+      "tagName": "location_query"
+    },
+    {
+      "pattern": "viewing|visit|schedule",
+      "flags": "i",
+      "tagName": "viewing_request"
+    }
+  ],
   "ingestionPipeline": [
     {
       "name": "template-chunker",

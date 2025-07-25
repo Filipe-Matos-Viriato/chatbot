@@ -173,12 +173,12 @@ const processDocument = async ({
   metadata,
 }) => {
   console.log(
-    `[${clientConfig.clientId}] Starting document processing. Type: ${ingestionType}`
+    `[${clientConfig.clientName || clientConfig.clientId}] Starting document processing. Type: ${ingestionType}`
   );
 
   try {
     // Debugging: Log clientConfig.ingestionPipeline
-    console.log(`[${clientConfig.clientId}] clientConfig.ingestionPipeline:`, JSON.stringify(clientConfig.ingestionPipeline, null, 2));
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] clientConfig.ingestionPipeline:`, JSON.stringify(clientConfig.ingestionPipeline, null, 2));
 
     // Extract chunking settings from clientConfig.ingestionPipeline
     const chunkingSettings = clientConfig.ingestionPipeline.find(
@@ -186,7 +186,7 @@ const processDocument = async ({
     )?.settings;
 
     // Debugging: Log chunkingSettings
-    console.log(`[${clientConfig.clientId}] chunkingSettings:`, JSON.stringify(chunkingSettings, null, 2));
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] chunkingSettings:`, JSON.stringify(chunkingSettings, null, 2));
 
 
     const chunkSize = chunkingSettings?.chunkSize || 1000; // Default if not found
@@ -194,13 +194,13 @@ const processDocument = async ({
 
     // 1. Extract text from the document
     const { originalname, buffer } = file;
-    console.log(`[${clientConfig.clientId}] Extracting text from ${originalname}...`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracting text from ${originalname}...`);
     const documentText = await extractText(buffer, originalname);
 
     // 2. Extract structured metadata
-    console.log(`[${clientConfig.clientId}] Extracting structured metadata...`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracting structured metadata...`);
     const structuredMetadata = extractStructuredMetadata(documentText, originalname, clientConfig); // Pass originalname and clientConfig
-    console.log(`[${clientConfig.clientId}] Extracted metadata:`, JSON.stringify(structuredMetadata, null, 2));
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracted metadata:`, JSON.stringify(structuredMetadata, null, 2));
 
     // Prepare amenities array from boolean flags
     const amenitiesArray = Object.keys(structuredMetadata).filter(key =>
@@ -220,13 +220,14 @@ const processDocument = async ({
           beds: structuredMetadata.num_bedrooms || null,
           baths: structuredMetadata.num_bathrooms || null,
           amenities: amenitiesArray.length > 0 ? amenitiesArray : null,
+          development_id: metadata.development_id || null,
           // created_at will default on the database side
         }, { onConflict: 'id' }); // Upsert based on 'id'
 
       if (upsertError) {
-        console.error(`[${clientConfig.clientId}] Error upserting listing to Supabase:`, upsertError);
+        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error upserting listing to Supabase:`, upsertError);
       } else {
-        console.log(`[${clientConfig.clientId}] Listing ${metadata.listing_id} upserted to Supabase.`);
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing ${metadata.listing_id} upserted to Supabase.`);
       }
 
       // Upsert listing metrics to Supabase 'listing_metrics' table
@@ -245,14 +246,14 @@ const processDocument = async ({
         }, { onConflict: 'listing_id' }); // Upsert based on 'listing_id'
 
       if (metricsUpsertError) {
-        console.error(`[${clientConfig.clientId}] Error upserting listing metrics to Supabase:`, metricsUpsertError);
+        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error upserting listing metrics to Supabase:`, metricsUpsertError);
       } else {
-        console.log(`[${clientConfig.clientId}] Listing metrics for ${metadata.listing_id} upserted to Supabase.`);
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing metrics for ${metadata.listing_id} upserted to Supabase.`);
       }
     }
 
     // 3. Chunk the text based on client's configuration
-    console.log(`[${clientConfig.clientId}] Chunking document with chunkSize: ${chunkSize}, chunkOverlap: ${chunkOverlap}...`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Chunking document with chunkSize: ${chunkSize}, chunkOverlap: ${chunkOverlap}...`);
     const textSplitter = new RecursiveCharacterTextSplitter({
       chunkSize: chunkSize,
       chunkOverlap: chunkOverlap,
@@ -260,7 +261,7 @@ const processDocument = async ({
     const chunks = await textSplitter.splitText(documentText);
 
     // 4. Generate embeddings for each chunk and prepare for upsert
-    console.log(`[${clientConfig.clientId}] Generating embeddings for ${chunks.length} chunks...`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generating embeddings for ${chunks.length} chunks...`);
     const vectors = [];
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
@@ -277,15 +278,18 @@ const processDocument = async ({
         ...structuredMetadata, // Add extracted structured metadata
       };
 
-      // Conditionally add listing_id and listing_url if they are not null
+      // Conditionally add listing_id, listing_url, and development_id if they are not null
       if (metadata.listing_id !== null) {
         vectorMetadata.listing_id = metadata.listing_id;
       }
       if (metadata.listing_url) {
         vectorMetadata.listing_url = metadata.listing_url;
       }
+      if (metadata.development_id !== null) {
+        vectorMetadata.development_id = metadata.development_id;
+      }
 
-      console.log(`[${clientConfig.clientId}] Metadata for vector ${i}:`, JSON.stringify(vectorMetadata, null, 2));
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Metadata for vector ${i}:`, JSON.stringify(vectorMetadata, null, 2));
 
       vectors.push({
         id: `${clientConfig.clientId}-${originalname}-${i}`, // Unique ID for each chunk
@@ -296,17 +300,17 @@ const processDocument = async ({
 
     // 5. Upsert chunks with metadata into the vector database
     console.log(
-      `[${clientConfig.clientId}] Upserting ${
+      `[${clientConfig.clientName || clientConfig.clientId}] Upserting ${
         vectors.length
       } vectors into Pinecone index '${process.env.PINECONE_INDEX_NAME}' namespace '${process.env.PINECONE_NAMESPACE}'...`
     );
     await pineconeIndex.namespace(process.env.PINECONE_NAMESPACE).upsert(vectors);
 
-    console.log(`[${clientConfig.clientId}] Document processing completed successfully.`);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Document processing completed successfully.`);
     return { success: true, message: 'Document processed successfully.' };
   } catch (error) {
     console.error(
-      `[${clientConfig.clientId}] Error processing document:`,
+      `[${clientConfig.clientName || clientConfig.clientId}] Error processing document:`,
       error
     );
     return { success: false, message: `Failed to process document: ${error.message}` };
