@@ -5,33 +5,50 @@
  * and upserting into the vector database.
  */
 
-const mammoth = require('mammoth');
-const pdf = require('pdf-parse');
 const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Pinecone } = require('@pinecone-database/pinecone');
 const supabase = require('../config/supabase'); // Import Supabase client
 const { getClientConfig } = require('./client-config-service'); // Import client config service
+const listingService = require('./listing-service'); // Import listing service
+const developmentService = require('./development-service'); // Import development service
+const { v4: uuidv4 } = require('uuid'); // For generating UUIDs
 
-// Initialize clients (ensure these are consistent with rag-service.js)
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-const pineconeIndex = pinecone.index(process.env.PINECONE_INDEX_NAME);
+// Default instances (can be overridden for testing)
+let defaultGenAI;
+let defaultPinecone;
+let defaultPineconeIndex;
+let defaultEmbeddingModel;
 
-const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+// Initialize default clients if not already initialized (for production/non-test use)
+const initializeDefaultClients = () => {
+  if (!defaultGenAI) {
+    defaultGenAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+    defaultPinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+    defaultPineconeIndex = defaultPinecone.index(process.env.PINECONE_INDEX_NAME);
+    defaultEmbeddingModel = defaultGenAI.getGenerativeModel({ model: "text-embedding-004" });
+  }
+};
+
+// Call this once to initialize defaults for non-test environments
+initializeDefaultClients();
 
 /**
  * Extracts text from a given file buffer based on its original name.
  * @param {Buffer} buffer The file buffer.
  * @param {string} originalname The original name of the file (to determine type).
+ * @param {object} dependencies - Optional dependencies for testing (mammoth, pdf).
  * @returns {Promise<string>} The extracted text.
  */
-const extractText = async (buffer, originalname) => {
+const extractText = async (buffer, originalname, dependencies = {}) => {
+  const {
+    mammoth = require('mammoth'), // Use require directly for default
+    pdf = require('pdf-parse'),   // Use require directly for default
+  } = dependencies;
+
   if (originalname.endsWith('.docx')) {
-    // Convert Node.js Buffer to Uint8Array and then to ArrayBuffer
-    const uint8Array = new Uint8Array(buffer);
-    const arrayBuffer = uint8Array.buffer;
-    const { value } = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+    // Pass Node.js Buffer directly to mammoth
+    const { value } = await mammoth.extractRawText({ buffer: buffer });
     return value;
   } else if (originalname.endsWith('.pdf')) {
     const data = await pdf(buffer);
@@ -50,7 +67,56 @@ const extractText = async (buffer, originalname) => {
  * @returns {object} An object containing extracted metadata.
  */
 const extractStructuredMetadata = (text, originalname, clientConfig) => {
-  const metadata = {};
+  const metadata = {
+    listing_status: null, // Initialize with null
+    current_state: null, // Initialize with null
+  };
+
+  // Check if the file is a JSON file and extract data directly
+  if (originalname.endsWith('.json')) {
+    try {
+      const jsonData = JSON.parse(text);
+
+      if (jsonData.preço !== undefined) {
+        metadata.price_eur = parseFloat(String(jsonData.preço).replace(/\./g, '').replace(',', '.'));
+        console.log(`[DEBUG] Price from JSON: ${metadata.price_eur}`); // Add debug log
+      }
+      if (jsonData.tipologia !== undefined) {
+        metadata.num_bedrooms = parseInt(String(jsonData.tipologia).replace('T', ''), 10);
+        // Infer type as "Apartamento" if tipologia exists and no explicit type is found yet
+        if (metadata.type === undefined || metadata.type === null) { // Only infer if not already set
+          metadata.type = 'Apartamento';
+        }
+      }
+      if (jsonData.area_bruta_m2 !== undefined) {
+        metadata.total_area_sqm = parseFloat(String(jsonData.area_bruta_m2));
+      }
+
+      // Extract num_bathrooms from "descricao.divisoes"
+      // Extract num_bathrooms from "descricao.divisoes" (JSON specific)
+      if (jsonData.descricao && Array.isArray(jsonData.descricao.divisoes)) {
+        const bathroomDivision = jsonData.descricao.divisoes.find(
+          (div) => div.nome && div.nome.toLowerCase().includes('casa de banho')
+        );
+        if (bathroomDivision) {
+          metadata.num_bathrooms = 1; // Assuming one bathroom if "Casa de banho" is found
+        }
+      }
+
+      // If a 'type' or 'Tipo' field exists in JSON, use it directly (overrides inferred type)
+      if (jsonData.type !== undefined) {
+        metadata.type = jsonData.type;
+      } else if (jsonData.Tipo !== undefined) {
+        metadata.type = jsonData.Tipo;
+      }
+
+      // Continue to apply regex extractions as fallbacks or for other metadata
+      // Do NOT return early here.
+    } catch (e) {
+      console.error(`Error parsing JSON from ${originalname}:`, e);
+      // Fallback to text-based extraction if JSON parsing fails
+    }
+  }
 
   // Helper function to apply regex extraction
   const applyRegexExtraction = (field, pattern, targetMetadataKey, parseFn = (val) => val) => {
@@ -74,14 +140,17 @@ const extractStructuredMetadata = (text, originalname, clientConfig) => {
     }
   }
 
-  // Number of Bathrooms (client-configurable)
-  applyRegexExtraction('listingBaths', null, 'num_bathrooms', (val) => parseInt(val, 10));
-  if (metadata.num_bathrooms === undefined) { // Fallback to existing logic if not extracted by client config
-    match = text.match(/(\d+)\s*(?:casas de banho|WC|W\.C\.)/i);
-    if (match) {
-      metadata.num_bathrooms = parseInt(match[1], 10);
-    } else {
-      metadata.num_bathrooms = null;
+  // Number of Bathrooms (client-configurable or fallback)
+  // Only apply if num_bathrooms was not set by JSON parsing
+  if (metadata.num_bathrooms === undefined || metadata.num_bathrooms === null) {
+    applyRegexExtraction('listingBaths', clientConfig.documentExtraction?.listingBaths?.pattern, 'num_bathrooms', (val) => parseInt(val, 10));
+    if (metadata.num_bathrooms === undefined || metadata.num_bathrooms === null) { // Fallback to existing logic if not extracted by client config or previous regex
+      match = text.match(/(\d+)\s*(?:casas de banho|WC|W\.C\.)/i);
+      if (match) {
+        metadata.num_bathrooms = parseInt(match[1], 10);
+      } else {
+        metadata.num_bathrooms = null;
+      }
     }
   }
   console.log(`Extracted num_bathrooms: ${metadata.num_bathrooms}`);
@@ -112,7 +181,7 @@ const extractStructuredMetadata = (text, originalname, clientConfig) => {
   console.log(`Extracted address: ${metadata.address}`);
 
   // Property Name (client-configurable)
-  applyRegexExtraction('listingName', null, 'property_name');
+  applyRegexExtraction('listingName', clientConfig.documentExtraction?.listingName?.pattern, 'property_name');
   if (metadata.property_name === undefined) { // Fallback to existing logic if not extracted by client config
     match = text.match(/^(.+?)\n\n/); // Capture text before first double newline
     if (match) {
@@ -131,9 +200,13 @@ const extractStructuredMetadata = (text, originalname, clientConfig) => {
   }
 
   // Price (€)
-  match = text.match(/Preço:\s*([\d.,]+)€/i);
-  if (match) {
-    metadata.price_eur = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+  applyRegexExtraction('listingPrice', clientConfig.documentExtraction?.listingPrice?.pattern, 'price_eur', (val) => parseFloat(val.replace(/\./g, '').replace(',', '.')));
+  if (metadata.price_eur === undefined || metadata.price_eur === null) { // Fallback to existing logic if not extracted by client config
+    match = text.match(/Preço:\s*([\d.,]+)€/i);
+    if (match) {
+      metadata.price_eur = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+      console.log(`[DEBUG] Price from text regex: ${metadata.price_eur}`); // Add debug log
+    }
   }
 
   // Boolean features (presence of keywords)
@@ -153,8 +226,115 @@ const extractStructuredMetadata = (text, originalname, clientConfig) => {
   if (/Aveiro/i.test(text)) metadata.location = 'Aveiro';
   if (/Lisboa/i.test(text)) metadata.location = 'Lisboa';
 
+  // Listing Status (e.g., 'available', 'reserved', 'sold')
+  // Listing Status (e.g., 'available', 'reserved', 'sold')
+  applyRegexExtraction('listingStatus', null, 'listing_status', (val) => val.toLowerCase());
+  if (metadata.listing_status === null) { // Fallback to existing logic if not extracted by client config
+    match = text.match(/(available|reserved|sold)/i);
+    if (match) {
+      metadata.listing_status = match[1].toLowerCase();
+    }
+  }
 
+  // Current State (e.g., 'project', 'building', 'finished')
+  applyRegexExtraction('currentState', null, 'current_state', (val) => val.toLowerCase());
+  if (metadata.current_state === null) { // Fallback to existing logic if not extracted by client config
+    match = text.match(/(project|building|finished)/i);
+    if (match) {
+      metadata.current_state = match[1].toLowerCase();
+    }
+  }
+
+  // Ensure listing_status has a default value if not extracted
+  if (metadata.listing_status === null) {
+    metadata.listing_status = 'available'; // Default to 'available'
+  }
+
+  // Ensure current_state has a default value if not extracted
+  if (metadata.current_state === null) {
+    metadata.current_state = 'finished'; // Default to 'finished'
+  }
+
+  console.log(`[DEBUG] Final extracted metadata:`, JSON.stringify(metadata, null, 2));
   return metadata;
+};
+
+/**
+ * Applies client-specific tagging rules to enrich vector metadata.
+ * @param {string} documentText The full text of the document.
+ * @param {string} originalname The original name of the file.
+ * @param {object} taggingRules The client-specific tagging rules from clientConfig.
+ * @param {object} currentMetadata The metadata object to enrich.
+ * @returns {object} The enriched metadata object.
+ */
+const applyClientTaggingRules = (documentText, originalname, taggingRules, currentMetadata) => {
+  const enrichedMetadata = { ...currentMetadata };
+  const documentType = originalname.split('.').pop().toLowerCase();
+
+  // Apply global tags
+  if (taggingRules.global_tags) {
+    taggingRules.global_tags.forEach(tag => {
+      enrichedMetadata[tag.field] = tag.value;
+    });
+  }
+
+  // Apply document type specific tags
+  if (taggingRules.document_type_tags) {
+    for (const typeKey in taggingRules.document_type_tags) {
+      // Check if the document matches the type (e.g., 'json', 'text/docx')
+      // This is a simplified check; a more robust solution might map file extensions to types
+      if (typeKey.includes(documentType) || (typeKey === 'json' && ['json'].includes(documentType)) || (typeKey === 'text/docx' && ['txt', 'docx', 'pdf'].includes(documentType))) {
+        const typeRules = taggingRules.document_type_tags[typeKey];
+
+        if (typeRules.source_type === 'json' && documentType === 'json') {
+          try {
+            const docJson = JSON.parse(documentText);
+            typeRules.fields.forEach(fieldRule => {
+              let value = docJson;
+              if (fieldRule.path) {
+                const pathParts = fieldRule.path.split('.');
+                for (const part of pathParts) {
+                  if (value && typeof value === 'object' && value.hasOwnProperty(part)) {
+                    value = value[part];
+                  } else {
+                    value = undefined; // Path not found
+                    break;
+                  }
+                }
+              } else if (fieldRule.value !== undefined) {
+                value = fieldRule.value;
+              }
+
+              if (value !== undefined && value !== null) {
+                if (fieldRule.transform === 'array_to_string' && Array.isArray(value)) {
+                  enrichedMetadata[fieldRule.name] = value.join(', ');
+                } else if (fieldRule.regex) {
+                  const regexMatch = String(value).match(new RegExp(fieldRule.regex));
+                  if (regexMatch && regexMatch[1]) {
+                    enrichedMetadata[fieldRule.name] = regexMatch[1];
+                  } else {
+                    enrichedMetadata[fieldRule.name] = value; // Fallback to original value if regex fails
+                  }
+                } else {
+                  enrichedMetadata[fieldRule.name] = value;
+                }
+              }
+            });
+          } catch (e) {
+            console.error(`Error parsing JSON for tagging: ${e.message}`);
+          }
+        } else if (typeRules.source_type === 'text/docx' && ['txt', 'docx', 'pdf'].includes(documentType)) {
+          typeRules.regex_rules.forEach(rule => {
+            const regex = new RegExp(rule.pattern, 'i');
+            if (regex.test(documentText) || regex.test(originalname)) { // Check both content and filename
+              enrichedMetadata[rule.tag_name] = rule.value || rule.pattern.replace(/\|/g, '/'); // Simple value or pattern
+            }
+          });
+        }
+      }
+    }
+  }
+  return enrichedMetadata;
 };
 
 /**
@@ -162,79 +342,123 @@ const extractStructuredMetadata = (text, originalname, clientConfig) => {
  * @param {object} params - The parameters for document processing.
  * @param {object} params.clientConfig - The client-specific configuration.
  * @param {object} params.file - The file object containing buffer and originalname.
- * @param {string} params.ingestionType - The type of ingestion (e.g., 'listing', 'general').
- * @param {object} params.metadata - Additional metadata for the document.
+ * @param {string} params.documentCategory - The category of the document (e.g., 'client', 'development', 'listing').
+ * @param {object} params.metadata - Additional metadata for the document (e.g., listing_id, development_id).
  * @returns {Promise<object>} An object indicating success or failure.
  */
 const processDocument = async ({
-  clientConfig,
+  clientConfig: initialClientConfig,
   file,
-  ingestionType,
+  documentCategory,
   metadata,
-}) => {
+}, dependencies = {}) => {
+  const {
+    genAI = defaultGenAI,
+    pinecone = defaultPinecone,
+    pineconeIndex = defaultPineconeIndex,
+    embeddingModel = defaultEmbeddingModel,
+    mammoth, // Passed to extractText
+    pdf,     // Passed to extractText
+    extractText: injectedExtractText, // Explicitly require extractText
+  } = dependencies;
+const { originalname, buffer } = file;
+
+  if (!injectedExtractText) {
+    throw new Error('extractText dependency must be provided to processDocument');
+  }
+
+  // Defensive check: Ensure clientConfig is not undefined and has expected structure
+  let clientConfig = initialClientConfig;
+  if (!clientConfig || !clientConfig.chunking_rules) {
+    console.error('Defensive check failed: clientConfig or chunking_rules is missing!', clientConfig);
+    clientConfig = clientConfig || { chunking_rules: {}, documentExtraction: {} };
+  }
+
+  // Ensure default clients are initialized if not provided via dependencies
+  initializeDefaultClients();
+
   console.log(
-    `[${clientConfig.clientName || clientConfig.clientId}] Starting document processing. Type: ${ingestionType}`
+    `[${clientConfig.clientName || clientConfig.clientId}] Starting document processing. Category: ${documentCategory}`
   );
 
   try {
-    // Debugging: Log clientConfig.ingestionPipeline
-    console.log(`[${clientConfig.clientName || clientConfig.clientId}] clientConfig.ingestionPipeline:`, JSON.stringify(clientConfig.ingestionPipeline, null, 2));
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] clientConfig.chunking_rules:`, JSON.stringify(clientConfig.chunking_rules, null, 2));
+    console.log('clientConfig at line 212:', clientConfig);
 
-    // Extract chunking settings from clientConfig.ingestionPipeline
-    const chunkingSettings = clientConfig.ingestionPipeline.find(
-      (pipeline) => pipeline.name === 'template-chunker'
-    )?.settings;
+    // Determine chunking strategy based on document type and client config
+    const documentType = originalname.split('.').pop().toLowerCase();
+    const chunkingStrategy = clientConfig.chunking_rules?.document_types?.[documentType]?.strategy || 'semantic_paragraph';
+    const chunkSize = clientConfig.chunking_rules?.document_types?.[documentType]?.max_tokens || 1000;
+    const chunkOverlap = clientConfig.chunking_rules?.document_types?.[documentType]?.overlap_tokens || 200;
 
-    // Debugging: Log chunkingSettings
-    console.log(`[${clientConfig.clientName || clientConfig.clientId}] chunkingSettings:`, JSON.stringify(chunkingSettings, null, 2));
-
-
-    const chunkSize = chunkingSettings?.chunkSize || 1000; // Default if not found
-    const chunkOverlap = chunkingSettings?.chunkOverlap || 200; // Default if not found
-
-    // 1. Extract text from the document
-    const { originalname, buffer } = file;
+    
     console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracting text from ${originalname}...`);
-    const documentText = await extractText(buffer, originalname);
+    const documentText = await injectedExtractText(buffer, originalname, { mammoth, pdf });
 
-    // 2. Extract structured metadata
-    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracting structured metadata...`);
-    const structuredMetadata = extractStructuredMetadata(documentText, originalname, clientConfig); // Pass originalname and clientConfig
-    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracted metadata:`, JSON.stringify(structuredMetadata, null, 2));
+    let currentListingId = null;
+    let currentDevelopmentId = null;
+    let structuredMetadata = {};
 
-    // Prepare amenities array from boolean flags
-    const amenitiesArray = Object.keys(structuredMetadata).filter(key =>
-      key.startsWith('has_') && structuredMetadata[key]
-    ).map(key => key.replace('has_', '').replace(/_/g, ' '));
+    if (documentCategory === 'listing') {
+      currentListingId = metadata.listing_id || null;
+      currentDevelopmentId = metadata.development_id || null;
 
-    // 2.5. Upsert listing data to Supabase 'listings' table if listing_id is present
-    if (metadata.listing_id) {
-      const { error: upsertError } = await supabase
-        .from('listings')
-        .upsert({
-          id: metadata.listing_id,
-          name: structuredMetadata.property_name || originalname, // Use extracted property_name
-          address: structuredMetadata.address || null,
-          type: structuredMetadata.type || null,
-          price: structuredMetadata.price_eur ? structuredMetadata.price_eur.toString() : null, // Convert number to string
-          beds: structuredMetadata.num_bedrooms || null,
-          baths: structuredMetadata.num_bathrooms || null,
-          amenities: amenitiesArray.length > 0 ? amenitiesArray : null,
-          development_id: metadata.development_id || null,
-          // created_at will default on the database side
-        }, { onConflict: 'id' }); // Upsert based on 'id'
+      // 2. Extract structured metadata for listings
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracting structured metadata for listing...`);
+      structuredMetadata = extractStructuredMetadata(documentText, originalname, clientConfig);
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracted metadata:`, JSON.stringify(structuredMetadata, null, 2));
 
-      if (upsertError) {
-        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error upserting listing to Supabase:`, upsertError);
+      // Prepare amenities array from boolean flags
+      const amenitiesArray = Object.keys(structuredMetadata).filter(key =>
+        key.startsWith('has_') && structuredMetadata[key]
+      ).map(key => key.replace('has_', '').replace(/_/g, ' '));
+
+      const listingData = {
+        name: structuredMetadata.property_name || originalname,
+        address: structuredMetadata.address || null,
+        type: structuredMetadata.type || null, // Use the extracted type
+        price: structuredMetadata.price_eur || null, // Pass as number directly
+        beds: structuredMetadata.num_bedrooms || null,
+        baths: structuredMetadata.num_bathrooms || null, // Use the extracted bathrooms
+        amenities: amenitiesArray.length > 0 ? amenitiesArray : null,
+        listing_status: structuredMetadata.listing_status || null,
+        current_state: structuredMetadata.current_state || null,
+        development_id: currentDevelopmentId, // Use currentDevelopmentId
+        client_id: clientConfig.clientId,
+        client_name: clientConfig.clientName || null, // Add client_name
+      };
+
+      if (currentListingId) {
+        // Update existing listing
+        const { success, error } = await listingService.updateListing(currentListingId, listingData);
+        if (error) {
+          console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error updating listing ${currentListingId} in Supabase:`, error);
+          throw new Error(`Failed to update listing: ${error.message}`);
+        }
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing ${currentListingId} updated in Supabase.`);
       } else {
-        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing ${metadata.listing_id} upserted to Supabase.`);
+        // Create new listing
+        listingData.id = uuidv4(); // Generate UUID for new listing
+        const { listing, error } = await listingService.createListing(listingData);
+        if (error) {
+          console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error creating new listing in Supabase:`, error);
+          throw new Error(`Failed to create listing: ${error.message}`);
+        }
+        // Only assign currentListingId if listing was successfully created
+        if (listing) {
+          currentListingId = listing.id;
+          console.log(`[${clientConfig.clientName || clientConfig.clientId}] New listing ${currentListingId} created in Supabase.`);
+        } else {
+          // This case should ideally be caught by the error check above, but as a safeguard
+          throw new Error(`Failed to create listing: listing object is undefined.`);
+        }
       }
 
       // Upsert listing metrics to Supabase 'listing_metrics' table
       const { error: metricsUpsertError } = await supabase
         .from('listing_metrics')
         .upsert({
-          listing_id: metadata.listing_id,
+          listing_id: currentListingId,
           chatbot_views: 0, // Initialize to 0
           inquiries: 0,     // Initialize to 0
           unacknowledged_hot_leads: 0,     // Initialize to 0
@@ -248,17 +472,41 @@ const processDocument = async ({
       if (metricsUpsertError) {
         console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error upserting listing metrics to Supabase:`, metricsUpsertError);
       } else {
-        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing metrics for ${metadata.listing_id} upserted to Supabase.`);
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing metrics for ${currentListingId} upserted to Supabase.`);
+      }
+    } else if (documentCategory === 'development') {
+      currentDevelopmentId = metadata.development_id || null;
+      if (!currentDevelopmentId) {
+        // Create new development if ID not provided
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Creating new development in Supabase...`);
+        const { development, error } = await developmentService.createDevelopment({
+          name: originalname.replace(/\.(pdf|docx)$/i, ''), // Use filename as name
+          client_id: clientConfig.clientId,
+        });
+        if (error) {
+          console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error creating new development in Supabase:`, error);
+          throw new Error(`Failed to create development: ${error.message}`);
+        }
+        currentDevelopmentId = development.id;
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] New development ${currentDevelopmentId} created in Supabase.`);
+      } else {
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using existing development ID: ${currentDevelopmentId}.`);
       }
     }
+    // For 'client' documents, currentListingId and currentDevelopmentId will remain null
 
     // 3. Chunk the text based on client's configuration
-    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Chunking document with chunkSize: ${chunkSize}, chunkOverlap: ${chunkOverlap}...`);
-    const textSplitter = new RecursiveCharacterTextSplitter({
-      chunkSize: chunkSize,
-      chunkOverlap: chunkOverlap,
-    });
-    const chunks = await textSplitter.splitText(documentText);
+    console.log(`[${clientConfig.clientName || clientConfig.clientId}] Chunking document with strategy: ${chunkingStrategy}, chunkSize: ${chunkSize}, chunkOverlap: ${chunkOverlap}...`);
+    let chunks = [];
+    if (chunkingStrategy === 'whole_document') {
+      chunks = [documentText];
+    } else {
+      const textSplitter = new RecursiveCharacterTextSplitter({
+        chunkSize: chunkSize,
+        chunkOverlap: chunkOverlap,
+      });
+      chunks = await textSplitter.splitText(documentText);
+    }
 
     // 4. Generate embeddings for each chunk and prepare for upsert
     console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generating embeddings for ${chunks.length} chunks...`);
@@ -275,33 +523,34 @@ const processDocument = async ({
         source: originalname,
         text: chunk, // Store the chunk text in metadata
         chunk_id: i,
-        ...structuredMetadata, // Add extracted structured metadata
+        // Apply structured metadata and client-defined tagging rules
+        ...structuredMetadata, // Keep existing structured metadata
       };
 
-      // Conditionally add listing_id, listing_url, and development_id if they are not null
-      if (metadata.listing_id !== null) {
-        vectorMetadata.listing_id = metadata.listing_id;
+      // Conditionally add listing_id and development_id based on category
+      if (documentCategory === 'listing' && currentListingId) {
+        vectorMetadata.listing_id = currentListingId;
       }
-      if (metadata.listing_url) {
-        vectorMetadata.listing_url = metadata.listing_url;
-      }
-      if (metadata.development_id !== null) {
-        vectorMetadata.development_id = metadata.development_id;
+      if ((documentCategory === 'development' || documentCategory === 'listing') && currentDevelopmentId) {
+        vectorMetadata.development_id = currentDevelopmentId;
       }
 
-      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Metadata for vector ${i}:`, JSON.stringify(vectorMetadata, null, 2));
+      // Apply client-specific tagging rules to enrich the metadata
+      const finalVectorMetadata = applyClientTaggingRules(documentText, originalname, clientConfig.tagging_rules, vectorMetadata);
+
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Metadata for vector ${i}:`, JSON.stringify(finalVectorMetadata, null, 2));
 
       vectors.push({
         id: `${clientConfig.clientId}-${originalname}-${i}`, // Unique ID for each chunk
         values: embeddingResult.embedding.values,
-        metadata: vectorMetadata,
+        metadata: finalVectorMetadata,
       });
     }
 
     // 5. Upsert chunks with metadata into the vector database
     console.log(
       `[${clientConfig.clientName || clientConfig.clientId}] Upserting ${
-        vectors.length
+      vectors.length
       } vectors into Pinecone index '${process.env.PINECONE_INDEX_NAME}' namespace '${process.env.PINECONE_NAMESPACE}'...`
     );
     await pineconeIndex.namespace(process.env.PINECONE_NAMESPACE).upsert(vectors);
@@ -319,4 +568,7 @@ const processDocument = async ({
 
 module.exports = {
   processDocument,
+  extractText, // Export extractText for testing and potential external use
+  extractStructuredMetadata, // Export for testing and potential external use
+  applyClientTaggingRules, // Export for testing
 };

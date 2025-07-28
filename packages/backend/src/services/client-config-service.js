@@ -32,7 +32,8 @@ async function getClientConfig(clientId) {
     leadScoringRules: data.lead_scoring_rules,
     documentExtraction: data.document_extraction,
     chatHistoryTaggingRules: data.chat_history_tagging_rules,
-    ingestionPipeline: data.ingestion_pipeline,
+    chunking_rules: data.chunking_rules, // Add new column
+    tagging_rules: data.tagging_rules,   // Add new column
   };
 
   return clientConfig;

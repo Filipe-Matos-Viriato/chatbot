@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { Pinecone } = require('@pinecone-database/pinecone');
 const userService = require('./services/user-service'); // Import user service
+const listingService = require('./services/listing-service'); // Import listing service
 
 // Initialize clients
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
@@ -313,7 +314,46 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   return { matches };
 }
 
+function isAggregativePriceQuery(query) {
+  const lowerCaseQuery = query.toLowerCase();
+  return (
+    lowerCaseQuery.includes('mais barato') ||
+    lowerCaseQuery.includes('preço mais baixo') ||
+    lowerCaseQuery.includes('preço mínimo') ||
+    lowerCaseQuery.includes('mais caro') ||
+    lowerCaseQuery.includes('preço mais alto') ||
+    lowerCaseQuery.includes('preço máximo')
+  );
+}
+
 async function generateResponse(query, clientConfig, externalContext = null, userContext = null) {
+  let aggregativeContext = '';
+
+  // Check for aggregative price queries
+  if (isAggregativePriceQuery(query)) {
+    try {
+      if (query.toLowerCase().includes('mais barato') || query.toLowerCase().includes('preço mínimo')) {
+        const minPrice = await listingService.getMinPrice(clientConfig.clientId);
+        if (minPrice !== null) {
+          aggregativeContext = `A propriedade com o preço mais baixo disponível é de ${minPrice}€.`;
+        } else {
+          aggregativeContext = `Não foi possível encontrar o preço mínimo nos documentos fornecidos.`;
+        }
+      } else if (query.toLowerCase().includes('mais caro') || query.toLowerCase().includes('preço máximo')) {
+        const maxPrice = await listingService.getMaxPrice(clientConfig.clientId);
+        if (maxPrice !== null) {
+          aggregativeContext = `A propriedade com o preço mais alto disponível é de ${maxPrice}€.`;
+        } else {
+          aggregativeContext = `Não foi possível encontrar o preço máximo nos documentos fornecidos.`;
+        }
+      }
+      console.log(`Aggregative Price Context: ${aggregativeContext}`);
+    } catch (error) {
+      console.error('Error fetching aggregative price:', error);
+      aggregativeContext = `Ocorreu um erro ao tentar obter informações de preço.`;
+    }
+  }
+
   // 1. Generate embedding for the user's query
   const queryEmbedding = await embeddingModel.embedContent({
     content: { parts: [{ text: query }] },
@@ -334,23 +374,15 @@ async function generateResponse(query, clientConfig, externalContext = null, use
     .join('\n\n---\n\n');
 
   // 4. Construct the prompt using the client's configuration
-  let externalContextString = '';
-  if (externalContext) {
-    externalContextString = `
-    This is the additional context provided by the application:
-    ${JSON.stringify(externalContext)}
-    `;
-  }
-
   const prompt = `
     ${clientConfig.prompts.systemInstruction}
     Answer the user's question based ONLY on the context provided below.
     If the answer is not in the context, say that you do not have enough information to answer that question based on the provided documents.
-    ${externalContextString}
 
     Context:
     ${context}
-
+    ${aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''}
+ 
     Question:
     ${query}
   `;

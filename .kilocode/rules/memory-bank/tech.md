@@ -10,6 +10,7 @@
   - `dotenv`: To manage environment variables from a `.env` file.
   - `express`: Web server framework.
   - **Regex for Data Extraction:** Used in the ingestion pipeline for flexible, client-configurable metadata extraction (e.g., `listings.name`, `listings.baths`).
+  - `@supabase/supabase-js`: For interacting with Supabase database, including direct queries for aggregative data in the RAG service.
 
 ## Frontend Technologies
 - **Framework:** React

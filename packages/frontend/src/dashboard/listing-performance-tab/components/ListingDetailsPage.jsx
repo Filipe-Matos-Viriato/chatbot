@@ -25,8 +25,8 @@ const ListingDetailsPage = () => {
         const fetchListingDetails = async () => {
             try {
                 const [listingResponse, commonQuestionsResponse] = await Promise.all([
-                    fetch(`http://localhost:3006/api/listing/${id}`),
-                    fetch(`http://localhost:3006/api/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
+                    fetch(`http://localhost:3007/api/listing/${id}`),
+                    fetch(`http://localhost:3007/api/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
                 ]);
 
                 if (!listingResponse.ok) {

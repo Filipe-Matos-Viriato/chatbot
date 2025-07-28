@@ -1,0 +1,27 @@
+{
+  "url_pt": "https://upinvestments.pt/pt/imoveis/aveiro/4278",
+  "url_en": "https://upinvestments.pt/en/real-estate/aveiro/4278",
+  "preço": "203550€",
+  "piso": "0",
+  "tipologia": "T1",
+  "bloco": "2",
+  "fracao": "A",
+  "area_bruta_m2": 67.85,
+  "area_privativa_m2": 67.85,
+  "terracos_m2": null,
+  "descricao": {
+    "divisoes": [
+      { "nome": "Sala e cozinha (open-space)", "area_m2": 30.53 },
+      { "nome": "Quarto", "area_m2": 16.96 },
+      { "nome": "Casa de banho", "area_m2": 6.79 },
+      { "nome": "Hall e circulação", "area_m2": 13.57 }
+    ],
+    "luz_natural": "Luz natural abundante em todas as divisões, através de amplas janelas",
+    "detalhes_extra": [
+      "Cozinha totalmente equipada",
+      "Lugar de garagem",
+      "Arrecadação",
+      "Vidros duplos"
+    ]
+  }
+}

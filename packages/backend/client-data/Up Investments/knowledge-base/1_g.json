@@ -1,0 +1,30 @@
+{
+  
+  "url_pt": "https://upinvestments.pt/pt/imoveis/aveiro/4276",
+  "url_en": "https://upinvestments.pt/en/real-estate/aveiro/4276",
+  "preço": "316860€",
+  "piso": "1",
+  "tipologia": "T2",
+  "bloco": "1",
+  "fracao": "G",
+  "area_bruta_m2": 105.62,
+  "area_privativa_m2": 105.62,
+  "terracos_m2": null,
+  "descricao": {
+    "divisoes": [
+      { "nome": "Sala", "area_m2": 36.97 },
+      { "nome": "Cozinha", "area_m2": 10.56 },
+      { "nome": "Quarto 1", "area_m2": 21.12 },
+      { "nome": "Quarto 2", "area_m2": 21.12 },
+      { "nome": "Casa de banho", "area_m2": 10.56 },
+      { "nome": "Hall e circulação", "area_m2": 5.28 }
+    ],
+    "luz_natural": "Luz natural abundante em sala e quartos",
+    "detalhes_extra": [
+      "Cozinha totalmente equipada",
+      "Lugar de garagem",
+      "Arrecadação",
+      "Vidros duplos"
+    ]
+  }
+}

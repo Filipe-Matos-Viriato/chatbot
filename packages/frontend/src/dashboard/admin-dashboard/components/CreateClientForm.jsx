@@ -3,7 +3,6 @@ import axios from 'axios';
 
 const CreateClientForm = ({ fetchClients }) => {
   const [newClient, setNewClient] = useState({
-    client_id: '',
     client_name: '',
     chatbot_name: '',
   });
@@ -17,8 +16,8 @@ const CreateClientForm = ({ fetchClients }) => {
   const handleCreateClient = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('http://localhost:3006/v1/clients', newClient);
-      setNewClient({ client_id: '', client_name: '', chatbot_name: '' }); // Clear form
+      await axios.post('http://localhost:3007/v1/clients', newClient);
+      setNewClient({ client_name: '', chatbot_name: '' }); // Clear form
       fetchClients(); // Refresh list
       setError(null); // Clear any previous errors
     } catch (err) {
@@ -31,18 +30,6 @@ const CreateClientForm = ({ fetchClients }) => {
       <h3 className="text-xl font-semibold mb-4">Create New Client</h3>
       {error && <p className="text-red-500 mb-4">Error creating client: {error.message}</p>}
       <form onSubmit={handleCreateClient} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <label htmlFor="client_id" className="block text-sm font-medium text-gray-700">Client ID</label>
-          <input
-            type="text"
-            name="client_id"
-            id="client_id"
-            value={newClient.client_id}
-            onChange={handleInputChange}
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-            required
-          />
-        </div>
         <div>
           <label htmlFor="client_name" className="block text-sm font-medium text-gray-700">Client Name</label>
           <input

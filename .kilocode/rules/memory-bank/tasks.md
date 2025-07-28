@@ -52,3 +52,11 @@ The lead score is a hybrid score (maximum 100 points) composed of three main com
 -   **Hot Lead (70–100 pts):** Ready for agent follow-up or direct sales.
 -   **Warm Lead (40–69 pts):** Nurture with follow-up content or offers.
 -   **Cold Lead (<40 pts):** Keep in CRM for future re-engagement.
+
+## Troubleshoot Ingestion Service Unit Test Failures
+**Status:** Pending
+**Goal:** Investigate and fix the `AssertionError` failures in `packages/backend/test/unit/ingestion.test.js` related to `mockExtractText.calledOnce` and `mockPineconeIndex.upsert.called`.
+**Details:** After fixing the `TypeError: Cannot stub non-existent property extractText`, new assertion errors appeared, indicating issues with test setup or logic regarding `extractText` and Pinecone upsert calls. The `extractText` stub's `calledOnce` property is not behaving as expected across test runs, and the `upsert` is being called in the unsupported file type test when it shouldn't be.
+**Files to investigate:**
+- `packages/backend/test/unit/ingestion.test.js`
+- `packages/backend/src/services/ingestion-service.js`

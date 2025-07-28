@@ -6,13 +6,15 @@
   "scripts": {
     "start": "node -r dotenv/config src/index.js",
     "ingest-test-data": "node -r dotenv/config scripts/ingest-test-data.js",
-    "migrate-configs": "node -r dotenv/config scripts/migrate-client-configs-to-db.js"
+    "migrate-configs": "node -r dotenv/config scripts/migrate-client-configs-to-db.js",
+    "test": "npx mocha --require ./test/setup.js test/**/*.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.12.0",
     "@pinecone-database/pinecone": "^2.2.2",
     "@supabase/supabase-js": "^2.51.0",
     "axios": "^1.10.0",
+    "chai": "^5.2.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -21,9 +23,11 @@
     "langchain": "^0.3.29",
     "mammoth": "^1.9.1",
     "ml-kmeans": "^6.0.0",
-    "multer": "^2.0.1",
+    "multer": "^2.0.2",
     "node-cron": "^4.2.1",
-    "pdf-parse": "^1.1.1"
+    "pdf-parse": "^1.1.1",
+    "sinon": "^21.0.0",
+    "supertest": "^7.1.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.3"

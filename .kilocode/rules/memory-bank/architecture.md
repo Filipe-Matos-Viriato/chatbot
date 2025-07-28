@@ -19,8 +19,8 @@ The backend is a Node.js application using Express.js. Its primary responsibilit
 - **`src/index.js` (API Gateway):** The main entry point. It validates `client_id` on all incoming requests and routes them to the appropriate services.
 - **Client Configuration Service (`src/services/client-config-service.js`):** Loads and serves client-specific configurations from the **Supabase `clients` table**. This governs everything from URL pattern matching for context extraction to fallback behavior.
 - **`src/rag-service.js` (RAG Service):** Executes the RAG pipeline.
-  - **Context-Filtered Retrieval:** It performs a **Hybrid Search** that is strictly filtered by `client_id` and, when available, `listing_id`, `development_id`, or **user-specific assigned listings** (for agents).
-  - **Dynamic Prompt Construction:** Creates a detailed prompt using instructions and templates defined in the client's configuration.
+-   **Context-Filtered Retrieval:** It performs a **Hybrid Search** that is strictly filtered by `client_id` and, when available, `listing_id`, `development_id`, or **user-specific assigned listings** (for agents). It also now directly queries the Supabase `listings` table for aggregative data (e.g., min/max prices) when relevant queries are detected.
+-   **Dynamic Prompt Construction:** Creates a detailed prompt using instructions and templates defined in the client's configuration, now also incorporating aggregated structured data from Supabase when applicable.
 - **`src/services/user-service.js` (User Management Service):** Manages user accounts (admins and promoters) in the **Supabase `users` table** and their assigned listings in the **Supabase `agent_listings` table**. Provides CRUD operations and methods for fetching user-specific data.
 - **Future: Chat History for RAG:** Embeddings of chat history turns can be stored in Pinecone for RAG context, referencing full text in Supabase.
 - **Asynchronous Document Ingestion Pipeline:** A separate, configurable service responsible for:
@@ -117,6 +117,8 @@ graph TD
         Y -- "Drives" --> K;
         K -- "Chunk, Tag, Embed" --> N[(Vector DB <br> Pinecone)];
         E -- "Hybrid Search with client_id, listing_id, development_id, user_id filters" --> N;
+        C -- "Aggregative Queries (e.g., min/max price)" --> S[(Supabase <br> Listings Table)];
+        S -- "Aggregated Data" --> E;
     end
 
     style G fill:#f9f,stroke:#333,stroke-width:2px
@@ -135,7 +137,7 @@ Clients can upload two types of documents:
 - **Development-Specific:** Tied to a unique `development_id`.
 - **General:** Account-wide documents (e.g., company FAQs) not tied to a specific listing or development. The `listing_id` and `development_id` are stored as `null`.
 
-The frontend UI includes confirmation dialogues to prevent miscategorization. On the backend, an asynchronous worker processes these submissions, chunks and tags the content based on client rules, and upserts the vectors into Pinecone with the appropriate `{ client_id, listing_id, development_id }` metadata.
+The frontend UI includes confirmation dialogues to prevent miscategorization. On the backend, an asynchronous worker processes these submissions, chunks and tags the content based on client rules, and **simultaneously updates the Supabase `listings` table with extracted structured metadata and upserts the vectors into Pinecone** with the appropriate `{ client_id, listing_id, development_id }` metadata.
 
 #### Retrieval Logic
 The RAG service uses a refined retrieval strategy to ensure comprehensive and context-aware responses. When a query is received:
@@ -166,6 +168,7 @@ graph TD
     subgraph Backend
         E -- "Adds to" --> F[Ingestion Queue];
         G[Async Worker] -- "Processes job" --> F;
+        G -- "Extracts structured metadata" --> I[(Supabase <br> Listings Table)];
         G -- "Upserts vector with metadata<br>(listing_id: '123' or null, development_id: 'dev-456' or null)" --> H[(Vector DB)];
     end
 
@@ -182,6 +185,9 @@ graph TD
     end
 
     style A fill:#f9f,stroke:#333,stroke-width:2px
+    style I fill:#f9f,stroke:#333,stroke-width:2px
+    style H fill:#f9f,stroke:#333,stroke-width:2px
+    style P fill:#f9f,stroke:#333,stroke-width:2px
 end
 ```
 

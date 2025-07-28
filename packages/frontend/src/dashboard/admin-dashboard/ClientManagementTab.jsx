@@ -3,6 +3,7 @@ import axios from 'axios';
 import CreateClientForm from './components/CreateClientForm';
 import ClientListTable from './components/ClientListTable';
 import EditClientForm from './components/EditClientForm';
+import ClientSearch from './components/ClientSearch';
 
 const ClientManagementTab = () => {
   const [clients, setClients] = useState([]);
@@ -14,17 +15,24 @@ const ClientManagementTab = () => {
     client_name: '',
     chatbot_name: '',
     document_extraction: '',
-    ingestion_pipeline: '',
+    chunking_rules: '',
+    tagging_rules: '',
     url_pattern: '',
     prompts: '',
     chat_history_tagging_rules: '',
     lead_scoring_rules: '',
   });
 
-  const fetchClients = async () => {
+  const fetchClients = async (searchQuery = '') => {
     try {
-      const response = await axios.get('http://localhost:3006/v1/clients');
-      setClients(response.data);
+      const response = await axios.get('http://localhost:3007/v1/clients');
+      let filteredClients = response.data;
+      if (searchQuery) {
+        filteredClients = response.data.filter(client =>
+          client.client_name.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      }
+      setClients(filteredClients);
       setError(null);
     } catch (err) {
       setError(err);
@@ -38,23 +46,28 @@ const ClientManagementTab = () => {
   }, []);
 
   const handleEditClick = (client) => {
-    setEditingClient(client);
-    setEditFormData({
-      client_id: client.client_id,
-      client_name: client.client_name,
-      chatbot_name: client.chatbot_name,
-      document_extraction: client.document_extraction ? JSON.stringify(client.document_extraction, null, 2) : '',
-      ingestion_pipeline: client.ingestion_pipeline ? JSON.stringify(client.ingestion_pipeline, null, 2) : '',
-      url_pattern: client.url_pattern || '',
-      prompts: client.prompts ? JSON.stringify(client.prompts, null, 2) : '',
-      chat_history_tagging_rules: client.chat_history_tagging_rules ? JSON.stringify(client.chat_history_tagging_rules, null, 2) : '',
-      lead_scoring_rules: client.lead_scoring_rules ? JSON.stringify(client.lead_scoring_rules, null, 2) : '',
-    });
+    if (editingClient && editingClient.client_id === client.client_id) {
+      setEditingClient(null); // Close the form if the same client is clicked again
+    } else {
+      setEditingClient(client);
+      setEditFormData({
+        client_id: client.client_id,
+        client_name: client.client_name,
+        chatbot_name: client.chatbot_name,
+        document_extraction: client.document_extraction ? JSON.stringify(client.document_extraction, null, 2) : '',
+        chunking_rules: client.chunking_rules ? JSON.stringify(client.chunking_rules, null, 2) : '',
+        tagging_rules: client.tagging_rules ? JSON.stringify(client.tagging_rules, null, 2) : '',
+        url_pattern: client.url_pattern || '',
+        prompts: client.prompts ? JSON.stringify(client.prompts, null, 2) : '',
+        chat_history_tagging_rules: client.chat_history_tagging_rules ? JSON.stringify(client.chat_history_tagging_rules, null, 2) : '',
+        lead_scoring_rules: client.lead_scoring_rules ? JSON.stringify(client.lead_scoring_rules, null, 2) : '',
+      });
+    }
   };
 
   const handleDeleteClient = async (clientId) => {
     try {
-      await axios.delete(`http://localhost:3006/v1/clients/${clientId}`);
+      await axios.delete(`http://localhost:3007/v1/clients/${clientId}`);
       fetchClients();
     } catch (err) {
       setError(err);
@@ -70,6 +83,8 @@ const ClientManagementTab = () => {
       {error && <p className="text-red-500 mb-4">Error: {error.message}</p>}
 
       <CreateClientForm fetchClients={fetchClients} />
+
+      <ClientSearch onSearch={fetchClients} />
 
       <ClientListTable
         clients={clients}

@@ -1,11 +1,27 @@
 # Project Context
 
 ## Current Work Focus
-The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeline to ensure accurate and complete answers for both general and context-specific queries, particularly for attribute-based and comparative questions. The Supabase integration for persistent visitor data storage has been successfully completed.
+The primary focus is on ensuring accurate and complete data ingestion into Supabase and Pinecone, enabling robust RAG (Retrieval-Augmented Generation) capabilities for both general and context-specific queries, including aggregative questions. The Supabase integration for persistent visitor data storage has been successfully completed.
 
 - **Common Questions Feature Status:** The "Common Questions about this Listing" feature now leverages pre-calculated and pre-clustered questions for improved performance and accuracy. The in-process K-Means clustering algorithm has been implemented to group semantically similar questions, and a dedicated API endpoint serves these pre-calculated common questions.
 
 ## Recent Changes
+- **Ingestion Service Enhancements (`packages/backend/src/services/ingestion-service.js`):**
+    - Prioritized JSON extraction for `num_bathrooms` and `price_eur`, ensuring values from JSON are not overwritten by text-based regex fallbacks.
+    - Added `console.log` statements for debugging `price_eur` extraction.
+    - Fixed `TypeError: Cannot read properties of undefined (reading 'id')` during listing creation.
+    - Ensured `client_name` is populated in the `listings` table.
+- **Listing Service Enhancements (`packages/backend/src/services/listing-service.js`):**
+    - Added `getMinPrice(clientId)` and `getMaxPrice(clientId)` functions to efficiently retrieve minimum and maximum prices from the Supabase `listings` table.
+- **RAG Service Enhancements (`packages/backend/src/rag-service.js`):**
+    - Implemented logic to detect aggregative price queries (e.g., "mais barato", "mais caro").
+    - When such queries are detected, it now fetches the min/max price directly from Supabase using the new `listingService` functions.
+    - This aggregated price information is then injected into the LLM prompt as additional context, enabling the chatbot to answer these types of questions.
+- **Client Configuration Updates (User Action):**
+    - User updated the `document_extraction` column in Supabase for "Up Investments" with new regex patterns for `listingBaths` and `listingPrice`.
+    - User fixed malformed JSON knowledge base files.
+    - User changed the `price` column in the Supabase `listings` table to a numeric data type.
+- **Streamlined Listing Ingestion:** Clarified and confirmed the process where adding a listing simultaneously updates both the Supabase `listings` table (with extracted structured metadata) and Pinecone (with processed content and metadata), ensuring data consistency and a streamlined workflow.
 - **Common Questions Pre-calculation & API:** Implemented an in-process K-Means clustering algorithm in `packages/backend/scripts/cluster-questions.js` to pre-calculate and pre-cluster common questions. A new API endpoint `/api/common-questions` in `packages/backend/src/index.js` now serves this pre-calculated data, and the frontend (`packages/frontend/src/dashboard/listing-performance-tab/components/ListingDetailsPage.jsx`) has been updated to consume it. The old on-the-fly clustering logic has been removed from the `/api/listing/:id` endpoint.
 - **Optimized Listing Details Page Data Fetching:** Implemented `Promise.all` for concurrent Supabase fetches (`listings`, `listing_metrics`, `unansweredQuestions`, `handoffs`) in `packages/backend/src/index.js` to improve page load performance.
 - **Reduced Backend Console Verbosity:** Removed excessive `console.log` statements from the common questions grouping logic in `packages/backend/src/index.js` to prevent console flooding.
@@ -53,8 +69,13 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
         - Created `packages/backend/src/services/user-service.js` for user management (CRUD operations, agent-listing assignments).
         - Added new API endpoints in `packages/backend/src/index.js` for user management.
         - Modified `packages/backend/src/rag-service.js` to support user/agent filtering during Pinecone retrieval, ensuring agents only access their assigned listings.
+- **Client Ingestion Configuration Refactoring:**
+    - Split the `ingestion_pipeline` column in the Supabase `clients` table into two new JSONB columns: `chunking_rules` and `tagging_rules`.
+    - Updated frontend components (`packages/frontend/src/dashboard/admin-dashboard/ClientManagementTab.jsx`, `packages/frontend/src/dashboard/admin-dashboard/components/EditClientForm.jsx`) to use the new `chunking_rules` and `tagging_rules` fields, and removed references to the old `ingestion_pipeline` field.
+    - Created new React components `ChunkingRulesEditor.jsx` and `TaggingRulesEditor.jsx` to manage these new fields in the admin dashboard.
 
 ## Next Steps
+- **Test Chatbot Functionality:** Verify that the chatbot can now correctly answer aggregative price queries (e.g., "qual é o preço mais barato?", "qual é o preço mais caro?").
 - **Client Dashboard Implementation:**
     - **Phase 1 (Current Focus):**
         - Connect to Supabase (Frontend - Initial): Directly fetch existing visitor data from Supabase within Dashboard.jsx to replace fake data.
@@ -78,6 +99,7 @@ The primary focus is on refining the RAG (Retrieval-Augmented Generation) pipeli
     - Ensure Consistent Context Passing: Further debug the frontend-to-iframe `postMessage` mechanism to guarantee consistent context delivery, as some inconsistencies were observed.
 - **Future Enhancements:**
     - **NLP Analysis for Chat History Tagging:** Implement advanced NLP techniques (e.g., named entity recognition, topic modeling) to automatically generate richer, more granular tags for chat messages, enhancing context-aware retrieval.
+- **Troubleshoot Ingestion Service Unit Test Failures:** Investigate and fix the `AssertionError` failures in `packages/backend/test/unit/ingestion.test.js` related to `mockExtractText.calledOnce` and `mockPineconeIndex.upsert.called`.
 
 ## Current Dashboard Implementation Status
 The dashboard is now correctly displaying the "New Hot Leads" metric. The previous issues with Tailwind CSS and Supabase schema have been resolved.

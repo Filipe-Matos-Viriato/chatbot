@@ -22,7 +22,7 @@ class ChatHistoryService {
 
   async generateEmbedding(text) {
     try {
-      const result = await embeddingModel.embedContent({ content: text });
+      const result = await embeddingModel.embedContent({ content: { parts: [{ text: text }] } });
       return result.embedding.values;
     } catch (error) {
       console.error("Error generating embedding:", error);

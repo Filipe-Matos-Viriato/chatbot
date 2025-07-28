@@ -1,7 +1,9 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import DocumentExtractionEditor from './DocumentExtractionEditor';
-import IngestionPipelineEditor from './IngestionPipelineEditor';
+import ChunkingRulesEditor from './ChunkingRulesEditor';
+import TaggingRulesEditor from './TaggingRulesEditor';
 import UrlPatternEditor from './UrlPatternEditor';
 import PromptsEditor from './PromptsEditor';
 import ChatHistoryTaggingRulesEditor from './ChatHistoryTaggingRulesEditor';
@@ -18,7 +20,7 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
     e.preventDefault();
     try {
       const dataToSend = { ...editFormData };
-      const jsonFields = ['document_extraction', 'ingestion_pipeline', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules'];
+      const jsonFields = ['document_extraction', 'chunking_rules', 'tagging_rules', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules'];
 
       for (const field of jsonFields) {
         if (dataToSend[field]) {
@@ -33,7 +35,7 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
         }
       }
 
-      await axios.put(`http://localhost:3006/v1/clients/${editingClient.client_id}`, dataToSend);
+      await axios.put(`http://localhost:3007/v1/clients/${editingClient.client_id}`, dataToSend);
       setEditingClient(null);
       fetchClients();
       setError(null);
@@ -46,18 +48,6 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
     <div className="mt-8 p-4 border rounded shadow-sm bg-white">
       <h3 className="text-xl font-semibold mb-4">Edit Client: {editingClient.client_name}</h3>
       <form onSubmit={handleUpdateClient} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <label htmlFor="edit_client_id" className="block text-sm font-medium text-gray-700">Client ID</label>
-          <input
-            type="text"
-            name="client_id"
-            id="edit_client_id"
-            value={editFormData.client_id}
-            onChange={handleEditFormChange}
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-            disabled
-          />
-        </div>
         <div>
           <label htmlFor="edit_client_name" className="block text-sm font-medium text-gray-700">Client Name</label>
           <input
@@ -82,12 +72,28 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
             required
           />
         </div>
+        <div>
+          <label htmlFor="edit_client_id" className="block text-sm font-medium text-gray-700">Client ID</label>
+          <input
+            type="text"
+            name="client_id"
+            id="edit_client_id"
+            value={editFormData.client_id}
+            onChange={handleEditFormChange}
+            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+            disabled
+          />
+        </div>
         <DocumentExtractionEditor
           value={editFormData.document_extraction}
           onChange={handleEditFormChange}
         />
-        <IngestionPipelineEditor
-          value={editFormData.ingestion_pipeline}
+        <ChunkingRulesEditor
+          value={editFormData.chunking_rules}
+          onChange={handleEditFormChange}
+        />
+        <TaggingRulesEditor
+          value={editFormData.tagging_rules}
           onChange={handleEditFormChange}
         />
         <UrlPatternEditor
@@ -106,7 +112,14 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
           value={editFormData.lead_scoring_rules}
           onChange={handleEditFormChange}
         />
-        <div className="md:col-span-3 flex justify-end">
+        <div className="md:col-span-3 flex justify-end items-center">
+          <button
+            type="button"
+            onClick={() => navigate(`/dashboard/document-upload/${editingClient.client_id}`)}
+            className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 mr-auto"
+          >
+            Upload Documents
+          </button>
           <button
             type="button"
             onClick={() => setEditingClient(null)}

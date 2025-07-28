@@ -59,7 +59,7 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
     const handleAcknowledgeHotLeads = async () => {
         if (newHotLeadVisitorIds.length > 0) {
             try {
-                const response = await fetch('http://localhost:3006/v1/leads/acknowledge', {
+                const response = await fetch('http://localhost:3007/v1/leads/acknowledge', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

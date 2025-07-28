@@ -41,12 +41,12 @@ function App() {
 
       if (!currentVisitorId) {
         try {
-          const response = await fetch('http://localhost:3006/v1/sessions', {
+          const response = await fetch('http://localhost:3007/v1/sessions', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ clientId: 'client-abc' }),
+            body: JSON.stringify({ clientId: 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c' }),
           });
           const data = await response.json();
           currentVisitorId = data.visitor_id;
@@ -88,11 +88,11 @@ function App() {
     // (Your existing trackEvent logic goes here)
 
     try {
-      const response = await fetch('http://localhost:3006/api/chat', {
+      const response = await fetch('http://localhost:3007/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-client-id': 'client-abc',
+          'x-client-id': 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c',
         },
         body: JSON.stringify({ query: message, context: contextRef.current }),
       });

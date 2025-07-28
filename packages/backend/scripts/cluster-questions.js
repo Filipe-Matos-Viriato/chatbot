@@ -221,4 +221,3 @@ async function clusterQuestions() {
   console.log('Question clustering process finished.');
 }
 
-clusterQuestions().catch(console.error);

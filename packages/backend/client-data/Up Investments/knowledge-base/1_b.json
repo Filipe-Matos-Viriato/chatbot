@@ -1,0 +1,27 @@
+{
+  "url_pt": "https://upinvestments.pt/pt/imoveis/aveiro/4271",
+  "url_en": "https://upinvestments.pt/en/real-estate/aveiro/4271",
+  "preço": "208710€",
+  "piso": "0",
+  "tipologia": "T1",
+  "bloco": "1",
+  "fracao": "B",
+  "area_bruta_m2": 69.57,
+  "area_privativa_m2": 69.57,
+  "terracos_m2": null,
+  "descricao": {
+    "divisoes": [
+      { "nome": "Sala e cozinha (open-space)", "area_m2": 31.31 },
+      { "nome": "Quarto", "area_m2": 17.39 },
+      { "nome": "Casa de banho", "area_m2": 6.96 },
+      { "nome": "Hall e circulação", "area_m2": 13.91 }
+    ],
+    "luz_natural": "Luz natural abundante em todas as divisões, através de amplas janelas",
+    "detalhes_extra": [
+      "Cozinha totalmente equipada",
+      "Lugar de garagem",
+      "Arrecadação",
+      "Vidros duplos"
+    ]
+  }
+}

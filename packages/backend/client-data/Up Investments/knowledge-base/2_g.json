@@ -1,0 +1,32 @@
+{
+  "url_pt": "https://upinvestments.pt/pt/imoveis/aveiro/4284",
+  "url_en": "https://upinvestments.pt/en/real-estate/aveiro/4284",
+  "preço": "316860€",
+  "piso": "1+2",
+  "tipologia": "T3 duplex",
+  "bloco": "2",
+  "fracao": "G",
+  "area_bruta_m2": 180.33,
+  "area_privativa_m2": 144.84,
+  "terracos_m2": 35.49,
+  "descricao": {
+    "divisoes": [
+      { "nome": "Sala", "area_m2": 36.21 },
+      { "nome": "Cozinha", "area_m2": 14.48 },
+      { "nome": "Quarto 1", "area_m2": 21.73 },
+      { "nome": "Quarto 2", "area_m2": 21.73 },
+      { "nome": "Quarto 3", "area_m2": 21.73 },
+      { "nome": "Casa de banho 1", "area_m2": 7.24 },
+      { "nome": "Casa de banho 2", "area_m2": 7.24 },
+      { "nome": "Casa de banho 3", "area_m2": 7.24 },
+      { "nome": "Hall e circulação", "area_m2": 7.24 }
+    ],
+    "luz_natural": "Luz natural abundante em todas as divisões, aproveitando as duas frentes",
+    "detalhes_extra": [
+      "Cozinha totalmente equipada",
+      "Lugar de garagem duplo",
+      "Arrecadação",
+      "Vidros duplos"
+    ]
+  }
+}
