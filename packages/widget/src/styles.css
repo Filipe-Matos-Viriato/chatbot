@@ -1,0 +1,106 @@
+/* Widget animations and responsive styles */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Widget container responsive adjustments */
+.widget-container {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.widget-chat-window {
+  animation: slideUp 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+}
+
+.widget-message {
+  animation: slideUp 0.2s ease-out;
+}
+
+/* Custom scrollbar for messages */
+.widget-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.widget-messages::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.widget-messages::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.widget-messages::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Focus styles for accessibility */
+.widget-input:focus {
+  border-color: var(--primary-color, #3b82f6);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.widget-button:focus {
+  outline: 2px solid var(--primary-color, #3b82f6);
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .widget-message-bot {
+    border: 2px solid #000;
+  }
+  
+  .widget-message-user {
+    border: 2px solid #fff;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Mobile-specific adjustments */
+@media (max-width: 768px) {
+  .widget-chat-window {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  
+  .widget-input {
+    font-size: 16px !important; /* Prevent zoom on iOS */
+  }
+} 

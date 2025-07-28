@@ -232,6 +232,18 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to get widget configuration
+  app.get('/api/v1/widget/config/:clientId', async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      res.json(clientConfig);
+    } catch (error) {
+      console.error(`Error fetching widget config for client ${req.params.clientId}:`, error);
+      res.status(404).json({ error: 'Configuration not found.' });
+    }
+  });
+
   // API endpoint to handle document uploads
   app.post('/v1/documents/upload', upload.fields([
     { name: 'files', maxCount: 10 },
