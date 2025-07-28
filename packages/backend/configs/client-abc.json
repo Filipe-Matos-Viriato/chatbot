@@ -13,11 +13,24 @@
   },
   "widgetSettings": {
     "primaryColor": "#007bff",
+    "secondaryColor": "#6c757d",
+    "backgroundColor": "#ffffff",
+    "textColor": "#1e293b",
     "chatIcon": "💬",
     "headerText": "Chat with us!",
     "welcomeMessage": "Hello! How can I help you today?",
     "position": "bottom-right",
-    "autoInit": true
+    "autoInit": true,
+    "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "fontSize": "14px",
+    "borderRadius": "16px",
+    "animation": "slide-up",
+    "theme": "light",
+    "customCSS": "",
+    "showBranding": true,
+    "enableSounds": false,
+    "maxHeight": "600px",
+    "mobileFullScreen": true
   },
   "leadScoringRules": {
     "engagementBehavior": {

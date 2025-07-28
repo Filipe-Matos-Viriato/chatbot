@@ -1,5 +1,6 @@
 import { render, h } from 'preact';
 import App from './App.jsx';
+import './styles.css';
 
 // Global function to initialize the widget
 window.initViriatoChatbot = function(config = {}) {
@@ -8,13 +9,25 @@ window.initViriatoChatbot = function(config = {}) {
   if (!container) {
     container = document.createElement('div');
     container.id = 'viriato-chatbot-container';
+    container.className = 'widget-container';
     container.style.cssText = `
       position: fixed;
       bottom: 20px;
       right: 20px;
       z-index: 999999;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
     `;
+    
+    // Set custom CSS properties for theming
+    if (config.theme) {
+      if (config.theme.primaryColor) {
+        container.style.setProperty('--primary-color', config.theme.primaryColor);
+      }
+      if (config.theme.fontFamily) {
+        container.style.fontFamily = config.theme.fontFamily;
+      }
+    }
+    
     document.body.appendChild(container);
   }
 
@@ -28,7 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (script && script.dataset.autoInit !== 'false') {
     const config = {
       clientId: script.dataset.clientId || 'default',
-      apiUrl: script.dataset.apiUrl || 'https://your-domain.vercel.app'
+      apiUrl: script.dataset.apiUrl || 'https://chatbot1-eta.vercel.app',
+      theme: {
+        primaryColor: script.dataset.primaryColor,
+        fontFamily: script.dataset.fontFamily
+      }
     };
     window.initViriatoChatbot(config);
   }
