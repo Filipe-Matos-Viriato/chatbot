@@ -44,7 +44,7 @@ module.exports = {
   plugins: [
     new webpack.DefinePlugin({
       'process.env.VITE_API_URL': JSON.stringify(
-        process.env.VITE_API_URL || 'https://your-domain.vercel.app'
+        process.env.VITE_API_URL || 'https://chatbot1-eta.vercel.app'
       )
     })
   ],

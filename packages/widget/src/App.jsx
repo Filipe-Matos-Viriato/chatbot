@@ -9,7 +9,8 @@ class App extends Component {
       inputValue: '',
       isTyping: false,
       config: null,
-      error: null
+      error: null,
+      isLoadingConfig: false
     };
   }
 
@@ -42,6 +43,13 @@ class App extends Component {
   };
 
   loadConfig = async () => {
+    // Prevent duplicate API calls
+    if (this.state.isLoadingConfig || this.state.config) {
+      return;
+    }
+
+    this.setState({ isLoadingConfig: true });
+
     try {
       const { clientId = 'default', apiUrl } = this.props.config || {};
       const response = await fetch(`${apiUrl}/api/v1/widget/config/${clientId}`);
@@ -53,6 +61,7 @@ class App extends Component {
       const config = await response.json();
       this.setState({ 
         config,
+        isLoadingConfig: false,
         messages: [{
           id: Date.now(),
           text: config.widgetSettings?.welcomeMessage || 'Hello! How can I help you?',
@@ -63,7 +72,10 @@ class App extends Component {
       });
     } catch (error) {
       console.error('Widget config error:', error);
-      this.setState({ error: 'Failed to load chatbot configuration' });
+      this.setState({ 
+        error: 'Failed to load chatbot configuration',
+        isLoadingConfig: false 
+      });
     }
   };
 
@@ -102,6 +114,12 @@ class App extends Component {
     
     if (!inputValue.trim()) return;
 
+    // Debug logging
+    console.log('🔧 Widget Debug Info:');
+    console.log('📡 API URL:', apiUrl);
+    console.log('⚙️ Props config:', this.props.config);
+    console.log('🎯 Target endpoint:', `${apiUrl}/api/chat`);
+
     const userMessage = {
       id: Date.now(),
       text: inputValue,
@@ -124,16 +142,18 @@ class App extends Component {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Client-Id': this.props.config?.clientId || 'default'
         },
         body: JSON.stringify({
           message: inputValue,
+          query: inputValue, // Add both for compatibility
           context: messages.slice(-5), // Last 5 messages for context
           clientId: this.props.config?.clientId || 'default'
         })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get response');
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
@@ -155,7 +175,9 @@ class App extends Component {
       this.announceToScreenReader('New message received');
 
     } catch (error) {
-      console.error('Chat error:', error);
+      console.error('❌ Chat API Error:', error);
+      console.error('🌐 Failed URL:', `${apiUrl}/api/chat`);
+      
       const errorMessage = {
         id: Date.now() + 1,
         text: 'Sorry, I\'m having trouble responding right now. Please try again.',
@@ -319,8 +341,12 @@ class App extends Component {
       }, 'Loading...');
     }
 
-    const primaryColor = config.widgetSettings?.primaryColor || '#3b82f6';
-    const chatIcon = config.widgetSettings?.chatIcon || '💬';
+    const widgetSettings = config.widgetSettings || {};
+    const isDarkTheme = widgetSettings.theme === 'dark';
+    const primaryColor = widgetSettings.primaryColor || '#3b82f6';
+    const textColor = widgetSettings.textColor || (isDarkTheme ? '#f9fafb' : '#1e293b');
+    const secondaryBg = isDarkTheme ? '#374151' : '#f1f5f9';
+    const chatIcon = widgetSettings.chatIcon || '💬';
     const styles = this.getResponsiveStyles();
     const isMobile = window.innerWidth <= 768;
 
