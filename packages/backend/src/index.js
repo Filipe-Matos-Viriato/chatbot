@@ -288,6 +288,18 @@ app.post('/v1/leads/acknowledge', async (req, res) => {
   }
 });
 
+// API endpoint to get widget configuration
+app.get('/api/v1/widget/config/:clientId', async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const clientConfig = await getClientConfig(clientId);
+    res.json(clientConfig);
+  } catch (error) {
+    console.error(`Error fetching widget config for client ${req.params.clientId}:`, error);
+    res.status(404).json({ error: 'Configuration not found.' });
+  }
+});
+
 // API endpoint to get listing details and metrics by ID
 app.get('/api/listing/:id', async (req, res) => {
   console.log(`[Backend] Received request for listing ID: ${req.params.id}`);

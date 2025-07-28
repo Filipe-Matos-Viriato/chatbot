@@ -9,7 +9,12 @@
   "scripts": {
     "dev": "npm run dev --workspace=packages/frontend",
     "start:backend": "npm start --workspace=packages/backend",
-    "start:harness": "npm start --workspace=packages/test-harness"
+    "start:harness": "npm start --workspace=packages/test-harness",
+    "vercel-build": "npm run build --workspace=@enterprise-rag-chatbot/frontend",
+    "build:widget": "npm run build --workspace=packages/widget",
+    "copy:widget": "node copy-widget.js",
+    "build:frontend": "npm run build --workspace=@enterprise-rag-chatbot/frontend",
+    "build": "npm run build:widget && npm run build:frontend && npm run copy:widget"
   },
   "keywords": [
     "rag",
@@ -19,5 +24,8 @@
     "monorepo"
   ],
   "author": "Kilo Code",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "fs-extra": "^11.2.0"
+  }
 }
