@@ -8,6 +8,7 @@ const defaultClientConfigService = require('./services/client-config-service');
 const { processDocument: defaultProcessDocument } = require('./services/ingestion-service');
 const listingService = require('./services/listing-service'); // Import Listing Service
 const visitorService = require('./services/visitor-service');
+const onboardingService = require('./services/onboarding-service');
 const defaultSupabase = require('./config/supabase'); // Import Supabase client
 const ChatHistoryService = require('./services/chat-history-service').default; // Import ChatHistoryService
 const developmentService = require('./services/development-service'); // Import Development Service
@@ -126,6 +127,27 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received query: ${query}`);
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
 
+      // Get and format onboarding answers for better context
+      let formattedOnboardingAnswers = null;
+      try {
+        // Check if we have onboarding answers from the request body first
+        if (onboardingAnswers) {
+          formattedOnboardingAnswers = onboardingAnswers;
+        } else if (sessionId) {
+          // Try to get visitor's onboarding status from database
+          const onboardingStatus = await onboardingService.getVisitorOnboardingStatus(sessionId, clientConfig.clientId);
+          if (onboardingStatus.completed && onboardingStatus.answers && onboardingStatus.questions) {
+            formattedOnboardingAnswers = onboardingService.formatOnboardingAnswersForRAG(
+              onboardingStatus.answers, 
+              onboardingStatus.questions
+            );
+          }
+        }
+      } catch (error) {
+        console.warn('Could not retrieve onboarding answers for visitor:', error.message);
+        // Don't fail the chat request if onboarding retrieval fails
+      }
+
       // Generate response with enhanced context including chat history and onboarding answers
       const responseText = await generateResponse(
         query, 
@@ -133,7 +155,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         context, 
         userContext, 
         chatHistory, 
-        onboardingAnswers || null
+        formattedOnboardingAnswers
       );
 
       // Upsert assistant response to Pinecone
@@ -340,7 +362,14 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(400).json({ error: 'Client ID is required' });
       }
       const newVisitor = await visitorService.createVisitor(clientId, listingId); // Pass listingId
-      res.status(201).json({ visitor_id: newVisitor.visitor_id });
+      
+      // Include onboarding status in response - new visitors need onboarding
+      const needsOnboarding = !newVisitor.onboarding_completed;
+      
+      res.status(201).json({ 
+        visitor_id: newVisitor.visitor_id,
+        needs_onboarding: needsOnboarding
+      });
     } catch (error) {
       console.error('Error creating visitor session:', error);
       res.status(500).json({ error: 'Failed to create visitor session.' });
@@ -392,6 +421,107 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error('Error getting visitor:', error);
       res.status(500).json({ error: 'Failed to get visitor.' });
+    }
+  });
+
+  // API endpoint to get visitor onboarding status and questions
+  app.get('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const clientId = req.headers['x-client-id'] || req.query.clientId;
+
+      if (!visitorId || !clientId) {
+        return res.status(400).json({ error: 'Visitor ID and Client ID are required' });
+      }
+
+      const onboardingData = await onboardingService.getVisitorOnboardingStatus(visitorId, clientId);
+      res.json(onboardingData);
+    } catch (error) {
+      console.error('Error getting visitor onboarding status:', error);
+      res.status(500).json({ error: 'Failed to get visitor onboarding status.' });
+    }
+  });
+
+  // API endpoint to submit onboarding answers
+  app.post('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { answers, completed } = req.body;
+
+      if (!visitorId || !answers) {
+        return res.status(400).json({ error: 'Visitor ID and answers are required' });
+      }
+
+      const updatedVisitor = await onboardingService.submitOnboardingAnswers(visitorId, answers, completed);
+      res.json({ 
+        success: true, 
+        visitor: updatedVisitor,
+        message: 'Onboarding answers submitted successfully'
+      });
+    } catch (error) {
+      console.error('Error submitting onboarding answers:', error);
+      res.status(500).json({ error: 'Failed to submit onboarding answers.' });
+    }
+  });
+
+  // API endpoint to update onboarding answers
+  app.put('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { answers } = req.body;
+
+      if (!visitorId || !answers) {
+        return res.status(400).json({ error: 'Visitor ID and answers are required' });
+      }
+
+      const updatedVisitor = await onboardingService.updateOnboardingAnswers(visitorId, answers);
+      res.json({ 
+        success: true, 
+        visitor: updatedVisitor,
+        message: 'Onboarding answers updated successfully'
+      });
+    } catch (error) {
+      console.error('Error updating onboarding answers:', error);
+      res.status(500).json({ error: 'Failed to update onboarding answers.' });
+    }
+  });
+
+  // API endpoint to get client onboarding template
+  app.get('/v1/clients/:clientId/onboarding-template', async (req, res) => {
+    try {
+      const { clientId } = req.params;
+
+      if (!clientId) {
+        return res.status(400).json({ error: 'Client ID is required' });
+      }
+
+      const template = await onboardingService.getClientOnboardingTemplate(clientId);
+      res.json(template);
+    } catch (error) {
+      console.error('Error getting client onboarding template:', error);
+      res.status(500).json({ error: 'Failed to get client onboarding template.' });
+    }
+  });
+
+  // API endpoint to update client onboarding template
+  app.put('/v1/clients/:clientId/onboarding-template', async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { template } = req.body;
+
+      if (!clientId || !template) {
+        return res.status(400).json({ error: 'Client ID and template are required' });
+      }
+
+      const updatedClient = await onboardingService.updateClientOnboardingTemplate(clientId, template);
+      res.json({ 
+        success: true, 
+        client: updatedClient,
+        message: 'Onboarding template updated successfully'
+      });
+    } catch (error) {
+      console.error('Error updating client onboarding template:', error);
+      res.status(500).json({ error: 'Failed to update client onboarding template.' });
     }
   });
 

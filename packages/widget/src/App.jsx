@@ -1,4 +1,5 @@
 import { h, Component, Fragment } from 'preact';
+import OnboardingModal from './OnboardingModal.jsx';
 
 class App extends Component {
   constructor(props) {
@@ -10,7 +11,12 @@ class App extends Component {
       isTyping: false,
       config: null,
       error: null,
-      isLoadingConfig: false
+      isLoadingConfig: false,
+      // Onboarding state
+      showOnboarding: false,
+      onboardingQuestions: null,
+      visitorId: null,
+      needsOnboarding: false
     };
   }
 
@@ -52,15 +58,48 @@ class App extends Component {
 
     try {
       const { clientId = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c', apiUrl } = this.props.config || {};
-      const response = await fetch(`${apiUrl}/api/v1/widget/config/${clientId}`);
       
-      if (!response.ok) {
+      // Load widget config
+      const configResponse = await fetch(`${apiUrl}/api/v1/widget/config/${clientId}`);
+      if (!configResponse.ok) {
         throw new Error('Failed to load configuration');
       }
+      const config = await configResponse.json();
+
+      // Create visitor session
+      const sessionResponse = await fetch(`${apiUrl}/v1/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ clientId })
+      });
       
-      const config = await response.json();
+      if (!sessionResponse.ok) {
+        throw new Error('Failed to create visitor session');
+      }
+      
+      const sessionData = await sessionResponse.json();
+
+      // Get onboarding questions if needed
+      let onboardingQuestions = null;
+      if (sessionData.needs_onboarding) {
+        try {
+          const onboardingResponse = await fetch(`${apiUrl}/v1/visitors/${sessionData.visitor_id}/onboarding?clientId=${clientId}`);
+          if (onboardingResponse.ok) {
+            const onboardingData = await onboardingResponse.json();
+            onboardingQuestions = onboardingData.questions;
+          }
+        } catch (onboardingError) {
+          console.warn('Could not load onboarding questions:', onboardingError);
+        }
+      }
+
       this.setState({ 
         config,
+        visitorId: sessionData.visitor_id,
+        needsOnboarding: sessionData.needs_onboarding,
+        onboardingQuestions,
         isLoadingConfig: false,
         messages: [{
           id: Date.now(),
@@ -70,10 +109,20 @@ class App extends Component {
           ariaLabel: 'Welcome message from chatbot'
         }]
       });
+
+      // Show onboarding after a brief delay if needed
+      if (sessionData.needs_onboarding && onboardingQuestions) {
+        setTimeout(() => {
+          if (this.state.needsOnboarding) {
+            this.setState({ showOnboarding: true });
+          }
+        }, 1000);
+      }
+
     } catch (error) {
-      console.error('Widget config error:', error);
+      console.error('Widget initialization error:', error);
       this.setState({ 
-        error: 'Failed to load chatbot configuration',
+        error: 'Failed to initialize chatbot',
         isLoadingConfig: false 
       });
     }
@@ -106,6 +155,37 @@ class App extends Component {
     
     document.body.appendChild(announcement);
     setTimeout(() => document.body.removeChild(announcement), 1000);
+  };
+
+  handleOnboardingComplete = (answers) => {
+    this.setState({ 
+      showOnboarding: false,
+      needsOnboarding: false 
+    });
+    
+    // Add completion message to chat
+    const completionMessage = {
+      id: Date.now(),
+      text: this.state.onboardingQuestions?.settings?.completion_message || 
+            'Obrigado! Com base nas suas preferências, posso agora ajudá-lo a encontrar o imóvel perfeito.',
+      sender: 'bot',
+      timestamp: new Date(),
+      ariaLabel: 'Onboarding completion message'
+    };
+    
+    this.setState(prev => ({
+      messages: [...prev.messages, completionMessage]
+    }));
+
+    this.announceToScreenReader('Onboarding completed successfully');
+  };
+
+  handleOnboardingSkip = () => {
+    this.setState({ 
+      showOnboarding: false,
+      needsOnboarding: false 
+    });
+    this.announceToScreenReader('Onboarding skipped');
   };
 
   sendMessage = async () => {
@@ -147,6 +227,7 @@ class App extends Component {
         body: JSON.stringify({
           message: inputValue,
           query: inputValue, // Add both for compatibility
+          sessionId: this.state.visitorId, // Add visitor session ID
           context: messages.slice(-5), // Last 5 messages for context
           clientId: this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c'
         })
@@ -520,7 +601,18 @@ class App extends Component {
               className: 'widget-button widget-send-button'
             }, isMobile ? '→' : 'Send')
         ])
-      ])
+      ]),
+
+      // Onboarding Modal
+      this.state.showOnboarding && h(OnboardingModal, {
+        isOpen: this.state.showOnboarding,
+        questions: this.state.onboardingQuestions?.questions || [],
+        settings: this.state.onboardingQuestions?.settings || {},
+        visitorId: this.state.visitorId,
+        apiUrl: this.props.config?.apiUrl || 'https://chatbot1-eta.vercel.app',
+        onComplete: this.handleOnboardingComplete,
+        onSkip: this.handleOnboardingSkip
+      })
     );
   }
 }
