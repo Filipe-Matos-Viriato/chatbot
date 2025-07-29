@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { API_BASE_URL } from '../../../config/apiClient';
 import DocumentExtractionEditor from './DocumentExtractionEditor';
 import ChunkingRulesEditor from './ChunkingRulesEditor';
 import TaggingRulesEditor from './TaggingRulesEditor';
@@ -35,7 +36,7 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
         }
       }
 
-      await axios.put(`http://localhost:3007/v1/clients/${editingClient.client_id}`, dataToSend);
+      await axios.put(`${API_BASE_URL}/v1/clients/${editingClient.client_id}`, dataToSend);
       setEditingClient(null);
       fetchClients();
       setError(null);

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from '../../../config/apiClient';
 
 const CreateClientForm = ({ fetchClients }) => {
   const [newClient, setNewClient] = useState({
@@ -16,7 +17,7 @@ const CreateClientForm = ({ fetchClients }) => {
   const handleCreateClient = async (e) => {
     e.preventDefault();
     try {
-      await axios.post('http://localhost:3007/v1/clients', newClient);
+      await axios.post(`${API_BASE_URL}/v1/clients`, newClient);
       setNewClient({ client_name: '', chatbot_name: '' }); // Clear form
       fetchClients(); // Refresh list
       setError(null); // Clear any previous errors

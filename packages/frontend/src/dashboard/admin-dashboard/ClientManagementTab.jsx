@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { API_BASE_URL } from '../../config/apiClient';
 import CreateClientForm from './components/CreateClientForm';
 import ClientListTable from './components/ClientListTable';
 import EditClientForm from './components/EditClientForm';
@@ -25,7 +26,7 @@ const ClientManagementTab = () => {
 
   const fetchClients = async (searchQuery = '') => {
     try {
-      const response = await axios.get('http://localhost:3007/v1/clients');
+      const response = await axios.get(`${API_BASE_URL}/v1/clients`);
       let filteredClients = response.data;
       if (searchQuery) {
         filteredClients = response.data.filter(client =>
@@ -67,7 +68,7 @@ const ClientManagementTab = () => {
 
   const handleDeleteClient = async (clientId) => {
     try {
-      await axios.delete(`http://localhost:3007/v1/clients/${clientId}`);
+      await axios.delete(`${API_BASE_URL}/v1/clients/${clientId}`);
       fetchClients();
     } catch (err) {
       setError(err);

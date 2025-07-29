@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { API_BASE_URL } from '../../../config/apiClient';
 import { getListingLeadDistributionMetrics } from '../../../config/supabaseClient';
 import ListingMetricsCards from './listing-details/ListingMetricsCards';
 import PropertyInformation from './listing-details/PropertyInformation';
@@ -25,8 +26,8 @@ const ListingDetailsPage = () => {
         const fetchListingDetails = async () => {
             try {
                 const [listingResponse, commonQuestionsResponse] = await Promise.all([
-                    fetch(`http://localhost:3007/api/listing/${id}`),
-                    fetch(`http://localhost:3007/api/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
+                    fetch(`${API_BASE_URL}/listing/${id}`),
+                    fetch(`${API_BASE_URL}/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
                 ]);
 
                 if (!listingResponse.ok) {

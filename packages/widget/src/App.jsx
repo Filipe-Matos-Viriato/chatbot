@@ -51,7 +51,7 @@ class App extends Component {
     this.setState({ isLoadingConfig: true });
 
     try {
-      const { clientId = 'default', apiUrl } = this.props.config || {};
+      const { clientId = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c', apiUrl } = this.props.config || {};
       const response = await fetch(`${apiUrl}/api/v1/widget/config/${clientId}`);
       
       if (!response.ok) {
@@ -142,13 +142,13 @@ class App extends Component {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Client-Id': this.props.config?.clientId || 'default'
+          'X-Client-Id': this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c'
         },
         body: JSON.stringify({
           message: inputValue,
           query: inputValue, // Add both for compatibility
           context: messages.slice(-5), // Last 5 messages for context
-          clientId: this.props.config?.clientId || 'default'
+          clientId: this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c'
         })
       });
 

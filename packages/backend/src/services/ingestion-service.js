@@ -338,6 +338,33 @@ const applyClientTaggingRules = (documentText, originalname, taggingRules, curre
 };
 
 /**
+ * Clean metadata for Pinecone compatibility by removing null values
+ * @param {Object} metadata - The metadata object to clean
+ * @returns {Object} - Cleaned metadata object
+ */
+const cleanMetadataForPinecone = (metadata) => {
+  const cleaned = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value !== null && value !== undefined) {
+      // Convert arrays to strings if they contain primitives
+      if (Array.isArray(value)) {
+        // Only keep arrays of strings, numbers, or booleans
+        const validArray = value.filter(item => 
+          typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'
+        );
+        if (validArray.length > 0) {
+          cleaned[key] = validArray;
+        }
+      } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        cleaned[key] = value;
+      }
+      // Skip objects and other complex types
+    }
+  }
+  return cleaned;
+};
+
+/**
  * Processes a document by extracting text, chunking, embedding, and upserting into Pinecone.
  * @param {object} params - The parameters for document processing.
  * @param {object} params.clientConfig - The client-specific configuration.
@@ -430,27 +457,27 @@ const { originalname, buffer } = file;
 
       if (currentListingId) {
         // Update existing listing
-        const { success, error } = await listingService.updateListing(currentListingId, listingData);
-        if (error) {
+        try {
+          const updatedListing = await listingService.updateListing(currentListingId, listingData);
+          console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing ${currentListingId} updated in Supabase.`);
+        } catch (error) {
           console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error updating listing ${currentListingId} in Supabase:`, error);
           throw new Error(`Failed to update listing: ${error.message}`);
         }
-        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Listing ${currentListingId} updated in Supabase.`);
       } else {
         // Create new listing
         listingData.id = uuidv4(); // Generate UUID for new listing
-        const { listing, error } = await listingService.createListing(listingData);
-        if (error) {
+        try {
+          const listing = await listingService.createListing(listingData);
+          if (listing) {
+            currentListingId = listing.id;
+            console.log(`[${clientConfig.clientName || clientConfig.clientId}] New listing ${currentListingId} created in Supabase.`);
+          } else {
+            throw new Error(`Failed to create listing: listing object is undefined.`);
+          }
+        } catch (error) {
           console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error creating new listing in Supabase:`, error);
           throw new Error(`Failed to create listing: ${error.message}`);
-        }
-        // Only assign currentListingId if listing was successfully created
-        if (listing) {
-          currentListingId = listing.id;
-          console.log(`[${clientConfig.clientName || clientConfig.clientId}] New listing ${currentListingId} created in Supabase.`);
-        } else {
-          // This case should ideally be caught by the error check above, but as a safeguard
-          throw new Error(`Failed to create listing: listing object is undefined.`);
         }
       }
 
@@ -538,12 +565,15 @@ const { originalname, buffer } = file;
       // Apply client-specific tagging rules to enrich the metadata
       const finalVectorMetadata = applyClientTaggingRules(documentText, originalname, clientConfig.tagging_rules, vectorMetadata);
 
-      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Metadata for vector ${i}:`, JSON.stringify(finalVectorMetadata, null, 2));
+      // Clean null values from metadata for Pinecone compatibility
+      const cleanedMetadata = cleanMetadataForPinecone(finalVectorMetadata);
+
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Metadata for vector ${i}:`, JSON.stringify(cleanedMetadata, null, 2));
 
       vectors.push({
         id: `${clientConfig.clientId}-${originalname}-${i}`, // Unique ID for each chunk
         values: embeddingResult.embedding.values,
-        metadata: finalVectorMetadata,
+        metadata: cleanedMetadata,
       });
     }
 

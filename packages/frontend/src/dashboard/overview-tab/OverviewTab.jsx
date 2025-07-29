@@ -8,6 +8,7 @@ import NewHotLeadsMetric from './metrics/NewHotLeadsMetric';
 import AvgChatDurationMetric from './metrics/AvgChatDurationMetric';
 import PropertyViewingsBookedMetric from './metrics/PropertyViewingsBookedMetric';
 import UnansweredQuestionsMetric from './metrics/UnansweredQuestionsMetric';
+import { API_BASE_URL } from '../../config/apiClient';
 import { supabase, getLeadDistributionMetrics } from '../../config/supabaseClient';
 
 
@@ -59,7 +60,7 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
     const handleAcknowledgeHotLeads = async () => {
         if (newHotLeadVisitorIds.length > 0) {
             try {
-                const response = await fetch('http://localhost:3007/v1/leads/acknowledge', {
+                const response = await fetch(`${API_BASE_URL}/v1/leads/acknowledge`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

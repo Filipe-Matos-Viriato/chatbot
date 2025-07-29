@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const script = document.querySelector('script[src*="loader.js"]');
   if (script && script.dataset.autoInit !== 'false') {
     const config = {
-      clientId: script.dataset.clientId || 'default',
+      clientId: script.dataset.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c',
       apiUrl: script.dataset.apiUrl || 'https://chatbot1-eta.vercel.app',
       theme: {
         primaryColor: script.dataset.primaryColor,

@@ -1,0 +1,103 @@
+{
+  "clientId": "e6f484a3-c3cb-4e01-b8ce-a276f4b7355c",
+  "clientName": "Up Investments",
+  "chatbotName": "Real Estate Chatbot",
+  "theme": {
+    "primaryColor": "#007bff",
+    "secondaryColor": "#6c757d",
+    "fontFamily": "Arial, sans-serif"
+  },
+  "urlPattern": "https://upinvestments.pt/(?:pt|en)/(?:imoveis|real-estate)/aveiro/(\\d+)",
+  "prompts": {
+    "systemInstruction": "You are a helpful assistant for the real estate agency 'Up Investments'. Your goal is to answer questions about property listings based on the provided context. Be professional and provide accurate information. Do not use markdown formatting, especially the * character for lists or bolding",
+    "fallbackResponse": "I'm sorry, I can't seem to find the specific listing you're referring to. I can answer general questions about our agency, or you could provide me with a valid listing ID."
+  },
+  "widgetSettings": {
+    "primaryColor": "#007bff",
+    "secondaryColor": "#6c757d",
+    "backgroundColor": "#ffffff",
+    "textColor": "#1e293b",
+    "chatIcon": "💬",
+    "headerText": "Chat with us!",
+    "welcomeMessage": "Hello! How can I help you today?",
+    "position": "bottom-right",
+    "autoInit": true,
+    "fontFamily": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    "fontSize": "14px",
+    "borderRadius": "16px",
+    "animation": "slide-up",
+    "theme": "light",
+    "customCSS": "",
+    "showBranding": true,
+    "enableSounds": false,
+    "maxHeight": "600px",
+    "mobileFullScreen": true
+  },
+  "leadScoringRules": {
+    "engagementBehavior": {
+      "questions_3_5": 5,
+      "questions_6_10": 10,
+      "questions_10_plus": 15,
+      "time_5_10_min": 5,
+      "time_10_plus_min": 10,
+      "clicked_listing": 5,
+      "returned_within_48h": 10
+    },
+    "questionIntentQuality": {
+      "asked_pricing": 10,
+      "asked_location": 10,
+      "asked_legal": 10,
+      "asked_remote_buying": 10,
+      "asked_details": 5,
+      "asked_availability": 5
+    },
+    "conversionActions": {
+      "submitted_contact": 15,
+      "booked_viewing": 30,
+      "asked_contact_agent": 20,
+      "requested_brochure": 10
+    }
+  },
+  "documentExtraction": {
+    "listingName": {
+      "pattern": "ap-\\d+\\s*[\\s\\W]*([^\\n]+)",
+      "type": "regex"
+    },
+    "listingBaths": {
+      "pattern": "Casas de banho:\\s*(\\d+)",
+      "type": "regex"
+    }
+  },
+  "chatHistoryTaggingRules": [
+    {
+      "pattern": "price|cost|value|how much",
+      "flags": "i",
+      "tagName": "price_query"
+    },
+    {
+      "pattern": "location|address|where is it",
+      "flags": "i",
+      "tagName": "location_query"
+    },
+    {
+      "pattern": "viewing|visit|schedule",
+      "flags": "i",
+      "tagName": "viewing_request"
+    }
+  ],
+  "ingestionPipeline": [
+    {
+      "name": "template-chunker",
+      "settings": {
+        "template": "## Room: {{room_name}}",
+        "chunkSize": 500
+      }
+    },
+    {
+      "name": "nlp-tagger",
+      "settings": {
+        "tags": ["amenities", "appliances", "nearby_locations"]
+      }
+    }
+  ]
+}
