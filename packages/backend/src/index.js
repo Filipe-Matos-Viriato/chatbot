@@ -81,6 +81,18 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to get widget configuration (moved before middleware)
+  app.get('/api/v1/widget/config/:clientId', async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      res.json(clientConfig);
+    } catch (error) {
+      console.error(`Error fetching widget config for client ${req.params.clientId}:`, error);
+      res.status(404).json({ error: 'Configuration not found.' });
+    }
+  });
+
   // Load client configuration for all API routes
   if (applyClientConfigMiddleware) {
     app.use(clientConfigMiddleware(clientConfigService));
@@ -271,18 +283,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error('Error in /api/common-questions endpoint:', error);
       res.status(500).json({ error: 'Internal server error.' });
-    }
-  });
-
-  // API endpoint to get widget configuration
-  app.get('/api/v1/widget/config/:clientId', async (req, res) => {
-    try {
-      const { clientId } = req.params;
-      const clientConfig = await clientConfigService.getClientConfig(clientId);
-      res.json(clientConfig);
-    } catch (error) {
-      console.error(`Error fetching widget config for client ${req.params.clientId}:`, error);
-      res.status(404).json({ error: 'Configuration not found.' });
     }
   });
 
