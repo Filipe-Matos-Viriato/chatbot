@@ -5,6 +5,7 @@ import App from './App';
 import './index.css';
 import Dashboard from './dashboard/Dashboard';
 import AdminDashboard from './dashboard/AdminDashboard';
+import ClientManagementTab from './dashboard/admin-dashboard/ClientManagementTab';
 import DocumentUploadPage from './dashboard/admin-dashboard/pages/DocumentUploadPage';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -13,8 +14,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/dashboard/*" element={<Dashboard />} /> {/* Use /* for nested routes */}
-        <Route path="/admin/*" element={<AdminDashboard />} /> {/* Admin dashboard routes */}
-        <Route path="/dashboard/document-upload/:clientId" element={<DocumentUploadPage />} />
+        <Route path="/admin/*" element={<AdminDashboard />}> {/* Admin dashboard routes */}
+          <Route index element={<ClientManagementTab />} /> {/* Default route for /admin */}
+          <Route path="clients" element={<ClientManagementTab />} />
+          <Route path="document-upload/:clientId" element={<DocumentUploadPage />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

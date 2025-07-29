@@ -10,6 +10,7 @@ import ChatHistoryTaggingRulesEditor from './ChatHistoryTaggingRulesEditor';
 import LeadScoringRulesEditor from './LeadScoringRulesEditor';
 
 const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditingClient, fetchClients, setError }) => {
+  const navigate = useNavigate();
 
   const handleEditFormChange = (e) => {
     const { name, value } = e.target;
@@ -46,7 +47,16 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
 
   return (
     <div className="mt-8 p-4 border rounded shadow-sm bg-white">
-      <h3 className="text-xl font-semibold mb-4">Edit Client: {editingClient.client_name}</h3>
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-xl font-semibold">Edit Client: {editingClient.client_name}</h3>
+        <button
+          type="button"
+          onClick={() => navigate(`/admin/document-upload/${editingClient.client_id}`)}
+          className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
+        >
+          Upload Documents
+        </button>
+      </div>
       <form onSubmit={handleUpdateClient} className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label htmlFor="edit_client_name" className="block text-sm font-medium text-gray-700">Client Name</label>
@@ -113,13 +123,6 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
           onChange={handleEditFormChange}
         />
         <div className="md:col-span-3 flex justify-end items-center">
-          <button
-            type="button"
-            onClick={() => navigate(`/dashboard/document-upload/${editingClient.client_id}`)}
-            className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 mr-auto"
-          >
-            Upload Documents
-          </button>
           <button
             type="button"
             onClick={() => setEditingClient(null)}
