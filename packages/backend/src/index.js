@@ -92,7 +92,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', async (req, res) => {
     try {
-      const { query, sessionId, context, onboardingAnswers } = req.body;
+      const { query, visitorId, sessionId, context, onboardingAnswers } = req.body;
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
@@ -113,7 +113,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         text: query,
         role: 'user',
         client_id: clientConfig.clientId,
-        visitor_id: sessionId,
+        visitor_id: visitorId,
         session_id: sessionId,
         timestamp: timestamp,
         turn_id: `${turnId}-user`,
@@ -128,11 +128,11 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       // Generate response with enhanced context including chat history and onboarding answers
       const responseText = await generateResponse(
-        query, 
-        clientConfig, 
-        context, 
-        userContext, 
-        chatHistory, 
+        query,
+        clientConfig,
+        context,
+        userContext,
+        chatHistory,
         onboardingAnswers || null
       );
 
@@ -141,7 +141,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         text: responseText,
         role: 'assistant',
         client_id: clientConfig.clientId,
-        visitor_id: sessionId,
+        visitor_id: visitorId,
         session_id: sessionId,
         timestamp: new Date().toISOString(),
         turn_id: `${turnId}-assistant`,
@@ -157,7 +157,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
               chatbot_response: responseText,
               listing_id: context?.listingId || null, // Assuming listingId is passed in context
               status: 'answered', // Mark as answered since a response is generated
-              visitor_id: req.body.sessionId, // Assuming sessionId is visitor_id
+              visitor_id: visitorId,
+              session_id: sessionId,
             },
           ])
           .select('id'); // Select the ID of the newly inserted question
@@ -815,6 +816,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     console.log(`[Backend] Received request for listing ID: ${req.params.id}`);
     try {
       const { id } = req.params;
+      const { session_id } = req.query; // Extract session_id from query parameters
       console.log(`[Backend] Fetching listing details for ID: ${id}`);
 
       // Fetch listing details, metrics, unanswered questions, and handoffs concurrently
@@ -829,7 +831,13 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         supabase.from('listing_metrics').select('*').eq('listing_id', id).single(),
         supabase.from('questions').select('question_text').eq('listing_id', id).eq('status', 'unanswered'),
         supabase.from('handoffs').select('reason').eq('listing_id', id),
-        supabase.from('questions').select('question_text, chatbot_response, asked_at').eq('listing_id', id).order('asked_at', { ascending: true }),
+        (() => {
+          let query = supabase.from('questions').select('question_text, chatbot_response, asked_at').eq('listing_id', id);
+          if (session_id) {
+            query = query.eq('session_id', session_id);
+          }
+          return query.order('asked_at', { ascending: true });
+        })(),
       ]);
 
       if (listingError && listingError.code !== 'PGRST116') {

@@ -1,8 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState([
@@ -10,6 +16,12 @@ const ChatInterface = () => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [visitorId, setVisitorId] = useState('placeholder_visitor_id'); // This should be dynamic in a real app
+
+  useEffect(() => {
+    setSessionId(generateUUID());
+  }, []);
 
   const handleSend = async () => {
     if (input.trim()) {
@@ -25,7 +37,7 @@ const ChatInterface = () => {
             'Content-Type': 'application/json',
             'x-client-id': 'client-abc' // This should be dynamic in a real app
           },
-          body: JSON.stringify({ query: input, context: null }), // Add context if needed
+          body: JSON.stringify({ query: input, context: null, session_id: sessionId, visitor_id: visitorId }), // Add context if needed
         });
 
         const data = await response.json();
