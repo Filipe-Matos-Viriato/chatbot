@@ -11,21 +11,6 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/database-backend.js"
-    },
-    {
-      "source": "/((?!widget|api).*)",
-      "destination": "/index.html"
-    }
-  ],
-  "headers": [
-    {
-      "source": "/widget/(.*)",
-      "headers": [
-        {
-          "key": "Access-Control-Allow-Origin",
-          "value": "*"
-        }
-      ]
     }
   ]
 } 
