@@ -7,7 +7,7 @@ const AdminDashboard = () => {
     <div className="flex h-screen bg-gray-100">
       {/* Sidebar Navigation */}
       <aside className="w-64 bg-white shadow-md p-4">
-        <h1 className="text-2xl font-bold mb-6">Admin Dashboard</h1>
+        <h1 className="text-2xl font-bold mb-6">Admidszfn Dashboard</h1>
         <nav>
           <ul>
             <li className="mb-2">
