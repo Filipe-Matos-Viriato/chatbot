@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
 const DocumentUploadPage = () => {
   const { clientId } = useParams();
+  const navigate = useNavigate();
+  const [clientName, setClientName] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Client Info');
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [uploadStatus, setUploadStatus] = useState('');
@@ -80,6 +83,24 @@ const DocumentUploadPage = () => {
       fetchDevelopments();
     }
   }, [clientId, selectedCategory]);
+
+  useEffect(() => {
+    const fetchClientName = async () => {
+      try {
+        const response = await axios.get(`http://localhost:3007/v1/clients/${clientId}`);
+        if (response.data && response.data.client_name) {
+          setClientName(response.data.client_name);
+        }
+      } catch (error) {
+        console.error('Error fetching client name:', error);
+        setClientName('Unknown Client'); // Fallback
+      }
+    };
+
+    if (clientId) {
+      fetchClientName();
+    }
+  }, [clientId]);
 
   const handleSubmitListing = async () => {
     if (!listingName || !numBedrooms || !totalAreaSqm || !priceEur || !listingStatus || !currentState) {
@@ -181,7 +202,7 @@ const DocumentUploadPage = () => {
               <label htmlFor="development-select" className="block text-sm font-medium text-gray-700">Select Existing Development:</label>
               <select
                 id="development-select"
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md bg-gray-100"
                 value={selectedDevelopmentId}
                 onChange={(e) => setSelectedDevelopmentId(e.target.value)}
               >
@@ -257,7 +278,7 @@ const DocumentUploadPage = () => {
               <label htmlFor="listing-development-select" className="block text-sm font-medium text-gray-700">Select Associated Development (Optional):</label>
               <select
                 id="listing-development-select"
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md bg-gray-100"
                 value={selectedDevelopmentId}
                 onChange={(e) => setSelectedDevelopmentId(e.target.value)}
               >
@@ -387,7 +408,16 @@ const DocumentUploadPage = () => {
 
   return (
     <div className="p-6 bg-white rounded-lg shadow-md">
-      <h1 className="text-2xl font-bold mb-4">Document Upload for Client ID: {clientId}</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold">Document Upload for Client: {clientName || clientId}</h1>
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600"
+        >
+          Return
+        </button>
+      </div>
 
       <div className="mb-6">
         <h2 className="text-xl font-semibold mb-3">Select Document Category</h2>

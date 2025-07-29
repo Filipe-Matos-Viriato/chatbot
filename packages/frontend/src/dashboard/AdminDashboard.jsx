@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, NavLink } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import ClientManagementTab from './admin-dashboard/ClientManagementTab';
 
 const AdminDashboard = () => {
@@ -27,10 +27,7 @@ const AdminDashboard = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 p-6">
-        <Routes>
-          <Route path="clients" element={<ClientManagementTab />} /> {/* Note: path is relative */}
-          {/* Add routes for other admin tabs here */}
-        </Routes>
+        <Outlet />
       </main>
     </div>
   );
