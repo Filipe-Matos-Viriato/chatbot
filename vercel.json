@@ -5,9 +5,16 @@
   "functions": {
     "api/database-backend.js": {
       "maxDuration": 30
+    },
+    "api/debug.js": {
+      "maxDuration": 10
     }
   },
   "rewrites": [
+    {
+      "source": "/api/debug",
+      "destination": "/api/debug.js"
+    },
     {
       "source": "/api/(.*)",
       "destination": "/api/database-backend.js"
