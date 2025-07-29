@@ -73,6 +73,53 @@ class ChatHistoryService {
       throw error;
     }
   }
+
+  async getRecentChatHistory(sessionId, clientId, limit = 10) {
+    try {
+      console.log(`Retrieving chat history for session: ${sessionId}, client: ${clientId}`);
+      
+      // Query Pinecone for recent messages in this session
+      const queryResponse = await this.pineconeIndex.query({
+        topK: limit * 2, // Get more than needed in case we need to filter
+        includeMetadata: true,
+        filter: {
+          session_id: sessionId,
+          client_id: clientId
+        }
+      });
+
+      if (!queryResponse.matches || queryResponse.matches.length === 0) {
+        return [];
+      }
+
+      // Sort by timestamp and take the most recent messages
+      const sortedMessages = queryResponse.matches
+        .map(match => ({
+          role: match.metadata.role,
+          text: match.metadata.text,
+          timestamp: match.metadata.timestamp,
+          turn_id: match.metadata.turn_id
+        }))
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Most recent first
+        .slice(0, limit); // Take only the requested number
+
+      return sortedMessages;
+    } catch (error) {
+      console.error("Error retrieving chat history:", error);
+      return []; // Return empty array on error to not break the chat
+    }
+  }
+
+  formatChatHistoryForPrompt(chatHistory) {
+    if (!chatHistory || chatHistory.length === 0) {
+      return "Nenhum histórico anterior disponível.";
+    }
+
+    return chatHistory
+      .reverse() // Show oldest first in the prompt
+      .map(msg => `${msg.role === 'user' ? 'Utilizador' : 'Assistente'}: ${msg.text}`)
+      .join('\n');
+  }
 }
 
 export default ChatHistoryService;

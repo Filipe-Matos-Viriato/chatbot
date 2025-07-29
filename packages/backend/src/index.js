@@ -92,10 +92,21 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', async (req, res) => {
     try {
-      const { query, sessionId, context } = req.body;
+      const { query, sessionId, context, onboardingAnswers } = req.body;
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
+
+      // Retrieve recent chat history for this session
+      let chatHistory = null;
+      try {
+        const recentMessages = await chatHistoryService.getRecentChatHistory(sessionId, clientConfig.clientId, 5);
+        chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages`);
+      } catch (error) {
+        console.error('Error retrieving chat history:', error);
+        chatHistory = "Nenhum histórico anterior disponível";
+      }
 
       // Upsert user message to Pinecone
       await chatHistoryService.upsertMessage({
@@ -115,7 +126,26 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received query: ${query}`);
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
 
-      const responseText = await generateResponse(query, clientConfig, context, userContext);
+      // Generate response with enhanced context including chat history and onboarding answers
+      const responseText = await generateResponse(
+        query, 
+        clientConfig, 
+        context, 
+        userContext, 
+        chatHistory, 
+        onboardingAnswers || null
+      );
+
+      // Upsert assistant response to Pinecone
+      await chatHistoryService.upsertMessage({
+        text: responseText,
+        role: 'assistant',
+        client_id: clientConfig.clientId,
+        visitor_id: sessionId,
+        session_id: sessionId,
+        timestamp: new Date().toISOString(),
+        turn_id: `${turnId}-assistant`,
+      }, clientConfig);
 
       // Log the user's question and its embedding to the questions and question_embeddings tables
       try {
@@ -161,17 +191,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       } catch (logError) {
         console.error('Error logging question or embedding:', logError);
       }
-
-      // Upsert chatbot response to Pinecone
-      await chatHistoryService.upsertMessage({
-        text: responseText,
-        role: 'assistant',
-        client_id: clientConfig.clientId,
-        visitor_id: sessionId,
-        session_id: sessionId,
-        timestamp: new Date().toISOString(), // Use a new timestamp for the response
-        turn_id: `${turnId}-assistant`,
-      }, clientConfig);
 
       res.json({ response: responseText });
     } catch (error) {

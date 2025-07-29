@@ -48,14 +48,23 @@ app.get('/', (req, res) => {
 // API endpoint to handle chat requests
 app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
   try {
-    const { query, sessionId, context } = req.body;
+    const { query, sessionId, context, onboardingAnswers } = req.body;
     const { clientConfig } = req;
 
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });
     }
 
-    const responseText = await generateResponse(query, clientConfig, context);
+    // For serverless function, provide basic template variables
+    // (Chat history is not available here due to architectural constraints)
+    const responseText = await generateResponse(
+      query, 
+      clientConfig, 
+      context, 
+      null, // userContext
+      "Histórico não disponível no modo serverless", // chatHistory
+      onboardingAnswers || null
+    );
 
     // Log the user's question and its embedding
     try {

@@ -326,7 +326,7 @@ function isAggregativePriceQuery(query) {
   );
 }
 
-async function generateResponse(query, clientConfig, externalContext = null, userContext = null) {
+async function generateResponse(query, clientConfig, externalContext = null, userContext = null, chatHistory = null, onboardingAnswers = null) {
   let aggregativeContext = '';
 
   // Check for aggregative price queries
@@ -373,25 +373,28 @@ async function generateResponse(query, clientConfig, externalContext = null, use
     .map(match => match.metadata.text)
     .join('\n\n---\n\n');
 
-  // 4. Construct the prompt using the client's configuration
-  const prompt = `
-    ${clientConfig.prompts.systemInstruction}
-    Answer the user's question based ONLY on the context provided below.
-    If the answer is not in the context, say that you do not have enough information to answer that question based on the provided documents.
+  // 4. Prepare template variables for the system prompt
+  const templateVariables = {
+    onboardingAnswers: onboardingAnswers || "Não disponível",
+    chatHistory: chatHistory || "Nenhum histórico anterior disponível",
+    context: context + (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
+    question: query
+  };
 
-    Context:
-    ${context}
-    ${aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''}
- 
-    Question:
-    ${query}
-  `;
+  // 5. Apply template variable substitution to the system instruction
+  let systemPrompt = clientConfig.prompts.systemInstruction;
+  Object.keys(templateVariables).forEach(key => {
+    const placeholder = `{${key}}`;
+    systemPrompt = systemPrompt.replace(new RegExp(placeholder, 'g'), templateVariables[key]);
+  });
 
-  // 5. Generate the final response with retry logic
+  console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt with context variables`);
+
+  // 6. Generate the final response with retry logic
   let retries = 3;
   while (retries > 0) {
     try {
-      const result = await generativeModel.generateContent(prompt);
+      const result = await generativeModel.generateContent(systemPrompt);
       const response = await result.response;
       return response.text();
     } catch (error) {
@@ -400,10 +403,13 @@ async function generateResponse(query, clientConfig, externalContext = null, use
         await delay(2000);
         retries--;
       } else {
-        throw error; // Re-throw other errors or if retries are exhausted
+        console.error('Error generating response:', error);
+        return clientConfig.prompts.fallbackResponse;
       }
     }
   }
+
+  return clientConfig.prompts.fallbackResponse;
 }
 
 async function generateSuggestedQuestions(clientConfig, externalContext = null, chatHistory = [], userContext = null) {
