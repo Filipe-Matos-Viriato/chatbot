@@ -408,10 +408,44 @@ app.post('/api/v1/clients', async (req, res) => {
   }
 });
 
+// GET individual client
+app.get('/api/v1/clients/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('client_id', id)
+      .single();
+
+    if (error) {
+      console.error('Error fetching client:', error);
+      return res.status(500).json({ error: 'Failed to fetch client.' });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Client not found.' });
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error('Error in /api/v1/clients/:id GET endpoint:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 app.put('/api/v1/clients/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
+
+    // Debug: Log what we're trying to save
+    console.log(`🔄 Updating client ${id} with data:`, {
+      hasOnboardingQuestions: !!updateData.default_onboarding_questions,
+      onboardingQuestionCount: updateData.default_onboarding_questions?.questions?.length || 0,
+      dataKeys: Object.keys(updateData)
+    });
 
     const { data, error } = await supabase
       .from('clients')
@@ -424,6 +458,12 @@ app.put('/api/v1/clients/:id', async (req, res) => {
       console.error('Error updating client:', error);
       return res.status(500).json({ error: 'Failed to update client.' });
     }
+
+    // Debug: Log what was saved
+    console.log(`✅ Client ${id} updated successfully:`, {
+      hasOnboardingQuestions: !!data.default_onboarding_questions,
+      onboardingQuestionCount: data.default_onboarding_questions?.questions?.length || 0
+    });
 
     res.json(data);
   } catch (error) {
@@ -551,6 +591,14 @@ app.get('/api/v1/widget/config/:clientId', async (req, res) => {
     // Load client configuration from database
     const clientConfig = await getClientConfig(clientId);
     
+    // Debug: Log what config is being returned to widget
+    console.log(`📋 Widget config for ${clientId}:`, {
+      hasOnboardingQuestions: !!clientConfig.defaultOnboardingQuestions,
+      onboardingQuestionCount: clientConfig.defaultOnboardingQuestions?.questions?.length || 0,
+      firstQuestionId: clientConfig.defaultOnboardingQuestions?.questions?.[0]?.id || 'none',
+      firstQuestionType: clientConfig.defaultOnboardingQuestions?.questions?.[0]?.type || 'none'
+    });
+    
     console.log(`Returning database config for client ${clientId}`);
     res.json(clientConfig);
     
@@ -558,6 +606,16 @@ app.get('/api/v1/widget/config/:clientId', async (req, res) => {
     console.error(`Error fetching widget config for client ${req.params.clientId}:`, error);
     res.status(404).json({ error: 'Configuration not found.' });
   }
+});
+
+// Global error handler to catch JSON parsing errors
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    console.error('Invalid JSON received:', err);
+    return res.status(400).send({ message: 'Invalid JSON payload passed to server.' });
+  }
+  // Pass other errors on
+  next(err);
 });
 
 module.exports = app; 

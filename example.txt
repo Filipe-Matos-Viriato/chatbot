@@ -448,3 +448,171 @@ Key Features Implemented:
 ✅ Error Handling: Graceful fallbacks and user-friendly messages
 ✅ Auto-initialization: Can be embedded with simple script tag
 The widget will automatically load configuration from your existing backend API and provide a complete chat interface that can be embedded on any website.
+
+
+
+
+
+
+{
+    "settings": {
+        "title": "Ajude-nos a encontrar o seu imóvel ideal",
+        "subtitle": "Responda a algumas perguntas para recebermos recomendações personalizadas",
+        "skip_option": "Continuar sem responder",
+        "completion_message": "Obrigado pelas suas respostas! Agora posso ajudá-lo de forma mais personalizada. Em que posso ajudar?"
+    },
+    "questions": [
+        {
+            "id": "tipologia",
+            "type": "multiple_choice",
+            "question": "Que tipo de imóvel procura?",
+            "options": [
+                {
+                    "label": "T0 - Estúdio",
+                    "value": "T0"
+                },
+                {
+                    "label": "T1 - 1 Quarto",
+                    "value": "T1"
+                },
+                {
+                    "label": "T2 - 2 Quartos",
+                    "value": "T2"
+                },
+                {
+                    "label": "T3 - 3 Quartos",
+                    "value": "T3"
+                }
+            ],
+            "required": true
+        },
+        {
+            "id": "orcamento",
+            "type": "range_select",
+            "question": "Qual o seu orçamento?",
+            "options": [
+                {
+                    "label": "Até 150.000€",
+                    "value": "<150k"
+                },
+                {
+                    "label": "150.000€ - 300.000€",
+                    "value": "150k-300k"
+                },
+                {
+                    "label": "300.000€ - 500.000€",
+                    "value": "300k-500k"
+                },
+                {
+                    "label": "500.000€ - 750.000€",
+                    "value": "500k-750k"
+                },
+                {
+                    "label": "Mais de 750.000€",
+                    "value": ">750k"
+                }
+            ],
+            "required": true
+        },
+        {
+            "id": "objetivo",
+            "type": "multiple_choice",
+            "question": "Qual o objetivo da compra?",
+            "options": [
+                {
+                    "label": "Habitação Própria",
+                    "value": "habitacao"
+                },
+                {
+                    "label": "Investimento",
+                    "value": "investimento"
+                },
+                {
+                    "label": "Ambos",
+                    "value": "ambos"
+                }
+            ],
+            "required": true
+        },
+        {
+            "id": "prazo",
+            "type": "multiple_choice",
+            "question": "Em que prazo pretende comprar?",
+            "options": [
+                {
+                    "label": "Imediatamente",
+                    "value": "imediato"
+                },
+                {
+                    "label": "3-6 meses",
+                    "value": "3-6meses"
+                },
+                {
+                    "label": "6-12 meses",
+                    "value": "6-12meses"
+                },
+                {
+                    "label": "Mais de 12 meses",
+                    "value": "+12meses"
+                }
+            ],
+            "required": true
+        },
+        {
+            "id": "localizacao",
+            "type": "multiple_choice",
+            "question": "Onde prefere que seja localizado o imóvel?",
+            "options": [
+                {
+                    "label": "Santa Joana",
+                    "value": "santa_joana"
+                },
+                {
+                    "label": "Verdemilho",
+                    "value": "verdemilho"
+                }
+            ],
+            "required": true
+        },
+        {
+            "id": "caracteristicas",
+            "type": "multiple_select",
+            "question": "Que características considera importantes?",
+            "options": [
+                {
+                    "label": "Varanda/Terraço",
+                    "value": "varanda"
+                },
+                {
+                    "label": "Garagem",
+                    "value": "garagem"
+                },
+                {
+                    "label": "Elevador",
+                    "value": "elevador"
+                },
+                {
+                    "label": "Piscina",
+                    "value": "piscina"
+                },
+                {
+                    "label": "Jardim",
+                    "value": "jardim"
+                },
+                {
+                    "label": "Vista Mar",
+                    "value": "vista_mar"
+                },
+                {
+                    "label": "Centro da Cidade",
+                    "value": "centro_cidade"
+                },
+                {
+                    "label": "Perto de Transportes",
+                    "value": "transportes"
+                }
+            ],
+            "required": false
+        }
+    ]
+}
