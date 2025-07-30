@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../../../config/apiClient';
 import { getListingLeadDistributionMetrics } from '../../../config/supabaseClient';
+import { useClient } from '../../../context/ClientContext'; // Import useClient
 import ListingMetricsCards from './listing-details/ListingMetricsCards';
 import PropertyInformation from './listing-details/PropertyInformation';
 import LeadScoreDistributionChart from './listing-details/LeadScoreDistributionChart';
@@ -14,6 +15,7 @@ import ChatHistory from './listing-details/ChatHistory'; // Import the new compo
 const ListingDetailsPage = () => {
     const { id } = useParams();
     const navigate = useNavigate();
+    const { selectedClientId } = useClient(); // Get selectedClientId from context
     const [listingData, setListingData] = useState(null);
     const [listingMetrics, setListingMetrics] = useState(null);
     const [leadDistributionData, setLeadDistributionData] = useState(null);
@@ -24,10 +26,12 @@ const ListingDetailsPage = () => {
 
     useEffect(() => {
         const fetchListingDetails = async () => {
+            if (!selectedClientId) return; // Don't fetch if no client is selected
+
             try {
                 const [listingResponse, commonQuestionsResponse] = await Promise.all([
-                    fetch(`${API_BASE_URL}/listing/${id}?clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`),
-                    fetch(`${API_BASE_URL}/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
+                    fetch(`${API_BASE_URL}/api/listing/${id}?clientId=${selectedClientId}`),
+                    fetch(`${API_BASE_URL}/api/common-questions?listingId=${id}&clientId=${selectedClientId}`)
                 ]);
 
                 if (!listingResponse.ok) {
@@ -75,7 +79,7 @@ const ListingDetailsPage = () => {
         };
 
         fetchListingDetails();
-    }, [id]);
+    }, [id, selectedClientId]);
 
     if (!listingData || !listingMetrics) {
         return <div className="text-center py-8">Loading listing details...</div>;

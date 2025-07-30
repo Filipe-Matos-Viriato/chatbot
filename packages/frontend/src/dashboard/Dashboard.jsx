@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../config/supabaseClient';
 import { Routes, Route, useLocation, useNavigate, Outlet } from 'react-router-dom';
+import { useClient } from '../context/ClientContext'; // Import useClient
 import OverviewTab from './overview-tab/OverviewTab';
 import LeadPerformanceTab from './lead-performance-tab/LeadPerformanceTab';
 import NavigationTabs from './NavigationTabs';
@@ -14,6 +15,7 @@ import ListingDetailsPage from './listing-performance-tab/components/ListingDeta
 const Dashboard = () => {
     const location = useLocation();
     const navigate = useNavigate();
+    const { selectedClientId } = useClient(); // Get selectedClientId from context
     const [visitors, setVisitors] = useState([]);
     const [listings, setListings] = useState([]);
     const [listingMetrics, setListingMetrics] = useState([]);
@@ -33,27 +35,48 @@ const Dashboard = () => {
     // Fetch data from Supabase
     useEffect(() => {
         const fetchData = async () => {
-            try {
-                const [visitorsResult, listingsResult, metricsResult] = await Promise.all([
-                    supabase.from('visitors').select('*'),
-                    supabase.from('listings').select('*'),
-                    supabase.from('listing_metrics').select('*')
-                ]);
+            if (!selectedClientId) return; // Don't fetch if no client is selected
+            console.log('Fetching data for client ID:', selectedClientId, 'Type:', typeof selectedClientId); // Add this line
 
-                if (!visitorsResult.error) {
-                    setVisitors(visitorsResult.data || []);
-                    console.log('Fetched visitors:', visitorsResult.data);
+            try {
+                // Fetch visitors
+                const { data: visitorsData, error: visitorsError } = await supabase
+                    .from('visitors')
+                    .select('*')
+                    .eq('client_id', selectedClientId);
+                if (visitorsError) {
+                    console.error('Error fetching visitors:', visitorsError);
+                } else {
+                    setVisitors(visitorsData || []);
+                    console.log('Fetched visitors:', visitorsData);
                 }
-                if (!listingsResult.error) {
-                    setListings(listingsResult.data || []);
-                    console.log('Fetched listings:', listingsResult.data);
+
+                // Fetch listings
+                const { data: listingsData, error: listingsError } = await supabase
+                    .from('listings')
+                    .select('*')
+                    .eq('client_id', selectedClientId);
+                if (listingsError) {
+                    console.error('Error fetching listings:', listingsError);
+                } else {
+                    setListings(listingsData || []);
+                    console.log('Fetched listings:', listingsData);
                 }
-                if (!metricsResult.error) {
-                    setListingMetrics(metricsResult.data || []);
-                    console.log('Fetched listing metrics:', metricsResult.data);
+
+                // Fetch listing metrics
+                const { data: metricsData, error: metricsError } = await supabase
+                    .from('listing_metrics')
+                    .select('*')
+                    .eq('client_id', selectedClientId);
+                if (metricsError) {
+                    console.error('Error fetching listing metrics:', metricsError);
+                } else {
+                    setListingMetrics(metricsData || []);
+                    console.log('Fetched listing metrics:', metricsData);
+
                     // Calculate top 5 inquired-about listings
-                    const combinedListings = (listingsResult.data || []).map(listing => {
-                        const metrics = (metricsResult.data || []).find(m => m.listing_id === listing.id);
+                    const combinedListings = (listingsData || []).map(listing => {
+                        const metrics = (metricsData || []).find(m => m.listing_id === listing.id);
                         return {
                             ...listing,
                             inquiries: metrics ? metrics.inquiries : 0,
@@ -73,7 +96,7 @@ const Dashboard = () => {
         };
 
         fetchData();
-    }, []);
+    }, [selectedClientId]);
 
     const handleTabClick = (tabId) => {
         navigate(`/dashboard/${tabId}`);

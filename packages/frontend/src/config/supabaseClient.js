@@ -5,10 +5,11 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-export async function getLeadDistributionMetrics() {
+export async function getLeadDistributionMetrics(clientId) {
     const { data, error } = await supabase
         .from('listing_metrics')
-        .select('lead_score_distribution_hot, lead_score_distribution_warm, lead_score_distribution_cold');
+        .select('lead_score_distribution_hot, lead_score_distribution_warm, lead_score_distribution_cold')
+        .eq('client_id', clientId); // Filter by client_id
 
     if (error) {
         console.error('Error fetching lead distribution metrics:', error);
@@ -34,11 +35,12 @@ export async function getLeadDistributionMetrics() {
     return { hot: 0, warm: 0, cold: 0, total: 0 };
 }
 
-export async function getListingLeadDistributionMetrics(listingId) {
+export async function getListingLeadDistributionMetrics(listingId, clientId) {
     const { data, error } = await supabase
         .from('listing_metrics')
         .select('lead_score_distribution_hot, lead_score_distribution_warm, lead_score_distribution_cold')
         .eq('listing_id', listingId)
+        .eq('client_id', clientId) // Filter by client_id
         .single(); // Use .single() as we expect one row per listing_id
 
     if (error) {
