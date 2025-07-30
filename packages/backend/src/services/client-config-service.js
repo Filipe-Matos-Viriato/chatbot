@@ -32,8 +32,15 @@ async function getClientConfig(clientId) {
     leadScoringRules: data.lead_scoring_rules,
     documentExtraction: data.document_extraction,
     chatHistoryTaggingRules: data.chat_history_tagging_rules,
-    chunking_rules: data.chunking_rules, // Add new column
-    tagging_rules: data.tagging_rules,   // Add new column
+    chunking_rules: data.chunking_rules,
+    tagging_rules: data.tagging_rules,
+    defaultOnboardingQuestions: data.default_onboarding_questions, // Add onboarding questions field
+    // Add widgetSettings derived from theme for widget consumption
+    widgetSettings: {
+      primaryColor: data.theme?.primaryColor || "#007bff",
+      welcomeMessage: "Hello! How can I help you today?",
+      headerText: "Chat with us!"
+    }
   };
 
   return clientConfig;

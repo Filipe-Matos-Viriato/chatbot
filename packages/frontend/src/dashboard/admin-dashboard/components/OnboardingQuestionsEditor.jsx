@@ -91,7 +91,8 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
     }
   };
 
-  const currentValue = value || JSON.stringify(defaultTemplate, null, 2);
+  // Only use default template if value is null/undefined, allow empty string
+  const currentValue = (value === null || value === undefined) ? JSON.stringify(defaultTemplate, null, 2) : value;
 
   const handleJsonChange = (e) => {
     const newValue = e.target.value;
@@ -152,6 +153,12 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
       timestamp: new Date().toLocaleTimeString()
     });
     setLastValidatedValue(currentValue);
+  };
+
+  const clearAllContent = () => {
+    setValidationResult(null);
+    setLastValidatedValue('');
+    onChange({ target: { name: 'default_onboarding_questions', value: '' } });
   };
 
   return (
@@ -232,17 +239,27 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
             </div>
           )}
           
-          <textarea
-            name="default_onboarding_questions"
-            value={currentValue}
-            onChange={handleJsonChange}
-            className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 font-mono text-sm"
-            rows={20}
-            placeholder="Enter onboarding questions configuration in JSON format"
-          />
+          <div className="relative">
+            <textarea
+              name="default_onboarding_questions"
+              value={currentValue}
+              onChange={handleJsonChange}
+              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-3 font-mono text-sm"
+              rows={20}
+              placeholder="Enter onboarding questions configuration in JSON format"
+            />
+            <button
+              type="button"
+              onClick={clearAllContent}
+              className="absolute top-2 right-2 text-xs bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600"
+              title="Clear all content"
+            >
+              Clear All
+            </button>
+          </div>
           
           <div className="text-sm text-gray-600">
-            <p>💡 <strong>Tip:</strong> Edit freely without syntax restrictions. Click "Validate Template" when ready to check your configuration.</p>
+            <p>💡 <strong>Tip:</strong> Edit freely without syntax restrictions. Use "Clear All" to start fresh, then paste your JSON. Click "Validate Template" when ready to check your configuration.</p>
           </div>
         </div>
       )}

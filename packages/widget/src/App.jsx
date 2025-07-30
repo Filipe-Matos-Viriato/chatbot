@@ -66,6 +66,13 @@ class App extends Component {
         throw new Error('Failed to load configuration');
       }
       const config = await configResponse.json();
+      
+      // Log config loading with onboarding questions info
+      console.log(`🔧 Widget config loaded for client ${clientId}:`, {
+        clientName: config.clientName,
+        hasOnboardingQuestions: !!config.defaultOnboardingQuestions,
+        questionCount: config.defaultOnboardingQuestions?.questions?.length || 0
+      });
 
       // Create visitor session
       const sessionResponse = await fetch(`${apiUrl}/v1/sessions`, {
@@ -82,17 +89,37 @@ class App extends Component {
       
       const sessionData = await sessionResponse.json();
 
-      // Get onboarding questions if needed
+      // Get onboarding questions from client configuration
       let onboardingQuestions = null;
       if (sessionData.needs_onboarding) {
-        try {
-          const onboardingResponse = await fetch(`${apiUrl}/v1/visitors/${sessionData.visitor_id}/onboarding?clientId=${clientId}`);
-          if (onboardingResponse.ok) {
-            const onboardingData = await onboardingResponse.json();
-            onboardingQuestions = onboardingData.questions;
+        // Use client's default onboarding questions from config
+        onboardingQuestions = config.defaultOnboardingQuestions;
+        
+        if (onboardingQuestions) {
+          console.log(`✅ Using dynamic onboarding questions from client config for ${clientId}`, onboardingQuestions);
+          
+          // Validate onboarding questions structure
+          if (onboardingQuestions.questions && Array.isArray(onboardingQuestions.questions)) {
+            console.log(`📋 Loaded ${onboardingQuestions.questions.length} onboarding questions`);
+          } else {
+            console.warn('⚠️ Invalid onboarding questions structure, falling back to API');
+            onboardingQuestions = null;
           }
-        } catch (onboardingError) {
-          console.warn('Could not load onboarding questions:', onboardingError);
+        }
+        
+        // If no default questions in config, fall back to API call
+        if (!onboardingQuestions) {
+          console.log(`🔄 Fallback: Fetching onboarding questions from API for visitor ${sessionData.visitor_id}`);
+          try {
+            const onboardingResponse = await fetch(`${apiUrl}/v1/visitors/${sessionData.visitor_id}/onboarding?clientId=${clientId}`);
+            if (onboardingResponse.ok) {
+              const onboardingData = await onboardingResponse.json();
+              onboardingQuestions = onboardingData.questions;
+              console.log(`📥 Received onboarding questions from API`, onboardingQuestions);
+            }
+          } catch (onboardingError) {
+            console.warn('❌ Could not load onboarding questions:', onboardingError);
+          }
         }
       }
 
