@@ -457,19 +457,38 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const { visitorId } = req.params;
       const { answers, completed } = req.body;
 
+      console.log('🔄 Onboarding submission received:', {
+        visitorId,
+        answers,
+        completed,
+        bodyKeys: Object.keys(req.body)
+      });
+
       if (!visitorId || !answers) {
+        console.error('❌ Missing required fields:', { visitorId: !!visitorId, answers: !!answers });
         return res.status(400).json({ error: 'Visitor ID and answers are required' });
       }
 
+      console.log('✅ Calling onboardingService.submitOnboardingAnswers...');
       const updatedVisitor = await onboardingService.submitOnboardingAnswers(visitorId, answers, completed);
+      
+      console.log('✅ Onboarding submission successful:', { visitorId, updatedVisitor });
       res.json({ 
         success: true, 
         visitor: updatedVisitor,
         message: 'Onboarding answers submitted successfully'
       });
     } catch (error) {
-      console.error('Error submitting onboarding answers:', error);
-      res.status(500).json({ error: 'Failed to submit onboarding answers.' });
+      console.error('❌ Error submitting onboarding answers:', {
+        error: error.message,
+        stack: error.stack,
+        visitorId: req.params.visitorId,
+        requestBody: req.body
+      });
+      res.status(500).json({ 
+        error: 'Failed to submit onboarding answers.',
+        details: error.message 
+      });
     }
   });
 
