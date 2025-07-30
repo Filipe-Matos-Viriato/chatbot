@@ -651,8 +651,9 @@ class App extends Component {
         transition: 'all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1)'
       },
       chatButton: {
-        width: isMobile ? '56px' : '64px',
+        width: isMobile ? 'auto' : 'auto',
         height: isMobile ? '56px' : '64px',
+        padding: isMobile ? '12px 16px' : '16px 20px',
         borderRadius: '0 !important',
         border: '1px solid #3f3f3f !important',
         cursor: 'pointer',
@@ -664,7 +665,8 @@ class App extends Component {
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'center'
+        justifyContent: 'center',
+        gap: isMobile ? '8px' : '12px'
       },
       messagesContainer: {
         flex: '1',
@@ -767,7 +769,14 @@ class App extends Component {
         onMouseOut: (e) => e.target.style.transform = 'scale(1)',
         'aria-label': 'Open chat',
         'aria-expanded': isOpen
-      }, chatIcon),
+      }, [
+        h('span', { 
+          style: `font-size: ${isMobile ? '20px' : '24px'};` 
+        }, chatIcon),
+        h('span', { 
+          style: `font-size: ${isMobile ? '12px' : '14px'}; font-weight: 600; white-space: nowrap;` 
+        }, 'Assistente IA')
+      ]),
 
       // Chat Window
       isOpen && h('div', {
