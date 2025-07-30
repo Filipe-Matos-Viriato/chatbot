@@ -18,6 +18,10 @@
     {
       "source": "/api/(.*)",
       "destination": "/api/database-backend.js"
+    },
+    {
+      "source": "/v1/(.*)",
+      "destination": "/api/database-backend.js"
     }
   ]
 } 
