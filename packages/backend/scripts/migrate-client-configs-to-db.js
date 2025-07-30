@@ -28,7 +28,7 @@ async function migrateClientConfigs() {
                 leadScoringRules,
                 documentExtraction,
                 chatHistoryTaggingRules,
-                ingestionPipeline
+                default_onboarding_questions
             } = clientConfig;
 
             // Generate a UUID for the client if clientId is not already a UUID
@@ -58,7 +58,7 @@ async function migrateClientConfigs() {
                     lead_scoring_rules: leadScoringRules,
                     document_extraction: documentExtraction,
                     chat_history_tagging_rules: chatHistoryTaggingRules,
-                    ingestion_pipeline: ingestionPipeline,
+                    default_onboarding_questions: default_onboarding_questions,
                     updated_at: new Date().toISOString() // Update timestamp on upsert
                 }, { onConflict: 'client_id', ignoreDuplicates: false })
                 .select();

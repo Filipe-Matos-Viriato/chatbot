@@ -8,6 +8,7 @@ const defaultClientConfigService = require('./services/client-config-service');
 const { processDocument: defaultProcessDocument } = require('./services/ingestion-service');
 const listingService = require('./services/listing-service'); // Import Listing Service
 const visitorService = require('./services/visitor-service');
+const onboardingService = require('./services/onboarding-service');
 const defaultSupabase = require('./config/supabase'); // Import Supabase client
 const ChatHistoryService = require('./services/chat-history-service').default; // Import ChatHistoryService
 const developmentService = require('./services/development-service'); // Import Development Service
@@ -54,7 +55,15 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   } = dependencies;
 
   const app = express();
-  app.use(cors());
+  
+  // Updated CORS configuration for third-party websites
+  app.use(cors({
+    origin: true, // Allow requests from any origin (necessary for embedded widgets)
+    credentials: true, // Allow cookies and auth headers
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-User-Id', 'X-User-Role']
+  }));
+  
   app.use(express.json());
   // Global request logger for debugging
   app.use((req, res, next) => {
@@ -82,6 +91,126 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error('Error in /v1/clients endpoint:', error);
       res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
+  // Also handle the /api/v1/clients path for frontend compatibility
+  app.get('/api/v1/clients', async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*');
+
+      if (error) {
+        console.error('Error fetching clients:', error);
+        return res.status(500).json({ error: 'Failed to fetch clients.' });
+      }
+      res.json(data);
+    } catch (error) {
+      console.error('Error in /api/v1/clients endpoint:', error);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
+  // API endpoint to get widget configuration (moved before middleware)
+  app.get('/api/v1/widget/config/:clientId', async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      res.json(clientConfig);
+    } catch (error) {
+      console.error(`Error fetching widget config for client ${req.params.clientId}:`, error);
+      res.status(404).json({ error: 'Configuration not found.' });
+    }
+  });
+
+  // Visitor onboarding endpoints (moved before middleware - they don't need client config context)
+  app.get('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const clientId = req.headers['x-client-id'] || req.query.clientId;
+
+      if (!visitorId || !clientId) {
+        return res.status(400).json({ error: 'Visitor ID and Client ID are required' });
+      }
+
+      const onboardingData = await onboardingService.getVisitorOnboardingStatus(visitorId, clientId);
+      res.json(onboardingData);
+    } catch (error) {
+      console.error('Error getting visitor onboarding status:', error);
+      res.status(500).json({ error: 'Failed to get visitor onboarding status.' });
+    }
+  });
+
+  // API endpoint to submit onboarding answers
+  app.post('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      console.log('🔍 Raw request details:', {
+        visitorId: req.params.visitorId,
+        hasBody: !!req.body,
+        bodyType: typeof req.body,
+        bodyStringified: JSON.stringify(req.body),
+        contentType: req.headers['content-type'],
+        contentLength: req.headers['content-length']
+      });
+
+      const { visitorId } = req.params;
+      const { answers, completed } = req.body;
+
+      console.log('🔄 Onboarding submission received:', {
+        visitorId,
+        answers,
+        completed,
+        bodyKeys: req.body ? Object.keys(req.body) : 'NO_BODY'
+      });
+
+      if (!visitorId || !answers) {
+        console.error('❌ Missing required fields:', { visitorId: !!visitorId, answers: !!answers });
+        return res.status(400).json({ error: 'Visitor ID and answers are required' });
+      }
+
+      console.log('✅ Calling onboardingService.submitOnboardingAnswers...');
+      const updatedVisitor = await onboardingService.submitOnboardingAnswers(visitorId, answers, completed);
+      
+      console.log('✅ Onboarding submission successful:', { visitorId, updatedVisitor });
+      res.json({ 
+        success: true, 
+        visitor: updatedVisitor,
+        message: 'Onboarding answers submitted successfully'
+      });
+    } catch (error) {
+      console.error('❌ Error submitting onboarding answers:', {
+        error: error.message,
+        stack: error.stack,
+        visitorId: req.params.visitorId,
+        requestBody: req.body
+      });
+      res.status(500).json({ 
+        error: 'Failed to submit onboarding answers.',
+        details: error.message 
+      });
+    }
+  });
+
+  // API endpoint to update onboarding answers
+  app.put('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { answers } = req.body;
+
+      if (!visitorId || !answers) {
+        return res.status(400).json({ error: 'Visitor ID and answers are required' });
+      }
+
+      const updatedVisitor = await onboardingService.updateOnboardingAnswers(visitorId, answers);
+      res.json({ 
+        success: true, 
+        visitor: updatedVisitor,
+        message: 'Onboarding answers updated successfully'
+      });
+    } catch (error) {
+      console.error('Error updating onboarding answers:', error);
+      res.status(500).json({ error: 'Failed to update onboarding answers.' });
     }
   });
 
@@ -129,14 +258,35 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received query: ${query}`);
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
 
+      // Get and format onboarding answers for better context
+      let formattedOnboardingAnswers = null;
+      try {
+        // Check if we have onboarding answers from the request body first
+        if (onboardingAnswers) {
+          formattedOnboardingAnswers = onboardingAnswers;
+        } else if (visitorId) {
+          // Try to get visitor's onboarding status from database
+          const onboardingStatus = await onboardingService.getVisitorOnboardingStatus(visitorId, clientConfig.clientId);
+          if (onboardingStatus.completed && onboardingStatus.answers && onboardingStatus.questions) {
+            formattedOnboardingAnswers = onboardingService.formatOnboardingAnswersForRAG(
+              onboardingStatus.answers, 
+              onboardingStatus.questions
+            );
+          }
+        }
+      } catch (error) {
+        console.warn('Could not retrieve onboarding answers for visitor:', error.message);
+        // Don't fail the chat request if onboarding retrieval fails
+      }
+
       // Generate response with enhanced context including chat history and onboarding answers
       const responseText = await generateResponse(
-        query,
-        clientConfig,
-        context,
-        userContext,
-        chatHistory,
-        onboardingAnswers || null
+        query, 
+        clientConfig, 
+        context, 
+        userContext, 
+        chatHistory, 
+        formattedOnboardingAnswers
       );
 
       // Upsert assistant response to Pinecone
@@ -255,18 +405,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // API endpoint to get widget configuration
-  app.get('/api/v1/widget/config/:clientId', async (req, res) => {
-    try {
-      const { clientId } = req.params;
-      const clientConfig = await clientConfigService.getClientConfig(clientId);
-      res.json(clientConfig);
-    } catch (error) {
-      console.error(`Error fetching widget config for client ${req.params.clientId}:`, error);
-      res.status(404).json({ error: 'Configuration not found.' });
-    }
-  });
-
   // API endpoint to handle document uploads
   app.post('/v1/documents/upload', clientConfigMiddleware(clientConfigService), upload.fields([
     { name: 'files', maxCount: 10 },
@@ -344,7 +482,14 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(400).json({ error: 'Client ID is required' });
       }
       const newVisitor = await visitorService.createVisitor(clientId, listingId); // Pass listingId
-      res.status(201).json({ visitor_id: newVisitor.visitor_id });
+      
+      // Include onboarding status in response - new visitors need onboarding
+      const needsOnboarding = !newVisitor.onboarding_completed;
+      
+      res.status(201).json({ 
+        visitor_id: newVisitor.visitor_id,
+        needs_onboarding: needsOnboarding
+      });
     } catch (error) {
       console.error('Error creating visitor session:', error);
       res.status(500).json({ error: 'Failed to create visitor session.' });
@@ -396,6 +541,47 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error('Error getting visitor:', error);
       res.status(500).json({ error: 'Failed to get visitor.' });
+    }
+  });
+
+
+
+  // API endpoint to get client onboarding template
+  app.get('/v1/clients/:clientId/onboarding-template', async (req, res) => {
+    try {
+      const { clientId } = req.params;
+
+      if (!clientId) {
+        return res.status(400).json({ error: 'Client ID is required' });
+      }
+
+      const template = await onboardingService.getClientOnboardingTemplate(clientId);
+      res.json(template);
+    } catch (error) {
+      console.error('Error getting client onboarding template:', error);
+      res.status(500).json({ error: 'Failed to get client onboarding template.' });
+    }
+  });
+
+  // API endpoint to update client onboarding template
+  app.put('/v1/clients/:clientId/onboarding-template', async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { template } = req.body;
+
+      if (!clientId || !template) {
+        return res.status(400).json({ error: 'Client ID and template are required' });
+      }
+
+      const updatedClient = await onboardingService.updateClientOnboardingTemplate(clientId, template);
+      res.json({ 
+        success: true, 
+        client: updatedClient,
+        message: 'Onboarding template updated successfully'
+      });
+    } catch (error) {
+      console.error('Error updating client onboarding template:', error);
+      res.status(500).json({ error: 'Failed to update client onboarding template.' });
     }
   });
 
@@ -627,6 +813,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // Also handle the /api/v1/clients path for frontend compatibility
+  app.post('/api/v1/clients', async (req, res) => {
+    try {
+      const newClient = await clientConfigService.createClientConfig(req.body);
+      res.status(201).json(newClient);
+    } catch (error) {
+      console.error('Error creating client:', error);
+      res.status(500).json({ error: 'Failed to create client.' });
+    }
+  });
 
   app.get('/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
@@ -650,7 +846,31 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // Also handle the /api/v1/clients/:id path for frontend compatibility
+  app.put('/api/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updatedClient = await clientConfigService.updateClientConfig(id, req.body);
+      res.json(updatedClient);
+    } catch (error) {
+      console.error('Error updating client:', error);
+      res.status(500).json({ error: 'Failed to update client.' });
+    }
+  });
+
   app.delete('/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { id } = req.params;
+      await clientConfigService.deleteClientConfig(id);
+      res.json({ success: true, message: 'Client deleted successfully.' });
+    } catch (error) {
+      console.error('Error deleting client:', error);
+      res.status(500).json({ error: 'Failed to delete client.' });
+    }
+  });
+
+  // Also handle the /api/v1/clients/:id path for frontend compatibility
+  app.delete('/api/v1/clients/:id', async (req, res) => {
     try {
       const { id } = req.params;
       await clientConfigService.deleteClientConfig(id);

@@ -13,24 +13,31 @@ class VisitorService {
       visitor_id: visitorId,
       client_id: clientId,
       lead_score: 0,
+      onboarding_completed: false,  // Add this field explicitly
+      onboarding_questions: null,   // Add this field explicitly  
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    console.log('Attempting to insert new visitor into Supabase:', newVisitor);
+    console.log('🔄 Attempting to insert new visitor into Supabase:', newVisitor);
     const { data, error } = await supabase
       .from('visitors')
       .insert([newVisitor])
       .select();
 
-    console.log('Supabase insert data:', data);
+    console.log('📊 Supabase insert result:', { data, error });
 
     if (error) {
-      console.error('Error creating visitor in Supabase:', error);
+      console.error('❌ Error creating visitor in Supabase:', error);
       throw new Error('Failed to create visitor');
     }
 
-    console.log(`Visitor created: ${visitorId} for client ${clientId}`);
+    if (!data || data.length === 0) {
+      console.error('❌ No data returned from visitor creation');
+      throw new Error('Failed to create visitor - no data returned');
+    }
+
+    console.log(`✅ Visitor created successfully: ${visitorId} for client ${clientId}`);
 
     return data[0];
   }

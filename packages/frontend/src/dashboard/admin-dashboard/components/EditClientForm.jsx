@@ -9,6 +9,8 @@ import UrlPatternEditor from './UrlPatternEditor';
 import PromptsEditor from './PromptsEditor';
 import ChatHistoryTaggingRulesEditor from './ChatHistoryTaggingRulesEditor';
 import LeadScoringRulesEditor from './LeadScoringRulesEditor';
+import OnboardingQuestionsEditor from './OnboardingQuestionsEditor';
+import EmbedScriptGenerator from './EmbedScriptGenerator';
 
 const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditingClient, fetchClients, setError }) => {
   const navigate = useNavigate();
@@ -22,7 +24,7 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
     e.preventDefault();
     try {
       const dataToSend = { ...editFormData };
-      const jsonFields = ['document_extraction', 'chunking_rules', 'tagging_rules', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules'];
+      const jsonFields = ['document_extraction', 'chunking_rules', 'tagging_rules', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules', 'default_onboarding_questions'];
 
       for (const field of jsonFields) {
         if (dataToSend[field]) {
@@ -122,6 +124,14 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
         <LeadScoringRulesEditor
           value={editFormData.lead_scoring_rules}
           onChange={handleEditFormChange}
+        />
+        <OnboardingQuestionsEditor
+          value={editFormData.default_onboarding_questions}
+          onChange={handleEditFormChange}
+        />
+        <EmbedScriptGenerator
+          clientId={editFormData.client_id}
+          clientName={editFormData.client_name}
         />
         <div className="md:col-span-3 flex justify-end items-center">
           <button

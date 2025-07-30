@@ -3,7 +3,7 @@ const path = require('path');
 
 async function copyWidget() {
   const sourceDir = path.join(__dirname, 'packages/widget/dist');
-  const targetDir = path.join(__dirname, 'packages/frontend/public/widget');
+  const targetDir = path.join(__dirname, 'packages/frontend/dist/widget');
   
   try {
     // Ensure target directory exists
