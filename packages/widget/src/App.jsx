@@ -304,13 +304,21 @@ class App extends Component {
   };
 
   handleOnboardingAnswer = (questionId, answer, questionIndex) => {
-    const { onboardingQuestions, onboardingAnswers, currentOnboardingIndex } = this.state;
+    const { onboardingQuestions, onboardingAnswers } = this.state;
+    
+    // Ensure we're answering the current question
+    if (questionIndex !== this.state.currentOnboardingIndex) {
+      console.log('⚠️ Ignoring answer for old question:', { questionIndex, currentIndex: this.state.currentOnboardingIndex });
+      return;
+    }
     
     // Store the answer
     const newAnswers = {
       ...onboardingAnswers,
       [questionId]: answer
     };
+
+    console.log('📝 Recording answer:', { questionId, answer, questionIndex });
 
     this.setState({
       onboardingAnswers: newAnswers
@@ -328,12 +336,16 @@ class App extends Component {
     this.addUserMessage(userMessage);
 
     // Move to next question or complete
-    if (currentOnboardingIndex < onboardingQuestions.questions.length - 1) {
+    const nextIndex = questionIndex + 1;
+    if (nextIndex < onboardingQuestions.questions.length) {
+      console.log('➡️ Moving to next question:', { from: questionIndex, to: nextIndex });
       setTimeout(() => {
-        this.setState({ currentOnboardingIndex: currentOnboardingIndex + 1 });
-        this.showCurrentOnboardingQuestion();
+        this.setState({ currentOnboardingIndex: nextIndex }, () => {
+          this.showCurrentOnboardingQuestion();
+        });
       }, 500);
     } else {
+      console.log('✅ Onboarding complete, submitting answers');
       setTimeout(() => {
         this.completeOnboarding();
       }, 500);
@@ -436,10 +448,10 @@ class App extends Component {
 
     return h('div', {
       style: 'margin-top: 12px;'
-    }, this.renderQuestionOptions(question));
+    }, this.renderQuestionOptions(question, message.questionIndex));
   };
 
-  renderQuestionOptions = (question) => {
+  renderQuestionOptions = (question, questionIndex) => {
     const { onboardingAnswers } = this.state;
     const answer = onboardingAnswers[question.id];
 
@@ -451,7 +463,7 @@ class App extends Component {
         }, question.options.map(option => 
           h('button', {
             key: option.value,
-            onClick: () => this.handleOnboardingAnswer(question.id, option.value, this.state.currentOnboardingIndex),
+            onClick: () => this.handleOnboardingAnswer(question.id, option.value, questionIndex),
             style: `
               padding: 10px 12px;
               border: 2px solid ${answer === option.value ? '#3b82f6' : '#e2e8f0'};
@@ -515,7 +527,7 @@ class App extends Component {
             }, option.label);
           }),
           selectedValues.length > 0 && h('button', {
-            onClick: () => this.handleOnboardingAnswer(question.id, selectedValues, this.state.currentOnboardingIndex),
+            onClick: () => this.handleOnboardingAnswer(question.id, selectedValues, questionIndex),
             style: `
               padding: 12px;
               background: #3b82f6;
@@ -547,7 +559,7 @@ class App extends Component {
             },
             onKeyPress: (e) => {
               if (e.key === 'Enter' && (answer || '').trim()) {
-                this.handleOnboardingAnswer(question.id, answer, this.state.currentOnboardingIndex);
+                this.handleOnboardingAnswer(question.id, answer, questionIndex);
               }
             },
             style: `
@@ -559,7 +571,7 @@ class App extends Component {
             `
           }),
           h('button', {
-            onClick: () => this.handleOnboardingAnswer(question.id, answer, this.state.currentOnboardingIndex),
+            onClick: () => this.handleOnboardingAnswer(question.id, answer, questionIndex),
             disabled: !(answer || '').trim(),
             style: `
               padding: 10px 16px;
