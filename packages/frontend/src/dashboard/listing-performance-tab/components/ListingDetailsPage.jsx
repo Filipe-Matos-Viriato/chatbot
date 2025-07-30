@@ -26,7 +26,7 @@ const ListingDetailsPage = () => {
         const fetchListingDetails = async () => {
             try {
                 const [listingResponse, commonQuestionsResponse] = await Promise.all([
-                    fetch(`${API_BASE_URL}/listing/${id}`),
+                    fetch(`${API_BASE_URL}/listing/${id}?clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`),
                     fetch(`${API_BASE_URL}/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
                 ]);
 
