@@ -13,13 +13,6 @@ module.exports = async (req, res) => {
     
     // Check if this is a widget static file request that shouldn't be here
     // Allow /api/v1/widget/config/* but block static widget files like /widget/loader.js
-    console.log('🔍 Widget URL check:', {
-      url: req.url,
-      includesWidget: req.url && req.url.includes('/widget/'),
-      includesWidgetConfig: req.url && req.url.includes('/api/v1/widget/config/'),
-      shouldBlock: req.url && req.url.includes('/widget/') && !req.url.includes('/api/v1/widget/config/')
-    });
-    
     if (req.url && req.url.includes('/widget/') && !req.url.includes('/api/v1/widget/config/')) {
       console.error('❌ WIDGET FILE REQUEST HITTING DATABASE FUNCTION!');
       console.error('  This should be served statically, not by this function');

@@ -55,7 +55,15 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   } = dependencies;
 
   const app = express();
-  app.use(cors());
+  
+  // Updated CORS configuration for third-party websites
+  app.use(cors({
+    origin: true, // Allow requests from any origin (necessary for embedded widgets)
+    credentials: true, // Allow cookies and auth headers
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-User-Id', 'X-User-Role']
+  }));
+  
   app.use(express.json());
 
   // Apply test middleware if provided (must be before clientConfigMiddleware)
