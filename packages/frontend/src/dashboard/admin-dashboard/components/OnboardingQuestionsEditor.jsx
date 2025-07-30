@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 
 const OnboardingQuestionsEditor = ({ value, onChange }) => {
   const [isJsonView, setIsJsonView] = useState(false);
-  const [jsonError, setJsonError] = useState('');
+  const [validationResult, setValidationResult] = useState(null);
+  const [lastValidatedValue, setLastValidatedValue] = useState('');
 
   // Default Portuguese onboarding questions template
   const defaultTemplate = {
@@ -94,18 +95,18 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
 
   const handleJsonChange = (e) => {
     const newValue = e.target.value;
-    try {
-      JSON.parse(newValue);
-      setJsonError('');
-      onChange({ target: { name: 'default_onboarding_questions', value: newValue } });
-    } catch (error) {
-      setJsonError('Invalid JSON syntax');
+    // Clear validation result when content changes after validation
+    if (lastValidatedValue && newValue !== lastValidatedValue) {
+      setValidationResult(null);
+      setLastValidatedValue('');
     }
+    onChange({ target: { name: 'default_onboarding_questions', value: newValue } });
   };
 
   const loadDefaultTemplate = () => {
     const templateJson = JSON.stringify(defaultTemplate, null, 2);
-    setJsonError('');
+    setValidationResult(null);
+    setLastValidatedValue('');
     onChange({ target: { name: 'default_onboarding_questions', value: templateJson } });
   };
 
@@ -143,7 +144,15 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
     }
   };
 
-  const validationError = validateTemplate();
+  const handleManualValidation = () => {
+    const error = validateTemplate();
+    setValidationResult({
+      isValid: !error,
+      message: error || 'Template is valid!',
+      timestamp: new Date().toLocaleTimeString()
+    });
+    setLastValidatedValue(currentValue);
+  };
 
   return (
     <div className="grid-item">
@@ -152,6 +161,13 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
           Onboarding Questions Template
         </label>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleManualValidation}
+            className="text-xs bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600"
+          >
+            Validate Template
+          </button>
           <button
             type="button"
             onClick={loadDefaultTemplate}
@@ -171,16 +187,24 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
 
       {!isJsonView ? (
         <div className="space-y-4">
+          {/* Validation Results */}
+          {validationResult && (
+            <div className={`text-sm p-3 border rounded ${
+              validationResult.isValid 
+                ? 'text-green-700 bg-green-50 border-green-200' 
+                : 'text-red-700 bg-red-50 border-red-200'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span>{validationResult.isValid ? '✅' : '⚠️'} {validationResult.message}</span>
+                <span className="text-xs opacity-75">Validated at {validationResult.timestamp}</span>
+              </div>
+            </div>
+          )}
+          
           {/* Visual Preview */}
           <div className="border border-gray-300 rounded-md p-4 bg-gray-50 max-h-96 overflow-y-auto">
             <h3 className="text-lg font-semibold text-gray-800 mb-2">Preview</h3>
-            {validationError ? (
-              <div className="text-red-600 text-sm mb-4 p-3 bg-red-50 border border-red-200 rounded">
-                ⚠️ {validationError}
-              </div>
-            ) : (
-              <OnboardingPreview template={JSON.parse(currentValue)} />
-            )}
+            <OnboardingPreview template={currentValue} />
           </div>
           <div className="text-sm text-gray-600">
             <p className="mb-2"><strong>Supported Question Types:</strong></p>
@@ -194,6 +218,20 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
         </div>
       ) : (
         <div className="space-y-2">
+          {/* Validation Results */}
+          {validationResult && (
+            <div className={`text-sm p-3 border rounded ${
+              validationResult.isValid 
+                ? 'text-green-700 bg-green-50 border-green-200' 
+                : 'text-red-700 bg-red-50 border-red-200'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span>{validationResult.isValid ? '✅' : '⚠️'} {validationResult.message}</span>
+                <span className="text-xs opacity-75">Validated at {validationResult.timestamp}</span>
+              </div>
+            </div>
+          )}
+          
           <textarea
             name="default_onboarding_questions"
             value={currentValue}
@@ -202,15 +240,10 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
             rows={20}
             placeholder="Enter onboarding questions configuration in JSON format"
           />
-          {jsonError && (
-            <p className="text-red-600 text-sm">⚠️ {jsonError}</p>
-          )}
-          {!jsonError && validationError && (
-            <p className="text-red-600 text-sm">⚠️ {validationError}</p>
-          )}
-          {!jsonError && !validationError && (
-            <p className="text-green-600 text-sm">✅ Valid onboarding template</p>
-          )}
+          
+          <div className="text-sm text-gray-600">
+            <p>💡 <strong>Tip:</strong> Edit freely without syntax restrictions. Click "Validate Template" when ready to check your configuration.</p>
+          </div>
         </div>
       )}
 
@@ -224,7 +257,21 @@ const OnboardingQuestionsEditor = ({ value, onChange }) => {
 
 // Component to preview the onboarding questions
 const OnboardingPreview = ({ template }) => {
-  if (!template || !template.questions) {
+  let parsedTemplate;
+  
+  // Try to parse the template if it's a string
+  try {
+    parsedTemplate = typeof template === 'string' ? JSON.parse(template) : template;
+  } catch (error) {
+    return (
+      <div className="text-gray-500 text-center py-8">
+        <p>Unable to preview - invalid JSON format</p>
+        <p className="text-xs mt-2">Click "Validate Template" to check for specific errors</p>
+      </div>
+    );
+  }
+
+  if (!parsedTemplate || !parsedTemplate.questions) {
     return <div className="text-gray-500">No questions configured</div>;
   }
 
@@ -232,12 +279,12 @@ const OnboardingPreview = ({ template }) => {
     <div className="space-y-4">
       {/* Settings Preview */}
       <div className="bg-white p-4 rounded border border-gray-200">
-        <h4 className="font-semibold text-blue-600">{template.settings?.title || 'Onboarding Title'}</h4>
-        <p className="text-sm text-gray-600 mt-1">{template.settings?.subtitle || 'Onboarding subtitle'}</p>
+        <h4 className="font-semibold text-blue-600">{parsedTemplate.settings?.title || 'Onboarding Title'}</h4>
+        <p className="text-sm text-gray-600 mt-1">{parsedTemplate.settings?.subtitle || 'Onboarding subtitle'}</p>
       </div>
 
       {/* Questions Preview */}
-      {template.questions.map((question, index) => (
+      {parsedTemplate.questions.map((question, index) => (
         <div key={question.id || index} className="bg-white p-4 rounded border border-gray-200">
           <h5 className="font-medium text-gray-800 mb-2">
             {question.question}
@@ -281,10 +328,10 @@ const OnboardingPreview = ({ template }) => {
       {/* Completion Message Preview */}
       <div className="bg-green-50 p-4 rounded border border-green-200">
         <div className="text-sm text-green-800">
-          <strong>Completion Message:</strong> {template.settings?.completion_message}
+          <strong>Completion Message:</strong> {parsedTemplate.settings?.completion_message}
         </div>
         <div className="text-sm text-gray-600 mt-1">
-          <strong>Skip Option:</strong> {template.settings?.skip_option}
+          <strong>Skip Option:</strong> {parsedTemplate.settings?.skip_option}
         </div>
       </div>
     </div>
