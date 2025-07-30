@@ -1,5 +1,4 @@
 import { h, Component, Fragment } from 'preact';
-import OnboardingModal from './OnboardingModal.jsx';
 
 class App extends Component {
   constructor(props) {
@@ -13,10 +12,12 @@ class App extends Component {
       error: null,
       isLoadingConfig: false,
       // Onboarding state
-      showOnboarding: false,
       onboardingQuestions: null,
       visitorId: null,
-      needsOnboarding: false
+      needsOnboarding: false,
+      currentOnboardingIndex: 0,
+      onboardingAnswers: {},
+      isInOnboardingMode: false
     };
   }
 
@@ -101,22 +102,26 @@ class App extends Component {
         needsOnboarding: sessionData.needs_onboarding,
         onboardingQuestions,
         isLoadingConfig: false,
-        messages: [{
+        messages: []
+      });
+
+      // Start onboarding in chat if needed, otherwise show welcome message
+      if (sessionData.needs_onboarding && onboardingQuestions) {
+        setTimeout(() => {
+          this.startOnboardingInChat();
+        }, 1000);
+      } else {
+        // Add welcome message only if not doing onboarding
+        const welcomeMessage = {
           id: Date.now(),
           text: config.widgetSettings?.welcomeMessage || 'Hello! How can I help you?',
           sender: 'bot',
           timestamp: new Date(),
           ariaLabel: 'Welcome message from chatbot'
-        }]
-      });
-
-      // Show onboarding after a brief delay if needed
-      if (sessionData.needs_onboarding && onboardingQuestions) {
-        setTimeout(() => {
-          if (this.state.needsOnboarding) {
-            this.setState({ showOnboarding: true });
-          }
-        }, 1000);
+        };
+        this.setState(prev => ({
+          messages: [...prev.messages, welcomeMessage]
+        }));
       }
 
     } catch (error) {
@@ -157,36 +162,7 @@ class App extends Component {
     setTimeout(() => document.body.removeChild(announcement), 1000);
   };
 
-  handleOnboardingComplete = (answers) => {
-    this.setState({ 
-      showOnboarding: false,
-      needsOnboarding: false 
-    });
-    
-    // Add completion message to chat
-    const completionMessage = {
-      id: Date.now(),
-      text: this.state.onboardingQuestions?.settings?.completion_message || 
-            'Obrigado! Com base nas suas preferências, posso agora ajudá-lo a encontrar o imóvel perfeito.',
-      sender: 'bot',
-      timestamp: new Date(),
-      ariaLabel: 'Onboarding completion message'
-    };
-    
-    this.setState(prev => ({
-      messages: [...prev.messages, completionMessage]
-    }));
 
-    this.announceToScreenReader('Onboarding completed successfully');
-  };
-
-  handleOnboardingSkip = () => {
-    this.setState({ 
-      showOnboarding: false,
-      needsOnboarding: false 
-    });
-    this.announceToScreenReader('Onboarding skipped');
-  };
 
   sendMessage = async () => {
     const { inputValue, messages, config } = this.state;
@@ -273,6 +249,332 @@ class App extends Component {
       }));
 
       this.announceToScreenReader('Error occurred while sending message');
+    }
+  };
+
+  // Onboarding methods
+  startOnboardingInChat = () => {
+    const { onboardingQuestions } = this.state;
+    if (!onboardingQuestions?.questions || onboardingQuestions.questions.length === 0) {
+      return;
+    }
+
+    this.setState({
+      isInOnboardingMode: true,
+      currentOnboardingIndex: 0
+    });
+
+    // Add intro message
+    const introMessage = {
+      id: Date.now(),
+      text: onboardingQuestions.settings?.title || 'Ajude-nos a encontrar o seu imóvel ideal! Responda a algumas perguntas para receber recomendações personalizadas.',
+      sender: 'bot',
+      timestamp: new Date(),
+      type: 'onboarding-intro'
+    };
+
+    this.addBotMessage(introMessage);
+
+    // Add first question
+    setTimeout(() => {
+      this.showCurrentOnboardingQuestion();
+    }, 1000);
+  };
+
+  showCurrentOnboardingQuestion = () => {
+    const { onboardingQuestions, currentOnboardingIndex } = this.state;
+    const question = onboardingQuestions.questions[currentOnboardingIndex];
+
+    if (!question) {
+      this.completeOnboarding();
+      return;
+    }
+
+    const questionMessage = {
+      id: Date.now(),
+      text: question.question + (question.required ? ' *' : ''),
+      sender: 'bot',
+      timestamp: new Date(),
+      type: 'onboarding-question',
+      questionData: question,
+      questionIndex: currentOnboardingIndex
+    };
+
+    this.addBotMessage(questionMessage);
+  };
+
+  handleOnboardingAnswer = (questionId, answer, questionIndex) => {
+    const { onboardingQuestions, onboardingAnswers, currentOnboardingIndex } = this.state;
+    
+    // Store the answer
+    const newAnswers = {
+      ...onboardingAnswers,
+      [questionId]: answer
+    };
+
+    this.setState({
+      onboardingAnswers: newAnswers
+    });
+
+    // Show user's response as a message
+    const answerText = this.formatAnswerForDisplay(answer, onboardingQuestions.questions[questionIndex]);
+    const userMessage = {
+      id: Date.now(),
+      text: answerText,
+      sender: 'user',
+      timestamp: new Date()
+    };
+
+    this.addUserMessage(userMessage);
+
+    // Move to next question or complete
+    if (currentOnboardingIndex < onboardingQuestions.questions.length - 1) {
+      setTimeout(() => {
+        this.setState({ currentOnboardingIndex: currentOnboardingIndex + 1 });
+        this.showCurrentOnboardingQuestion();
+      }, 500);
+    } else {
+      setTimeout(() => {
+        this.completeOnboarding();
+      }, 500);
+    }
+  };
+
+  formatAnswerForDisplay = (answer, question) => {
+    if (question.type === 'multiple_select' && Array.isArray(answer)) {
+      const selectedOptions = question.options.filter(opt => answer.includes(opt.value));
+      return selectedOptions.map(opt => opt.label).join(', ');
+    } else if (question.type === 'multiple_choice' || question.type === 'range_select') {
+      const selectedOption = question.options.find(opt => opt.value === answer);
+      return selectedOption ? selectedOption.label : answer;
+    }
+    return answer;
+  };
+
+  completeOnboarding = async () => {
+    const { onboardingAnswers, visitorId, onboardingQuestions } = this.state;
+    const apiUrl = this.props.config?.apiUrl || 'https://chatbot1-eta.vercel.app';
+
+    console.log('🔄 Submitting onboarding answers:', {
+      visitorId,
+      answers: onboardingAnswers,
+      apiUrl: `${apiUrl}/v1/visitors/${visitorId}/onboarding`
+    });
+
+    try {
+      // Submit onboarding answers
+      const response = await fetch(`${apiUrl}/v1/visitors/${visitorId}/onboarding`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          answers: onboardingAnswers,
+          completed: true 
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`HTTP ${response.status}: ${errorData.error || response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Onboarding submission successful:', result);
+
+      // Add completion message from settings
+      const completionText = onboardingQuestions?.settings?.completion_message || 
+                           'Obrigado pelas suas respostas! Agora posso ajudá-lo de forma mais personalizada. Em que posso ajudar?';
+      
+      const completionMessage = {
+        id: Date.now(),
+        text: completionText,
+        sender: 'bot',
+        timestamp: new Date()
+      };
+
+      this.addBotMessage(completionMessage);
+
+    } catch (error) {
+      console.error('❌ Error submitting onboarding:', error);
+      const errorMessage = {
+        id: Date.now(),
+        text: 'Erro ao guardar as suas respostas, mas posso ajudá-lo na mesma. Em que posso ajudar?',
+        sender: 'bot',
+        timestamp: new Date()
+      };
+      this.addBotMessage(errorMessage);
+    }
+
+    this.setState({
+      isInOnboardingMode: false,
+      needsOnboarding: false
+    });
+  };
+
+  addBotMessage = (message) => {
+    this.setState(prev => ({
+      messages: [...prev.messages, message]
+    }));
+  };
+
+  addUserMessage = (message) => {
+    this.setState(prev => ({
+      messages: [...prev.messages, message]
+    }));
+  };
+
+  renderOnboardingQuestion = (message) => {
+    const { isInOnboardingMode, currentOnboardingIndex } = this.state;
+    
+    if (!isInOnboardingMode || message.questionIndex !== currentOnboardingIndex) {
+      return null;
+    }
+
+    const question = message.questionData;
+    if (!question) return null;
+
+    return h('div', {
+      style: 'margin-top: 12px;'
+    }, this.renderQuestionOptions(question));
+  };
+
+  renderQuestionOptions = (question) => {
+    const { onboardingAnswers } = this.state;
+    const answer = onboardingAnswers[question.id];
+
+    switch (question.type) {
+      case 'multiple_choice':
+      case 'range_select':
+        return h('div', {
+          style: 'display: flex; flex-direction: column; gap: 8px;'
+        }, question.options.map(option => 
+          h('button', {
+            key: option.value,
+            onClick: () => this.handleOnboardingAnswer(question.id, option.value, this.state.currentOnboardingIndex),
+            style: `
+              padding: 10px 12px;
+              border: 2px solid ${answer === option.value ? '#3b82f6' : '#e2e8f0'};
+              background: ${answer === option.value ? '#eff6ff' : 'white'};
+              color: ${answer === option.value ? '#1e40af' : '#374151'};
+              border-radius: 8px;
+              cursor: pointer;
+              text-align: left;
+              font-size: 14px;
+              transition: all 0.2s ease;
+            `,
+            onMouseOver: (e) => {
+              if (answer !== option.value) {
+                e.target.style.borderColor = '#94a3b8';
+                e.target.style.backgroundColor = '#f8fafc';
+              }
+            },
+            onMouseOut: (e) => {
+              if (answer !== option.value) {
+                e.target.style.borderColor = '#e2e8f0';
+                e.target.style.backgroundColor = 'white';
+              }
+            }
+          }, option.label)
+        ));
+
+      case 'multiple_select':
+        const selectedValues = Array.isArray(answer) ? answer : [];
+        return h('div', {
+          style: 'display: flex; flex-direction: column; gap: 8px;'
+        }, [
+          ...question.options.map(option => {
+            const isSelected = selectedValues.includes(option.value);
+            return h('button', {
+              key: option.value,
+              onClick: () => {
+                let newAnswer;
+                if (isSelected) {
+                  newAnswer = selectedValues.filter(v => v !== option.value);
+                } else {
+                  newAnswer = [...selectedValues, option.value];
+                }
+                this.setState(prev => ({
+                  onboardingAnswers: {
+                    ...prev.onboardingAnswers,
+                    [question.id]: newAnswer
+                  }
+                }));
+              },
+              style: `
+                padding: 10px 12px;
+                border: 2px solid ${isSelected ? '#3b82f6' : '#e2e8f0'};
+                background: ${isSelected ? '#eff6ff' : 'white'};
+                color: ${isSelected ? '#1e40af' : '#374151'};
+                border-radius: 8px;
+                cursor: pointer;
+                text-align: left;
+                font-size: 14px;
+                transition: all 0.2s ease;
+              `
+            }, option.label);
+          }),
+          selectedValues.length > 0 && h('button', {
+            onClick: () => this.handleOnboardingAnswer(question.id, selectedValues, this.state.currentOnboardingIndex),
+            style: `
+              padding: 12px;
+              background: #3b82f6;
+              color: white;
+              border: none;
+              border-radius: 8px;
+              cursor: pointer;
+              font-weight: 600;
+              margin-top: 8px;
+            `
+          }, 'Continuar')
+        ]);
+
+      case 'text_input':
+        return h('div', {
+          style: 'display: flex; gap: 8px; margin-top: 8px;'
+        }, [
+          h('input', {
+            type: 'text',
+            placeholder: question.placeholder || '',
+            value: answer || '',
+            onInput: (e) => {
+              this.setState(prev => ({
+                onboardingAnswers: {
+                  ...prev.onboardingAnswers,
+                  [question.id]: e.target.value
+                }
+              }));
+            },
+            onKeyPress: (e) => {
+              if (e.key === 'Enter' && (answer || '').trim()) {
+                this.handleOnboardingAnswer(question.id, answer, this.state.currentOnboardingIndex);
+              }
+            },
+            style: `
+              flex: 1;
+              padding: 10px 12px;
+              border: 2px solid #e2e8f0;
+              border-radius: 8px;
+              font-size: 14px;
+            `
+          }),
+          h('button', {
+            onClick: () => this.handleOnboardingAnswer(question.id, answer, this.state.currentOnboardingIndex),
+            disabled: !(answer || '').trim(),
+            style: `
+              padding: 10px 16px;
+              background: ${(answer || '').trim() ? '#3b82f6' : '#9ca3af'};
+              color: white;
+              border: none;
+              border-radius: 8px;
+              cursor: ${(answer || '').trim() ? 'pointer' : 'not-allowed'};
+              font-weight: 600;
+            `
+          }, '→')
+        ]);
+
+      default:
+        return h('div', null, 'Tipo de pergunta não suportado');
     }
   };
 
@@ -531,8 +833,8 @@ class App extends Component {
                   background: ${msg.sender === 'user' ? primaryColor : secondaryBg};
                   color: ${msg.sender === 'user' ? 'white' : textColor};
                   padding: ${isMobile ? '10px 14px' : '12px 16px'};
-                                  border-radius: ${msg.sender === 'user' ? styles.messageUser.borderRadius : styles.messageBot.borderRadius};
-                  max-width: 85%;
+                  border-radius: ${msg.sender === 'user' ? styles.messageUser.borderRadius : styles.messageBot.borderRadius};
+                  max-width: ${msg.type === 'onboarding-question' ? '95%' : '85%'};
                   word-wrap: break-word;
                   font-size: ${isMobile ? '14px' : '15px'};
                   line-height: 1.4;
@@ -541,7 +843,10 @@ class App extends Component {
                 role: 'article',
                 'aria-label': msg.ariaLabel || `${msg.sender === 'user' ? 'Your message' : 'Bot message'}: ${msg.text}`,
                 className: `widget-message widget-message-${msg.sender}`
-              }, msg.text)
+              }, [
+                msg.text,
+                msg.type === 'onboarding-question' && this.renderOnboardingQuestion(msg)
+              ])
           ),
           isTyping && h('div', {
             style: `
@@ -572,7 +877,7 @@ class App extends Component {
         ]),
 
         // Input
-        h('div', {
+        !this.state.isInOnboardingMode && h('div', {
           style: Object.entries(styles.inputContainer).map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`).join('; ')
         }, [
           h('textarea', {
@@ -587,7 +892,7 @@ class App extends Component {
             ref: (el) => { this.inputRef = el; },
             className: 'widget-input'
           }),
-                      h('button', {
+          h('button', {
               onClick: this.sendMessage,
               disabled: !inputValue.trim(),
               style: `
@@ -603,16 +908,7 @@ class App extends Component {
         ])
       ]),
 
-      // Onboarding Modal
-      this.state.showOnboarding && h(OnboardingModal, {
-        isOpen: this.state.showOnboarding,
-        questions: this.state.onboardingQuestions?.questions || [],
-        settings: this.state.onboardingQuestions?.settings || {},
-        visitorId: this.state.visitorId,
-        apiUrl: this.props.config?.apiUrl || 'https://chatbot1-eta.vercel.app',
-        onComplete: this.handleOnboardingComplete,
-        onSkip: this.handleOnboardingSkip
-      })
+
     );
   }
 }
