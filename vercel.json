@@ -22,6 +22,10 @@
     {
       "source": "/v1/(.*)",
       "destination": "/api/database-backend.js"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 } 

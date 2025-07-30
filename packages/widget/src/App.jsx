@@ -466,10 +466,10 @@ class App extends Component {
             onClick: () => this.handleOnboardingAnswer(question.id, option.value, questionIndex),
             style: `
               padding: 10px 12px;
-              border: 2px solid ${answer === option.value ? '#3b82f6' : '#e2e8f0'};
-              background: ${answer === option.value ? '#eff6ff' : 'white'};
-              color: ${answer === option.value ? '#1e40af' : '#374151'};
-              border-radius: 8px;
+              border: 1px solid #3f3f3f !important;
+              background: rgba(20, 20, 20, .9) !important;
+              color: white !important;
+              border-radius: 0 !important;
               cursor: pointer;
               text-align: left;
               font-size: 14px;
@@ -477,14 +477,14 @@ class App extends Component {
             `,
             onMouseOver: (e) => {
               if (answer !== option.value) {
-                e.target.style.borderColor = '#94a3b8';
-                e.target.style.backgroundColor = '#f8fafc';
+                e.target.style.borderColor = '#3f3f3f';
+                e.target.style.backgroundColor = 'rgba(20, 20, 20, .9)';
               }
             },
             onMouseOut: (e) => {
               if (answer !== option.value) {
-                e.target.style.borderColor = '#e2e8f0';
-                e.target.style.backgroundColor = 'white';
+                e.target.style.borderColor = '#3f3f3f';
+                e.target.style.backgroundColor = 'rgba(20, 20, 20, .9)';
               }
             }
           }, option.label)
@@ -515,10 +515,10 @@ class App extends Component {
               },
               style: `
                 padding: 10px 12px;
-                border: 2px solid ${isSelected ? '#3b82f6' : '#e2e8f0'};
-                background: ${isSelected ? '#eff6ff' : 'white'};
-                color: ${isSelected ? '#1e40af' : '#374151'};
-                border-radius: 8px;
+                border: 1px solid #3f3f3f !important;
+                background: rgba(20, 20, 20, .9) !important;
+                color: white !important;
+                border-radius: 0 !important;
                 cursor: pointer;
                 text-align: left;
                 font-size: 14px;
@@ -530,10 +530,10 @@ class App extends Component {
             onClick: () => this.handleOnboardingAnswer(question.id, selectedValues, questionIndex),
             style: `
               padding: 12px;
-              background: #3b82f6;
-              color: white;
-              border: none;
-              border-radius: 8px;
+              background: rgba(20, 20, 20, .9) !important;
+              color: white !important;
+              border: 1px solid #3f3f3f !important;
+              border-radius: 0 !important;
               cursor: pointer;
               font-weight: 600;
               margin-top: 8px;
@@ -565,8 +565,10 @@ class App extends Component {
             style: `
               flex: 1;
               padding: 10px 12px;
-              border: 2px solid #e2e8f0;
-              border-radius: 8px;
+              border: 1px solid #3f3f3f !important;
+              background: rgba(20, 20, 20, .9) !important;
+              color: white !important;
+              border-radius: 0 !important;
               font-size: 14px;
             `
           }),
@@ -575,10 +577,10 @@ class App extends Component {
             disabled: !(answer || '').trim(),
             style: `
               padding: 10px 16px;
-              background: ${(answer || '').trim() ? '#3b82f6' : '#9ca3af'};
-              color: white;
-              border: none;
-              border-radius: 8px;
+              background: rgba(20, 20, 20, .9) !important;
+              color: white !important;
+              border: 1px solid #3f3f3f !important;
+              border-radius: 0 !important;
               cursor: ${(answer || '').trim() ? 'pointer' : 'not-allowed'};
               font-weight: 600;
             `
@@ -603,12 +605,12 @@ class App extends Component {
     const { config } = this.state;
     const widgetSettings = config?.widgetSettings || {};
     
-    // Theme-based colors
+    // Theme-based colors - Custom dark theme
     const isDarkTheme = widgetSettings.theme === 'dark';
-    const backgroundColor = widgetSettings.backgroundColor || (isDarkTheme ? '#1f2937' : '#ffffff');
-    const textColor = widgetSettings.textColor || (isDarkTheme ? '#f9fafb' : '#1e293b');
-    const secondaryBg = isDarkTheme ? '#374151' : '#f1f5f9';
-    const borderColor = isDarkTheme ? '#4b5563' : '#e2e8f0';
+    const backgroundColor = 'rgba(20, 20, 20, .9)';
+    const textColor = 'white';
+    const secondaryBg = 'rgba(20, 20, 20, .9)';
+    const borderColor = '#3f3f3f';
     
     // Position settings
     const position = widgetSettings.position || 'bottom-right';
@@ -633,7 +635,8 @@ class App extends Component {
         maxHeight: isMobile ? '100vh' : '85vh',
         background: backgroundColor,
         color: textColor,
-        borderRadius: isMobile ? '0' : (widgetSettings.borderRadius || '16px'),
+        borderRadius: '0 !important',
+        border: '1px solid #3f3f3f !important',
         boxShadow: isMobile 
           ? 'none' 
           : isDarkTheme
@@ -650,8 +653,8 @@ class App extends Component {
       chatButton: {
         width: isMobile ? '56px' : '64px',
         height: isMobile ? '56px' : '64px',
-        borderRadius: '50%',
-        border: 'none',
+        borderRadius: '0 !important',
+        border: '1px solid #3f3f3f !important',
         cursor: 'pointer',
         fontSize: isMobile ? '20px' : '24px',
         boxShadow: isDarkTheme
@@ -671,7 +674,8 @@ class App extends Component {
         flexDirection: 'column',
         gap: isMobile ? '8px' : '12px',
         scrollBehavior: 'smooth',
-        background: backgroundColor
+        background: backgroundColor,
+        border: '1px solid #3f3f3f !important'
       },
       inputContainer: {
         padding: isMobile ? '12px' : '20px',
@@ -679,13 +683,14 @@ class App extends Component {
         display: 'flex',
         gap: isMobile ? '8px' : '12px',
         alignItems: 'flex-end',
-        background: backgroundColor
+        background: backgroundColor,
+        border: '1px solid #3f3f3f !important'
       },
       input: {
         flex: '1',
         padding: isMobile ? '12px 16px' : '14px 18px',
-        border: `1px solid ${borderColor}`,
-        borderRadius: isMobile ? '24px' : '28px',
+        border: '1px solid #3f3f3f !important',
+        borderRadius: '0 !important',
         outline: 'none',
         fontSize: isMobile ? '16px' : widgetSettings.fontSize || '14px', // 16px on mobile to prevent zoom
         resize: 'none',
@@ -693,13 +698,13 @@ class App extends Component {
         minHeight: isMobile ? '40px' : '44px',
         maxHeight: '120px',
         transition: 'border-color 0.2s ease',
-        background: isDarkTheme ? '#374151' : '#f8fafc',
-        color: textColor
+        background: 'rgba(20, 20, 20, .9) !important',
+        color: 'white !important'
       },
       sendButton: {
         padding: isMobile ? '12px 16px' : '14px 20px',
-        border: 'none',
-        borderRadius: isMobile ? '24px' : '28px',
+        border: '1px solid #3f3f3f !important',
+        borderRadius: '0 !important',
         cursor: 'pointer',
         fontSize: isMobile ? '14px' : '16px',
         fontWeight: '600',
@@ -711,12 +716,14 @@ class App extends Component {
         justifyContent: 'center'
       },
       messageBot: {
-        background: secondaryBg,
-        color: textColor,
-        borderRadius: '20px 20px 20px 6px'
+        background: 'rgba(20, 20, 20, .9) !important',
+        color: 'white !important',
+        borderRadius: '0 !important',
+        border: '1px solid #3f3f3f !important'
       },
       messageUser: {
-        borderRadius: '20px 20px 6px 20px'
+        borderRadius: '0 !important',
+        border: '1px solid #3f3f3f !important'
       }
     };
   };
@@ -726,21 +733,23 @@ class App extends Component {
     
     if (error) {
       return h('div', { 
-        style: 'color: #ef4444; padding: 12px; font-size: 14px; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);' 
+        style: 'color: white !important; padding: 12px; font-size: 14px; background: rgba(20, 20, 20, .9) !important; border-radius: 0 !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #3f3f3f !important;' 
       }, error);
     }
 
     if (!config) {
       return h('div', { 
-        style: 'padding: 12px; font-size: 14px; background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);' 
+        style: 'padding: 12px; font-size: 14px; background: rgba(20, 20, 20, .9) !important; border-radius: 0 !important; box-shadow: 0 4px 12px rgba(0,0,0,0.15); color: white !important; border: 1px solid #3f3f3f !important;' 
       }, 'Loading...');
     }
 
     const widgetSettings = config.widgetSettings || {};
     const isDarkTheme = widgetSettings.theme === 'dark';
-    const primaryColor = widgetSettings.primaryColor || '#3b82f6';
-    const textColor = widgetSettings.textColor || (isDarkTheme ? '#f9fafb' : '#1e293b');
-    const secondaryBg = isDarkTheme ? '#374151' : '#f1f5f9';
+    const primaryColor = 'rgba(20, 20, 20, .9)'; // Remove blue, use dark background
+    const userMessageBg = '#6b7280'; // Lighter grey for user messages
+    const sendButtonBg = '#6b7280'; // Lighter grey for send button
+    const textColor = 'white';
+    const secondaryBg = 'rgba(20, 20, 20, .9)';
     const chatIcon = widgetSettings.chatIcon || '💬';
     const styles = this.getResponsiveStyles();
     const isMobile = window.innerWidth <= 768;
@@ -784,7 +793,8 @@ class App extends Component {
                 width: ${isMobile ? '32px' : '36px'};
                 height: ${isMobile ? '32px' : '36px'};
                 background: rgba(255,255,255,0.2);
-                border-radius: 50%;
+                border-radius: 0 !important;
+                border: 1px solid #3f3f3f !important;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -804,7 +814,8 @@ class App extends Component {
               font-size: ${isMobile ? '24px' : '28px'};
               cursor: pointer;
               padding: 8px;
-              border-radius: 50%;
+              border-radius: 0 !important;
+              border: 1px solid #3f3f3f !important;
               width: ${isMobile ? '40px' : '44px'};
               height: ${isMobile ? '40px' : '44px'};
               display: flex;
@@ -842,7 +853,7 @@ class App extends Component {
                 key: msg.id,
                 style: `
                   align-self: ${msg.sender === 'user' ? 'flex-end' : 'flex-start'};
-                  background: ${msg.sender === 'user' ? primaryColor : secondaryBg};
+                  background: ${msg.sender === 'user' ? userMessageBg : secondaryBg};
                   color: ${msg.sender === 'user' ? 'white' : textColor};
                   padding: ${isMobile ? '10px 14px' : '12px 16px'};
                   border-radius: ${msg.sender === 'user' ? styles.messageUser.borderRadius : styles.messageBot.borderRadius};
@@ -909,7 +920,7 @@ class App extends Component {
               disabled: !inputValue.trim(),
               style: `
                 ${Object.entries(styles.sendButton).map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`).join('; ')};
-                background: ${inputValue.trim() ? primaryColor : '#94a3b8'};
+                background: ${inputValue.trim() ? sendButtonBg : '#4b5563'};
                 color: white;
                 opacity: ${inputValue.trim() ? '1' : '0.7'};
               `,

@@ -89,6 +89,24 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // Also handle the /api/v1/clients path for frontend compatibility
+  app.get('/api/v1/clients', async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('*');
+
+      if (error) {
+        console.error('Error fetching clients:', error);
+        return res.status(500).json({ error: 'Failed to fetch clients.' });
+      }
+      res.json(data);
+    } catch (error) {
+      console.error('Error in /api/v1/clients endpoint:', error);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
   // API endpoint to get widget configuration (moved before middleware)
   app.get('/api/v1/widget/config/:clientId', async (req, res) => {
     try {
@@ -792,8 +810,30 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // Also handle the /api/v1/clients path for frontend compatibility
+  app.post('/api/v1/clients', async (req, res) => {
+    try {
+      const newClient = await clientConfigService.createClientConfig(req.body);
+      res.status(201).json(newClient);
+    } catch (error) {
+      console.error('Error creating client:', error);
+      res.status(500).json({ error: 'Failed to create client.' });
+    }
+  });
 
   app.get('/v1/clients/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const client = await clientConfigService.getClientConfig(id);
+      res.json(client);
+    } catch (error) {
+      console.error('Error fetching client:', error);
+      res.status(500).json({ error: 'Failed to fetch client.' });
+    }
+  });
+
+  // Also handle the /api/v1/clients/:id path for frontend compatibility
+  app.get('/api/v1/clients/:id', async (req, res) => {
     try {
       const { id } = req.params;
       const client = await clientConfigService.getClientConfig(id);
@@ -815,7 +855,31 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // Also handle the /api/v1/clients/:id path for frontend compatibility
+  app.put('/api/v1/clients/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updatedClient = await clientConfigService.updateClientConfig(id, req.body);
+      res.json(updatedClient);
+    } catch (error) {
+      console.error('Error updating client:', error);
+      res.status(500).json({ error: 'Failed to update client.' });
+    }
+  });
+
   app.delete('/v1/clients/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await clientConfigService.deleteClientConfig(id);
+      res.json({ success: true, message: 'Client deleted successfully.' });
+    } catch (error) {
+      console.error('Error deleting client:', error);
+      res.status(500).json({ error: 'Failed to delete client.' });
+    }
+  });
+
+  // Also handle the /api/v1/clients/:id path for frontend compatibility
+  app.delete('/api/v1/clients/:id', async (req, res) => {
     try {
       const { id } = req.params;
       await clientConfigService.deleteClientConfig(id);
