@@ -101,6 +101,96 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // Visitor onboarding endpoints (moved before middleware - they don't need client config context)
+  app.get('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const clientId = req.headers['x-client-id'] || req.query.clientId;
+
+      if (!visitorId || !clientId) {
+        return res.status(400).json({ error: 'Visitor ID and Client ID are required' });
+      }
+
+      const onboardingData = await onboardingService.getVisitorOnboardingStatus(visitorId, clientId);
+      res.json(onboardingData);
+    } catch (error) {
+      console.error('Error getting visitor onboarding status:', error);
+      res.status(500).json({ error: 'Failed to get visitor onboarding status.' });
+    }
+  });
+
+  // API endpoint to submit onboarding answers
+  app.post('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      console.log('🔍 Raw request details:', {
+        visitorId: req.params.visitorId,
+        hasBody: !!req.body,
+        bodyType: typeof req.body,
+        bodyStringified: JSON.stringify(req.body),
+        contentType: req.headers['content-type'],
+        contentLength: req.headers['content-length']
+      });
+
+      const { visitorId } = req.params;
+      const { answers, completed } = req.body;
+
+      console.log('🔄 Onboarding submission received:', {
+        visitorId,
+        answers,
+        completed,
+        bodyKeys: req.body ? Object.keys(req.body) : 'NO_BODY'
+      });
+
+      if (!visitorId || !answers) {
+        console.error('❌ Missing required fields:', { visitorId: !!visitorId, answers: !!answers });
+        return res.status(400).json({ error: 'Visitor ID and answers are required' });
+      }
+
+      console.log('✅ Calling onboardingService.submitOnboardingAnswers...');
+      const updatedVisitor = await onboardingService.submitOnboardingAnswers(visitorId, answers, completed);
+      
+      console.log('✅ Onboarding submission successful:', { visitorId, updatedVisitor });
+      res.json({ 
+        success: true, 
+        visitor: updatedVisitor,
+        message: 'Onboarding answers submitted successfully'
+      });
+    } catch (error) {
+      console.error('❌ Error submitting onboarding answers:', {
+        error: error.message,
+        stack: error.stack,
+        visitorId: req.params.visitorId,
+        requestBody: req.body
+      });
+      res.status(500).json({ 
+        error: 'Failed to submit onboarding answers.',
+        details: error.message 
+      });
+    }
+  });
+
+  // API endpoint to update onboarding answers
+  app.put('/v1/visitors/:visitorId/onboarding', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { answers } = req.body;
+
+      if (!visitorId || !answers) {
+        return res.status(400).json({ error: 'Visitor ID and answers are required' });
+      }
+
+      const updatedVisitor = await onboardingService.updateOnboardingAnswers(visitorId, answers);
+      res.json({ 
+        success: true, 
+        visitor: updatedVisitor,
+        message: 'Onboarding answers updated successfully'
+      });
+    } catch (error) {
+      console.error('Error updating onboarding answers:', error);
+      res.status(500).json({ error: 'Failed to update onboarding answers.' });
+    }
+  });
+
   // Load client configuration for all API routes
   if (applyClientConfigMiddleware) {
     app.use(clientConfigMiddleware(clientConfigService));
@@ -433,95 +523,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // API endpoint to get visitor onboarding status and questions
-  app.get('/v1/visitors/:visitorId/onboarding', async (req, res) => {
-    try {
-      const { visitorId } = req.params;
-      const clientId = req.headers['x-client-id'] || req.query.clientId;
 
-      if (!visitorId || !clientId) {
-        return res.status(400).json({ error: 'Visitor ID and Client ID are required' });
-      }
-
-      const onboardingData = await onboardingService.getVisitorOnboardingStatus(visitorId, clientId);
-      res.json(onboardingData);
-    } catch (error) {
-      console.error('Error getting visitor onboarding status:', error);
-      res.status(500).json({ error: 'Failed to get visitor onboarding status.' });
-    }
-  });
-
-  // API endpoint to submit onboarding answers
-  app.post('/v1/visitors/:visitorId/onboarding', async (req, res) => {
-    try {
-      console.log('🔍 Raw request details:', {
-        visitorId: req.params.visitorId,
-        hasBody: !!req.body,
-        bodyType: typeof req.body,
-        bodyStringified: JSON.stringify(req.body),
-        contentType: req.headers['content-type'],
-        contentLength: req.headers['content-length']
-      });
-
-      const { visitorId } = req.params;
-      const { answers, completed } = req.body;
-
-      console.log('🔄 Onboarding submission received:', {
-        visitorId,
-        answers,
-        completed,
-        bodyKeys: req.body ? Object.keys(req.body) : 'NO_BODY'
-      });
-
-      if (!visitorId || !answers) {
-        console.error('❌ Missing required fields:', { visitorId: !!visitorId, answers: !!answers });
-        return res.status(400).json({ error: 'Visitor ID and answers are required' });
-      }
-
-      console.log('✅ Calling onboardingService.submitOnboardingAnswers...');
-      const updatedVisitor = await onboardingService.submitOnboardingAnswers(visitorId, answers, completed);
-      
-      console.log('✅ Onboarding submission successful:', { visitorId, updatedVisitor });
-      res.json({ 
-        success: true, 
-        visitor: updatedVisitor,
-        message: 'Onboarding answers submitted successfully'
-      });
-    } catch (error) {
-      console.error('❌ Error submitting onboarding answers:', {
-        error: error.message,
-        stack: error.stack,
-        visitorId: req.params.visitorId,
-        requestBody: req.body
-      });
-      res.status(500).json({ 
-        error: 'Failed to submit onboarding answers.',
-        details: error.message 
-      });
-    }
-  });
-
-  // API endpoint to update onboarding answers
-  app.put('/v1/visitors/:visitorId/onboarding', async (req, res) => {
-    try {
-      const { visitorId } = req.params;
-      const { answers } = req.body;
-
-      if (!visitorId || !answers) {
-        return res.status(400).json({ error: 'Visitor ID and answers are required' });
-      }
-
-      const updatedVisitor = await onboardingService.updateOnboardingAnswers(visitorId, answers);
-      res.json({ 
-        success: true, 
-        visitor: updatedVisitor,
-        message: 'Onboarding answers updated successfully'
-      });
-    } catch (error) {
-      console.error('Error updating onboarding answers:', error);
-      res.status(500).json({ error: 'Failed to update onboarding answers.' });
-    }
-  });
 
   // API endpoint to get client onboarding template
   app.get('/v1/clients/:clientId/onboarding-template', async (req, res) => {
