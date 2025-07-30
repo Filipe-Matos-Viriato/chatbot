@@ -454,6 +454,15 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to submit onboarding answers
   app.post('/v1/visitors/:visitorId/onboarding', async (req, res) => {
     try {
+      console.log('🔍 Raw request details:', {
+        visitorId: req.params.visitorId,
+        hasBody: !!req.body,
+        bodyType: typeof req.body,
+        bodyStringified: JSON.stringify(req.body),
+        contentType: req.headers['content-type'],
+        contentLength: req.headers['content-length']
+      });
+
       const { visitorId } = req.params;
       const { answers, completed } = req.body;
 
@@ -461,7 +470,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         visitorId,
         answers,
         completed,
-        bodyKeys: Object.keys(req.body)
+        bodyKeys: req.body ? Object.keys(req.body) : 'NO_BODY'
       });
 
       if (!visitorId || !answers) {
