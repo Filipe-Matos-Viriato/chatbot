@@ -10,7 +10,7 @@ const listingService = require('./services/listing-service'); // Import Listing 
 const visitorService = require('./services/visitor-service');
 const onboardingService = require('./services/onboarding-service');
 const defaultSupabase = require('./config/supabase'); // Import Supabase client
-const ChatHistoryService = require('./services/chat-history-service').default; // Import ChatHistoryService
+const ChatHistoryService = require('./services/chat-history-service'); // Corrected import
 const developmentService = require('./services/development-service'); // Import Development Service
 const userService = require('./services/user-service'); // Import User Service
 
