@@ -41,7 +41,7 @@ export async function getListingLeadDistributionMetrics(listingId, clientId) {
         .select('lead_score_distribution_hot, lead_score_distribution_warm, lead_score_distribution_cold')
         .eq('listing_id', listingId)
         .eq('client_id', clientId) // Filter by client_id
-        .single(); // Use .single() as we expect one row per listing_id
+        .maybeSingle(); // Use .maybeSingle() to handle cases where no row is found
 
     if (error) {
         console.error(`Error fetching lead distribution metrics for listing ${listingId}:`, error);
