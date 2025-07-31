@@ -2,8 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('./rag-service');
-const cron = require('node-cron');
-const { clusterQuestions } = require('../scripts/cluster-questions');
+// const cron = require('node-cron'); // Removed as clustering is now a separate script
+// const { clusterQuestions } = require('../scripts/cluster-questions'); // Removed as clustering is now a separate script
 const defaultClientConfigService = require('./services/client-config-service');
 const { processDocument: defaultProcessDocument } = require('./services/ingestion-service');
 const listingService = require('./services/listing-service'); // Import Listing Service
@@ -21,7 +21,7 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
-const port = process.env.PORT || 3006;
+const port = process.env.PORT || 3007; // Changed default port to 3007 to match frontend
 
 // Middleware to load client configuration and attach it to the request, along with a placeholder user context
 const clientConfigMiddleware = (clientConfigService) => async (req, res, next) => {
@@ -64,7 +64,12 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-User-Id', 'X-User-Role']
   }));
   
-  app.use(express.json({ limit: '500kb' }));
+  app.use(express.json());
+  // Global request logger for debugging
+  app.use((req, res, next) => {
+    console.log(`[Global Logger] Request received: ${req.method} ${req.url}`);
+    next();
+  });
 
   // Apply test middleware if provided (must be before clientConfigMiddleware)
   if (testMiddleware) {
@@ -228,16 +233,14 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // Load client configuration for all API routes
-  if (applyClientConfigMiddleware) {
-    app.use(clientConfigMiddleware(clientConfigService));
-  }
+  // Removed global application of clientConfigMiddleware
 
   app.get('/', (req, res) => {
     res.send('Backend server is running!');
   });
 
   // API endpoint to handle chat requests
-  app.post('/api/chat', async (req, res) => {
+  app.post('/api/chat', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { query, visitorId, sessionId, context, onboardingAnswers } = req.body;
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
@@ -378,7 +381,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // API endpoint to generate suggested questions
-  app.post('/api/suggested-questions', async (req, res) => {
+  app.post('/api/suggested-questions', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { context, chatHistory } = req.body;
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
@@ -394,10 +397,12 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // API endpoint to retrieve pre-clustered common questions
-  app.get('/api/common-questions', async (req, res) => {
+  app.get('/api/common-questions', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
       const listingId = req.query.listingId || null; // listingId is optional
+
+      console.log(`[API] /api/common-questions received: clientId=${clientConfig.clientId}, listingId=${listingId}`);
 
       let query = supabase
         .from('clustered_questions')
@@ -416,9 +421,11 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       if (error) {
         console.error('Error fetching clustered questions:', error);
+        console.error('Supabase error details:', error.message, error.details, error.hint);
         return res.status(500).json({ error: 'Failed to fetch common questions.' });
       }
 
+      console.log(`[API] Fetched common questions data:`, data);
       res.json({ commonQuestions: data || [] });
     } catch (error) {
       console.error('Error in /api/common-questions endpoint:', error);
@@ -427,7 +434,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // API endpoint to handle document uploads
-  app.post('/v1/documents/upload', upload.fields([
+  app.post('/v1/documents/upload', clientConfigMiddleware(clientConfigService), upload.fields([
     { name: 'files', maxCount: 10 },
     { name: 'document_category' },
     { name: 'listing_id' },
@@ -623,7 +630,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // API endpoints for Developments
-  app.post('/v1/developments', async (req, res) => {
+  app.post('/v1/developments', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
       const { name, location, amenities } = req.body;
@@ -642,7 +649,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/developments/:id', async (req, res) => {
+  app.get('/v1/developments/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const development = await developmentService.getDevelopmentById(id);
@@ -656,7 +663,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/developments', async (req, res) => {
+  app.get('/v1/developments', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
       const developments = await developmentService.getDevelopmentsByClientId(clientConfig.clientId);
@@ -667,7 +674,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/clients/:clientId/developments', async (req, res) => {
+  app.get('/v1/clients/:clientId/developments', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientId } = req.params;
       if (clientId !== req.clientConfig.clientId) {
@@ -682,7 +689,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.put('/v1/developments/:id', async (req, res) => {
+  app.put('/v1/developments/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const { clientConfig } = req;
@@ -700,7 +707,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.delete('/v1/developments/:id', async (req, res) => {
+  app.delete('/v1/developments/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const { clientConfig } = req;
@@ -719,7 +726,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // API endpoints for Listings
-  app.post('/v1/listings', async (req, res) => {
+  app.post('/v1/listings', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
       const { listing_id, name, num_bedrooms, total_area_sqm, price_eur, listing_status, current_state, development_id } = req.body;
@@ -757,7 +764,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/clients/:clientId/listings', async (req, res) => {
+  app.get('/v1/clients/:clientId/listings', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientId } = req.params;
       // Ensure the requested clientId matches the authenticated client's ID
@@ -773,7 +780,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/listings/:id', async (req, res) => {
+  app.get('/v1/listings/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const listing = await listingService.getListingById(id);
@@ -787,7 +794,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.put('/v1/listings/:id', async (req, res) => {
+  app.put('/v1/listings/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const { clientConfig } = req;
@@ -805,7 +812,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.delete('/v1/listings/:id', async (req, res) => {
+  app.delete('/v1/listings/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const { clientConfig } = req;
@@ -845,7 +852,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/clients/:id', async (req, res) => {
+  app.get('/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const client = await clientConfigService.getClientConfig(id);
@@ -856,19 +863,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // Also handle the /api/v1/clients/:id path for frontend compatibility
-  app.get('/api/v1/clients/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const client = await clientConfigService.getClientConfig(id);
-      res.json(client);
-    } catch (error) {
-      console.error('Error fetching client:', error);
-      res.status(500).json({ error: 'Failed to fetch client.' });
-    }
-  });
-
-  app.put('/v1/clients/:id', async (req, res) => {
+  app.put('/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const updatedClient = await clientConfigService.updateClientConfig(id, req.body);
@@ -880,7 +875,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // Also handle the /api/v1/clients/:id path for frontend compatibility
-  app.put('/api/v1/clients/:id', async (req, res) => {
+  app.put('/api/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const updatedClient = await clientConfigService.updateClientConfig(id, req.body);
@@ -891,7 +886,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.delete('/v1/clients/:id', async (req, res) => {
+  app.delete('/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       await clientConfigService.deleteClientConfig(id);
@@ -915,7 +910,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // API endpoints for User Management
-  app.post('/v1/users', async (req, res) => {
+  app.post('/v1/users', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
       const userData = { ...req.body, client_id: clientConfig.clientId };
@@ -927,7 +922,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/users/:id', async (req, res) => {
+  app.get('/v1/users/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const user = await userService.getUserById(id);
@@ -941,7 +936,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.put('/v1/users/:id', async (req, res) => {
+  app.put('/v1/users/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const { clientConfig } = req;
@@ -959,7 +954,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.delete('/v1/users/:id', async (req, res) => {
+  app.delete('/v1/users/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
       const { clientConfig } = req;
@@ -977,7 +972,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/clients/:clientId/users', async (req, res) => {
+  app.get('/v1/clients/:clientId/users', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientId } = req.params;
       if (clientId !== req.clientConfig.clientId) {
@@ -991,7 +986,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/clients/:clientId/agents', async (req, res) => {
+  app.get('/v1/clients/:clientId/agents', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientId } = req.params;
       if (clientId !== req.clientConfig.clientId) {
@@ -1005,7 +1000,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.post('/v1/users/:userId/listings/:listingId', async (req, res) => {
+  app.post('/v1/users/:userId/listings/:listingId', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { userId, listingId } = req.params;
       const { clientConfig } = req;
@@ -1029,7 +1024,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.delete('/v1/users/:userId/listings/:listingId', async (req, res) => {
+  app.delete('/v1/users/:userId/listings/:listingId', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { userId, listingId } = req.params;
       const { clientConfig } = req;
@@ -1048,7 +1043,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/users/:userId/listings', async (req, res) => {
+  app.get('/v1/users/:userId/listings', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { userId } = req.params;
       const { clientConfig } = req;
@@ -1068,12 +1063,13 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
   // API endpoint to get listing details and metrics by ID
-  app.get('/api/listing/:id', async (req, res) => {
+  app.get('/api/listing/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     console.log(`[Backend] Received request for listing ID: ${req.params.id}`);
     try {
       const { id } = req.params;
+      const clientId = req.clientConfig.clientId; // Get clientId from req.clientConfig
       const { session_id } = req.query; // Extract session_id from query parameters
-      console.log(`[Backend] Fetching listing details for ID: ${id}`);
+      console.log(`[Backend] Fetching listing details for ID: ${id} and Client ID: ${clientId}`);
 
       // Fetch listing details, metrics, unanswered questions, and handoffs concurrently
       const [
@@ -1083,7 +1079,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         { data: handoffs, error: handoffsError },
         { data: fullChatHistory, error: fullChatHistoryError }, // New line for full chat history
       ] = await Promise.all([
-        supabase.from('listings').select('*').eq('id', id).single(),
+        supabase.from('listings').select('*').eq('id', id).eq('client_id', req.clientConfig.clientId).single(),
         supabase.from('listing_metrics').select('*').eq('listing_id', id).single(),
         supabase.from('questions').select('question_text').eq('listing_id', id).eq('status', 'unanswered'),
         supabase.from('handoffs').select('reason').eq('listing_id', id),
@@ -1096,11 +1092,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         })(),
       ]);
 
-      if (listingError && listingError.code !== 'PGRST116') {
+      if (listingError) {
+        if (listingError.code === 'PGRST116') { // No rows found from single() call
+          console.warn(`[Backend] Listing with ID ${id} not found for client ID ${clientId}.`);
+          return res.status(404).json({ error: 'Listing not found for this client.' });
+        }
         console.error(`[Backend] Error fetching listing:`, listingError);
         throw listingError;
       }
-      console.log(`[Backend] Listing data:`, listing);
+      console.log(`[Backend] Listing data for ID ${id} and Client ID ${clientId}:`, listing);
+      console.log(`[Backend] Listing error for ID ${id} and Client ID ${clientId}:`, listingError);
 
       if (metricsError && metricsError.code !== 'PGRST116') {
         console.error(`[Backend] Error fetching metrics:`, metricsError);

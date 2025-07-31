@@ -10,16 +10,19 @@ import PropertyViewingsBookedMetric from './metrics/PropertyViewingsBookedMetric
 import UnansweredQuestionsMetric from './metrics/UnansweredQuestionsMetric';
 import { API_BASE_URL } from '../../config/apiClient';
 import { supabase, getLeadDistributionMetrics } from '../../config/supabaseClient';
+import { useClient } from '../../context/ClientContext'; // Import useClient
 
 
 const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
+    const { selectedClientId } = useClient(); // Get selectedClientId from context
     const [leadDistributionData, setLeadDistributionData] = useState(null);
     const [newHotLeadsCount, setNewHotLeadsCount] = useState(0);
     const [newHotLeadVisitorIds, setNewHotLeadVisitorIds] = useState([]);
 
     useEffect(() => {
         const fetchLeadData = async () => {
-            const metrics = await getLeadDistributionMetrics();
+            if (!selectedClientId) return; // Don't fetch if no client is selected
+            const metrics = await getLeadDistributionMetrics(selectedClientId);
             if (metrics) {
                 setLeadDistributionData({
                     labels: ['Hot Leads', 'Warm Leads', 'Cold Leads'],
@@ -35,9 +38,12 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
         };
 
         const fetchNewHotLeads = async () => {
+            if (!selectedClientId) return; // Don't fetch if no client is selected
+
             const { data, count, error } = await supabase
                 .from('visitors')
                 .select('visitor_id', { count: 'exact' })
+                .eq('client_id', selectedClientId) // Filter by client_id
                 .gte('lead_score', 70)
                 .eq('is_acknowledged', false);
 
@@ -55,7 +61,7 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
 
         fetchLeadData();
         fetchNewHotLeads();
-    }, []);
+    }, [selectedClientId]);
 
     const handleAcknowledgeHotLeads = async () => {
         if (newHotLeadVisitorIds.length > 0) {
@@ -65,7 +71,7 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ visitorIds: newHotLeadVisitorIds }),
+                    body: JSON.stringify({ visitorIds: newHotLeadVisitorIds, clientId: selectedClientId }), // Pass clientId
                 });
 
                 if (response.ok) {
