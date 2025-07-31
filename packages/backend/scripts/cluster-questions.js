@@ -7,8 +7,12 @@ const { createClient } = require('@supabase/supabase-js');
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+console.log('Environment Variables Loaded:');
+console.log(`SUPABASE_URL: ${supabaseUrl ? 'Loaded' : 'Missing'}`);
+console.log(`SUPABASE_SERVICE_ROLE_KEY: ${supabaseServiceRoleKey ? 'Loaded' : 'Missing'}`);
+
 if (!supabaseUrl || !supabaseServiceRoleKey) {
-  console.error('Supabase URL or Service Role Key is missing in environment variables.');
+  console.error('Supabase URL or Service Role Key is missing in environment variables. Exiting.');
   process.exit(1);
 }
 
@@ -78,6 +82,7 @@ function updateCentroids(data, assignments, k) {
 async function clusterQuestions() {
   console.log('Starting question clustering process...');
 
+  console.log('Attempting to fetch question embeddings...');
   const { data: questionData, error: fetchError } = await supabase
     .from('question_embeddings')
     .select(`
@@ -91,13 +96,16 @@ async function clusterQuestions() {
 
   if (fetchError) {
     console.error('Error fetching question embeddings and texts:', fetchError);
+    console.error('Fetch error details:', fetchError.message, fetchError.details, fetchError.hint);
     return;
   }
 
   if (!questionData || questionData.length === 0) {
     console.log('No question embeddings found. Exiting clustering process.');
+    console.log('Question data:', questionData); // Log the actual data
     return;
   }
+  console.log(`Fetched ${questionData.length} question embeddings.`);
 
   const embeddings = questionData
     .filter(item => item.questions && item.questions.question_text)
@@ -187,7 +195,12 @@ async function clusterQuestions() {
           }
         });
 
-        const clientId = 'client-abc'; // This should ideally come from a config or be passed
+        const clientId = process.argv[2]; // Get clientId from command-line argument
+
+        if (!clientId) {
+          console.error('Client ID must be provided as a command-line argument (e.g., node cluster-questions.js your-client-id)');
+          return; // Exit if no client ID is provided
+        }
 
         clusteredQuestionsToInsert.push({
           client_id: clientId,
@@ -220,4 +233,13 @@ async function clusterQuestions() {
 
   console.log('Question clustering process finished.');
 }
+
+// Call the clustering function and handle potential top-level errors
+(async () => {
+  try {
+    await clusterQuestions();
+  } catch (topLevelError) {
+    console.error('An unexpected error occurred during the clustering process:', topLevelError);
+  }
+})();
 

@@ -14,6 +14,7 @@ const OverallListingPerformance = ({ listings, listingMetrics, searchTerm }) => 
         return {
             id: listing.id,
             name: listing.name,
+            client_id: listing.client_id, // Include client_id here
             engaged_users: metrics ? metrics.engaged_users : 0,
             inquiries: metrics ? metrics.inquiries : 0,
             total_conversions: metrics ? metrics.total_conversions : 0,
@@ -120,7 +121,7 @@ const OverallListingPerformance = ({ listings, listingMetrics, searchTerm }) => 
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.unacknowledged_hot_leads}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <button
-                                        onClick={() => navigate(`/dashboard/listing/${listing.id}`)}
+                                        onClick={() => navigate(`/dashboard/listing/${listing.id}?clientId=${listing.client_id}`)}
                                         className="text-blue-600 hover:text-blue-900"
                                     >
                                         View Details

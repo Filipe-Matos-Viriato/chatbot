@@ -7,6 +7,7 @@
     "start": "node -r dotenv/config src/index.js",
     "ingest-test-data": "node -r dotenv/config scripts/ingest-test-data.js",
     "migrate-configs": "node -r dotenv/config scripts/migrate-client-configs-to-db.js",
+    "cluster-questions": "node -r dotenv/config scripts/cluster-questions.js",
     "test": "npx mocha --require ./test/setup.js test/**/*.test.js"
   },
   "dependencies": {

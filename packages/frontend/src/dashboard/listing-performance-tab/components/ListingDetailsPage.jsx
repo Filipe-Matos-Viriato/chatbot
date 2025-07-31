@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../../config/apiClient';
 import { getListingLeadDistributionMetrics } from '../../../config/supabaseClient';
+// import { useClient } from '../../../context/ClientContext'; // No longer needed as clientId comes from URL
 import ListingMetricsCards from './listing-details/ListingMetricsCards';
 import PropertyInformation from './listing-details/PropertyInformation';
 import LeadScoreDistributionChart from './listing-details/LeadScoreDistributionChart';
@@ -14,6 +15,9 @@ import ChatHistory from './listing-details/ChatHistory'; // Import the new compo
 const ListingDetailsPage = () => {
     const { id } = useParams();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const clientId = searchParams.get('clientId'); // Get clientId from URL query parameters
+    // const { selectedClientId } = useClient(); // No longer needed as clientId comes from URL
     const [listingData, setListingData] = useState(null);
     const [listingMetrics, setListingMetrics] = useState(null);
     const [leadDistributionData, setLeadDistributionData] = useState(null);
@@ -24,16 +28,32 @@ const ListingDetailsPage = () => {
 
     useEffect(() => {
         const fetchListingDetails = async () => {
+            if (!clientId) { // Don't fetch if no clientId is available from URL
+                console.warn("No clientId found in URL, cannot fetch listing details.");
+                return;
+            }
+
             try {
                 const [listingResponse, commonQuestionsResponse] = await Promise.all([
-                    fetch(`${API_BASE_URL}/listing/${id}?clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`),
-                    fetch(`${API_BASE_URL}/common-questions?listingId=${id}&clientId=a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`) // Use the correct client ID
+                    fetch(`${API_BASE_URL}/api/listing/${id}?clientId=${clientId}`),
+                    fetch(`${API_BASE_URL}/api/common-questions?listingId=${id}&clientId=${clientId}`)
                 ]);
 
+                console.log("Frontend: listingResponse.ok:", listingResponse.ok);
+                console.log("Frontend: listingResponse.status:", listingResponse.status);
+                
                 if (!listingResponse.ok) {
+                    if (listingResponse.status === 404) {
+                        console.warn(`Listing with ID ${id} not found for client ${clientId}. Redirecting.`);
+                        navigate('/dashboard/listing-performance');
+                        return; // Stop further processing
+                    }
                     throw new Error(`HTTP error! status: ${listingResponse.status}`);
                 }
+                
                 const listingData = await listingResponse.json();
+                console.log("Frontend: Parsed listingData:", listingData);
+                
                 setListingData(listingData.listing);
                 setListingMetrics(listingData.metrics);
                 setUnansweredQuestions(listingData.unansweredQuestions); // Set unanswered questions
@@ -49,7 +69,7 @@ const ListingDetailsPage = () => {
                     setCommonQuestions(commonQuestionsData.commonQuestions);
                 }
 
-                const leadMetrics = await getListingLeadDistributionMetrics(id);
+                const leadMetrics = await getListingLeadDistributionMetrics(id, clientId);
                 if (leadMetrics) {
                     setLeadDistributionData({
                         labels: ['Hot Leads', 'Warm Leads', 'Cold Leads'],
@@ -75,9 +95,9 @@ const ListingDetailsPage = () => {
         };
 
         fetchListingDetails();
-    }, [id]);
+    }, [id, clientId, navigate]); // Add navigate to dependency array
 
-    if (!listingData || !listingMetrics) {
+    if (!listingData) { // Only check for listingData, allow metrics to be null
         return <div className="text-center py-8">Loading listing details...</div>;
     }
 

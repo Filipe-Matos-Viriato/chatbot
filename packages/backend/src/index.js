@@ -2,8 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('./rag-service');
-const cron = require('node-cron');
-const { clusterQuestions } = require('../scripts/cluster-questions');
+// const cron = require('node-cron'); // Removed as clustering is now a separate script
+// const { clusterQuestions } = require('../scripts/cluster-questions'); // Removed as clustering is now a separate script
 const defaultClientConfigService = require('./services/client-config-service');
 const { processDocument: defaultProcessDocument } = require('./services/ingestion-service');
 const listingService = require('./services/listing-service'); // Import Listing Service
@@ -402,6 +402,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const { clientConfig } = req;
       const listingId = req.query.listingId || null; // listingId is optional
 
+      console.log(`[API] /api/common-questions received: clientId=${clientConfig.clientId}, listingId=${listingId}`);
+
       let query = supabase
         .from('clustered_questions')
         .select('question_text, count')
@@ -419,9 +421,11 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       if (error) {
         console.error('Error fetching clustered questions:', error);
+        console.error('Supabase error details:', error.message, error.details, error.hint);
         return res.status(500).json({ error: 'Failed to fetch common questions.' });
       }
 
+      console.log(`[API] Fetched common questions data:`, data);
       res.json({ commonQuestions: data || [] });
     } catch (error) {
       console.error('Error in /api/common-questions endpoint:', error);
@@ -1088,7 +1092,11 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         })(),
       ]);
 
-      if (listingError && listingError.code !== 'PGRST116') {
+      if (listingError) {
+        if (listingError.code === 'PGRST116') { // No rows found from single() call
+          console.warn(`[Backend] Listing with ID ${id} not found for client ID ${clientId}.`);
+          return res.status(404).json({ error: 'Listing not found for this client.' });
+        }
         console.error(`[Backend] Error fetching listing:`, listingError);
         throw listingError;
       }
