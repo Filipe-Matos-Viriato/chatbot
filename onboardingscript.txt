@@ -1,0 +1,3 @@
+Change Onboarding:
+
+node packages/backend/scripts/migrate-client-configs-to-db.js

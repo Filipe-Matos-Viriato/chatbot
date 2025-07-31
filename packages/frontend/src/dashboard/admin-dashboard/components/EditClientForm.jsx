@@ -28,11 +28,15 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
 
       for (const field of jsonFields) {
         if (dataToSend[field]) {
-          try {
-            dataToSend[field] = JSON.parse(dataToSend[field]);
-          } catch (jsonError) {
-            setError(new Error(`Invalid JSON for ${field.replace(/([A-Z])/g, ' $1').trim()}. Please correct it.`));
-            return;
+          // The 'default_onboarding_questions' field is already an object, not a string.
+          // The other fields are stringified JSON from their respective editors.
+          if (field !== 'default_onboarding_questions') {
+            try {
+              dataToSend[field] = JSON.parse(dataToSend[field]);
+            } catch (jsonError) {
+              setError(new Error(`Invalid JSON for ${field.replace(/([A-Z])/g, ' $1').trim()}. Please correct it.`));
+              return;
+            }
           }
         } else {
           dataToSend[field] = null;

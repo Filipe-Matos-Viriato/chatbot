@@ -56,6 +56,7 @@ class App extends Component {
     }
 
     this.setState({ isLoadingConfig: true });
+    console.log('--- Widget Initialization ---');
 
     try {
       const { clientId = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c', apiUrl } = this.props.config || {};
@@ -67,60 +68,71 @@ class App extends Component {
       }
       const config = await configResponse.json();
       
-      // Log config loading with onboarding questions info
-      console.log(`🔧 Widget config loaded for client ${clientId}:`, {
-        clientName: config.clientName,
-        hasOnboardingQuestions: !!config.defaultOnboardingQuestions,
-        questionCount: config.defaultOnboardingQuestions?.questions?.length || 0
-      });
-
-      // Create visitor session
-      const sessionResponse = await fetch(`${apiUrl}/v1/sessions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ clientId })
-      });
+      // Check for an existing visitor ID in localStorage
+      let visitorId = localStorage.getItem('visitorId');
+      let sessionData;
       
-      if (!sessionResponse.ok) {
-        throw new Error('Failed to create visitor session');
+      console.log(`🔍 Checking for existing visitorId... Found: ${visitorId || 'None'}`);
+
+      // If a visitorId exists, try to fetch their data
+      if (visitorId) {
+        const visitorResponse = await fetch(`${apiUrl}/v1/visitor`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visitorId })
+        });
+        if (visitorResponse.ok) {
+          sessionData = await visitorResponse.json();
+          console.log('✅ Found returning visitor:', sessionData);
+        } else {
+            console.log('🤔 Visitor ID found but no record on backend. Clearing invalid ID.');
+            localStorage.removeItem('visitorId');
+        }
       }
       
-      const sessionData = await sessionResponse.json();
-
-      // Get onboarding questions from client configuration
-      let onboardingQuestions = null;
-      if (sessionData.needs_onboarding) {
-        // Use client's default onboarding questions from config
-        onboardingQuestions = config.defaultOnboardingQuestions;
+      // If no session data (either new visitor or failed fetch), create a new session
+      if (!sessionData) {
+        console.log('🔄 Creating new visitor session...');
+        const sessionResponse = await fetch(`${apiUrl}/v1/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId })
+        });
         
-        if (onboardingQuestions) {
-          console.log(`✅ Using dynamic onboarding questions from client config for ${clientId}`, onboardingQuestions);
-          
-          // Validate onboarding questions structure
-          if (onboardingQuestions.questions && Array.isArray(onboardingQuestions.questions)) {
-            console.log(`📋 Loaded ${onboardingQuestions.questions.length} onboarding questions`);
-          } else {
-            console.warn('⚠️ Invalid onboarding questions structure, falling back to API');
-            onboardingQuestions = null;
-          }
+        if (!sessionResponse.ok) {
+          throw new Error('Failed to create visitor session');
         }
         
-        // If no default questions in config, fall back to API call
+        sessionData = await sessionResponse.json();
+        console.log('✨ New visitor created:', sessionData);
+        
+        // Store the new visitor ID
+        localStorage.setItem('visitorId', sessionData.visitor_id);
+        console.log(`💾 Stored new visitorId in localStorage: ${sessionData.visitor_id}`);
+      }
+
+      // Get onboarding questions from client configuration if needed
+      let onboardingQuestions = null;
+      if (sessionData.needs_onboarding) {
+        console.log('➡️ Visitor needs onboarding. Fetching questions...');
+        onboardingQuestions = config.defaultOnboardingQuestions;
+        
         if (!onboardingQuestions) {
-          console.log(`🔄 Fallback: Fetching onboarding questions from API for visitor ${sessionData.visitor_id}`);
           try {
             const onboardingResponse = await fetch(`${apiUrl}/v1/visitors/${sessionData.visitor_id}/onboarding?clientId=${clientId}`);
             if (onboardingResponse.ok) {
               const onboardingData = await onboardingResponse.json();
               onboardingQuestions = onboardingData.questions;
-              console.log(`📥 Received onboarding questions from API`, onboardingQuestions);
+              console.log('📦 Onboarding questions loaded from API.');
             }
           } catch (onboardingError) {
             console.warn('❌ Could not load onboarding questions:', onboardingError);
           }
+        } else {
+            console.log('📦 Onboarding questions loaded from widget config.');
         }
+      } else {
+          console.log('👍 Visitor has already completed onboarding.');
       }
 
       this.setState({ 
@@ -131,6 +143,8 @@ class App extends Component {
         isLoadingConfig: false,
         messages: []
       });
+      
+      console.log('--- Initialization Complete ---');
 
       // Start onboarding in chat if needed, otherwise show welcome message
       if (sessionData.needs_onboarding && onboardingQuestions) {
@@ -138,7 +152,6 @@ class App extends Component {
           this.startOnboardingInChat();
         }, 1000);
       } else {
-        // Add welcome message only if not doing onboarding
         const welcomeMessage = {
           id: Date.now(),
           text: config.widgetSettings?.welcomeMessage || 'Hello! How can I help you?',
@@ -152,7 +165,7 @@ class App extends Component {
       }
 
     } catch (error) {
-      console.error('Widget initialization error:', error);
+      console.error('💥 Widget initialization error:', error);
       this.setState({ 
         error: 'Failed to initialize chatbot',
         isLoadingConfig: false 

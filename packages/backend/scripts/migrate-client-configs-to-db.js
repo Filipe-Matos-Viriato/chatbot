@@ -1,6 +1,6 @@
-require('dotenv').config({ path: '../.env' }); // Load .env from packages/backend/
 const fs = require('fs').promises;
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const supabase = require('../src/config/supabase');
 
 const configDirectory = path.join(__dirname, '..', 'configs');
