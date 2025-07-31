@@ -1,15 +1,17 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const OpenAI = require('openai');
 const { Pinecone } = require('@pinecone-database/pinecone');
-const userService = require('./services/user-service'); // Import user service
-const listingService = require('./services/listing-service'); // Import listing service
+const userService = require('./services/user-service');
+const listingService = require('./services/listing-service');
 
 // Initialize clients
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
 const pineconeIndex = pinecone.index(process.env.PINECONE_INDEX_NAME);
 
-const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
-const generativeModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const embeddingModel = "text-embedding-ada-002";
+const generativeModel = "gpt-3.5-turbo";
 
 /**
  * A helper function to add a delay.
@@ -355,13 +357,13 @@ async function generateResponse(query, clientConfig, externalContext = null, use
   }
 
   // 1. Generate embedding for the user's query
-  const queryEmbedding = await embeddingModel.embedContent({
-    content: { parts: [{ text: query }] },
-    taskType: "RETRIEVAL_QUERY",
+  const queryEmbedding = await openai.embeddings.create({
+    model: embeddingModel,
+    input: query,
   });
 
   // 2. Perform Hybrid Search with re-ranking, passing userContext
-  const queryResponse = await performHybridSearch(queryEmbedding.embedding.values, clientConfig, externalContext, query, userContext);
+  const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, query, userContext);
 
   // If there are no matches at all, use the client's configured fallback.
   if (!queryResponse || queryResponse.matches.length === 0) {
@@ -394,9 +396,11 @@ async function generateResponse(query, clientConfig, externalContext = null, use
   let retries = 3;
   while (retries > 0) {
     try {
-      const result = await generativeModel.generateContent(systemPrompt);
-      const response = await result.response;
-      return response.text();
+      const completion = await openai.chat.completions.create({
+        model: generativeModel,
+        messages: [{ role: 'system', content: systemPrompt }],
+      });
+      return completion.choices[0].message.content;
     } catch (error) {
       if (error.status === 503 && retries > 1) {
         console.log(`Model is overloaded. Retrying in 2 seconds... (${retries - 1} retries left)`);
@@ -422,13 +426,13 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
     searchQuery = chatHistory.map(m => m.text).join(' ');
   }
 
-  const queryEmbedding = await embeddingModel.embedContent({
-    content: { parts: [{ text: searchQuery }] },
-    taskType: "RETRIEVAL_QUERY",
+  const queryEmbedding = await openai.embeddings.create({
+    model: embeddingModel,
+    input: searchQuery,
   });
 
   // 2. Perform Hybrid Search to find relevant context, now client-aware, passing userContext
-  const queryResponse = await performHybridSearch(queryEmbedding.embedding.values, clientConfig, externalContext, searchQuery, userContext);
+  const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, searchQuery, userContext);
 
   if (!queryResponse || queryResponse.matches.length === 0) {
     return []; // No context found, no questions to suggest
@@ -450,11 +454,13 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
 
   // 4. Generate the questions
   try {
-    const result = await generativeModel.generateContent(prompt);
-    const responseText = await result.response.text();
-    // Clean and parse the JSON output
-    const cleanedJson = responseText.trim().replace(/^```json\s*|```$/g, '');
-    const questions = JSON.parse(cleanedJson);
+    const completion = await openai.chat.completions.create({
+        model: generativeModel,
+        messages: [{ role: 'system', content: prompt }],
+        response_format: { type: "json_object" },
+      });
+    const responseText = completion.choices[0].message.content;
+    const questions = JSON.parse(responseText);
     return Array.isArray(questions) ? questions : [];
   } catch (error) {
     console.error("Failed to generate or parse suggested questions:", error);

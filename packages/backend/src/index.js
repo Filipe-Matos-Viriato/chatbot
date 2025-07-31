@@ -214,6 +214,24 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to get a visitor by ID
+  app.post('/v1/visitor', async (req, res) => {
+    try {
+      const { visitorId } = req.body;
+      if (!visitorId) {
+        return res.status(400).json({ error: 'Visitor ID is required' });
+      }
+      const visitor = await visitorService.getVisitor(visitorId);
+      if (!visitor) {
+        return res.status(404).json({ error: 'Visitor not found' });
+      }
+      res.json(visitor);
+    } catch (error) {
+      console.error('Error getting visitor:', error);
+      res.status(500).json({ error: 'Failed to get visitor.' });
+    }
+  });
+
   // Load client configuration for all API routes
   // Removed global application of clientConfigMiddleware
 
@@ -229,12 +247,18 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
 
-      // Retrieve recent chat history for this session
+      // Retrieve recent chat history for this visitor (across all sessions)
       let chatHistory = null;
       try {
-        const recentMessages = await chatHistoryService.getRecentChatHistory(sessionId, clientConfig.clientId, 5);
-        chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
-        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages`);
+        if (visitorId) {
+          const recentMessages = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 10);
+          chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
+          console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages for visitor ${visitorId}`);
+          console.log(`[${clientConfig.clientName || clientConfig.clientId}] Formatted Chat History:\n---\n${chatHistory}\n---`);
+        } else {
+          console.warn('No visitorId provided, skipping chat history retrieval');
+          chatHistory = "Nenhum histórico anterior disponível";
+        }
       } catch (error) {
         console.error('Error retrieving chat history:', error);
         chatHistory = "Nenhum histórico anterior disponível";
@@ -1119,6 +1143,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.error(`Error fetching listing details for ID ${req.params.id}:`, error);
       res.status(500).json({ error: 'Failed to fetch listing details.' });
     }
+  });
+
+  // Global error handler to catch JSON parsing errors
+  app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+      console.error('Invalid JSON received:', err);
+      return res.status(400).send({ message: 'Invalid JSON payload passed to server.' });
+    }
+    // Pass other errors on
+    next(err);
   });
 
   return app;

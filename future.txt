@@ -1,0 +1,1 @@
+I want to start the implementation of the chatHistory to the chatbot context. When the chatbot is interacting with a visitor, it must have access to all previous chat history with that visitor and use it to generate better responses.
