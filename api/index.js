@@ -18,9 +18,6 @@ const multer = require('multer');
 // Configure multer for in-memory file storage
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Initialize chat history service
-const chatHistoryService = new ChatHistoryService();
-
 const app = express();
 
 // Updated CORS configuration for third-party websites
@@ -276,6 +273,7 @@ app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
     const { clientConfig } = req;
     const timestamp = new Date().toISOString();
     const turnId = Date.now().toString(); // Simple unique ID for this turn
+    const chatHistoryService = new ChatHistoryService();
 
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });

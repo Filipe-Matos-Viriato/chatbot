@@ -10,11 +10,10 @@ const listingService = require('./services/listing-service'); // Import Listing 
 const visitorService = require('./services/visitor-service');
 const onboardingService = require('./services/onboarding-service');
 const defaultSupabase = require('./config/supabase'); // Import Supabase client
-const ChatHistoryService = require('./services/chat-history-service'); // Corrected import
+const ChatHistoryService = require('./services/chat-history-service');
 const developmentService = require('./services/development-service'); // Import Development Service
 const userService = require('./services/user-service'); // Import User Service
 
-const chatHistoryService = new ChatHistoryService();
 const multer = require('multer');
 
 // Configure multer for in-memory file storage
@@ -246,6 +245,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
+      const chatHistoryService = new ChatHistoryService();
 
       // Retrieve recent chat history for this visitor (across all sessions)
       let chatHistory = null;
