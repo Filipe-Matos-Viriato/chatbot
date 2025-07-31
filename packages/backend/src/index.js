@@ -64,7 +64,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-User-Id', 'X-User-Role']
   }));
   
-  // Increase payload size limit before parsing
   app.use(express.json({ limit: '500kb' }));
 
   // Apply test middleware if provided (must be before clientConfigMiddleware)
