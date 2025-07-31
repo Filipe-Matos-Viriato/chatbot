@@ -55,6 +55,7 @@ class ChatHistoryService {
       id: `${session_id}-${turn_id}`, // Unique ID for the vector
       values: embedding,
       metadata: {
+        text, // Store the original text in metadata for retrieval
         role,
         client_id,
         visitor_id,
@@ -110,6 +111,43 @@ class ChatHistoryService {
     }
   }
 
+  async getVisitorChatHistory(visitorId, clientId, limit = 10) {
+    try {
+      console.log(`Retrieving visitor chat history for visitor: ${visitorId}, client: ${clientId}`);
+      
+      // Query Pinecone for recent messages from this visitor across all sessions
+      const queryResponse = await this.pineconeIndex.query({
+        topK: limit * 2, // Get more than needed in case we need to filter
+        includeMetadata: true,
+        filter: {
+          visitor_id: visitorId,
+          client_id: clientId
+        }
+      });
+
+      if (!queryResponse.matches || queryResponse.matches.length === 0) {
+        return [];
+      }
+
+      // Sort by timestamp and take the most recent messages
+      const sortedMessages = queryResponse.matches
+        .map(match => ({
+          role: match.metadata.role,
+          text: match.metadata.text,
+          timestamp: match.metadata.timestamp,
+          turn_id: match.metadata.turn_id,
+          session_id: match.metadata.session_id
+        }))
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) // Most recent first
+        .slice(0, limit); // Take only the requested number
+
+      return sortedMessages;
+    } catch (error) {
+      console.error("Error retrieving visitor chat history:", error);
+      return []; // Return empty array on error to not break the chat
+    }
+  }
+
   formatChatHistoryForPrompt(chatHistory) {
     if (!chatHistory || chatHistory.length === 0) {
       return "Nenhum histórico anterior disponível.";
@@ -122,4 +160,4 @@ class ChatHistoryService {
   }
 }
 
-export default ChatHistoryService;
+module.exports = ChatHistoryService;

@@ -11,11 +11,15 @@ const { getClientConfig } = require('../packages/backend/src/services/client-con
 const { processDocument } = require('../packages/backend/src/services/ingestion-service');
 const visitorService = require('../packages/backend/src/services/visitor-service');
 const onboardingService = require('../packages/backend/src/services/onboarding-service');
+const ChatHistoryService = require('../packages/backend/src/services/chat-history-service');
 const supabase = require('../packages/backend/src/config/supabase');
 const multer = require('multer');
 
 // Configure multer for in-memory file storage
 const upload = multer({ storage: multer.memoryStorage() });
+
+// Initialize chat history service
+const chatHistoryService = new ChatHistoryService();
 
 const app = express();
 
@@ -270,9 +274,45 @@ app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
   try {
     const { query, visitorId, sessionId, context, onboardingAnswers } = req.body;
     const { clientConfig } = req;
+    const timestamp = new Date().toISOString();
+    const turnId = Date.now().toString(); // Simple unique ID for this turn
 
     if (!query) {
       return res.status(400).json({ error: 'Query is required' });
+    }
+
+    // Retrieve recent chat history for this visitor (across all sessions)
+    let chatHistory = null;
+    try {
+      if (visitorId) {
+        const recentMessages = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 10);
+        chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages for visitor ${visitorId}`);
+        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Formatted Chat History:\n---\n${chatHistory}\n---`);
+      } else {
+        console.warn('No visitorId provided, skipping chat history retrieval');
+        chatHistory = "Nenhum histórico anterior disponível";
+      }
+    } catch (error) {
+      console.error('Error retrieving chat history:', error);
+      chatHistory = "Nenhum histórico anterior disponível";
+    }
+
+    // Upsert user message to Pinecone if we have session info
+    if (sessionId && visitorId) {
+      try {
+        await chatHistoryService.upsertMessage({
+          text: query,
+          role: 'user',
+          client_id: clientConfig.clientId,
+          visitor_id: visitorId,
+          session_id: sessionId,
+          timestamp: timestamp,
+          turn_id: `${turnId}-user`,
+        }, clientConfig);
+      } catch (error) {
+        console.error('Error storing user message to chat history:', error);
+      }
     }
 
     // Get onboarding answers if not provided but visitorId is available
@@ -298,9 +338,26 @@ app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
       clientConfig, 
       context, 
       null, // userContext
-      "Histórico não disponível no modo serverless", // chatHistory
+      chatHistory, // Now using actual chat history
       formattedOnboardingAnswers
     );
+
+    // Upsert assistant response to Pinecone if we have session info
+    if (sessionId && visitorId) {
+      try {
+        await chatHistoryService.upsertMessage({
+          text: responseText,
+          role: 'assistant',
+          client_id: clientConfig.clientId,
+          visitor_id: visitorId,
+          session_id: sessionId,
+          timestamp: new Date().toISOString(),
+          turn_id: `${turnId}-assistant`,
+        }, clientConfig);
+      } catch (error) {
+        console.error('Error storing assistant message to chat history:', error);
+      }
+    }
 
     // Log the user's question and its embedding
     try {

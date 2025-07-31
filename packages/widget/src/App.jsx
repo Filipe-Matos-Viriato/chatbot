@@ -14,6 +14,7 @@ class App extends Component {
       // Onboarding state
       onboardingQuestions: null,
       visitorId: null,
+      sessionId: null, // Add sessionId state
       needsOnboarding: false,
       currentOnboardingIndex: 0,
       onboardingAnswers: {},
@@ -49,6 +50,11 @@ class App extends Component {
     this.forceUpdate();
   };
 
+  // Helper function to generate sessionId
+  generateSessionId = () => {
+    return `session_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  };
+
   loadConfig = async () => {
     // Prevent duplicate API calls
     if (this.state.isLoadingConfig || this.state.config) {
@@ -57,6 +63,11 @@ class App extends Component {
 
     this.setState({ isLoadingConfig: true });
     console.log('--- Widget Initialization ---');
+
+    // Generate a new sessionId for this chat session
+    const sessionId = this.generateSessionId();
+    this.setState({ sessionId });
+    console.log(`🆔 Generated new sessionId: ${sessionId}`);
 
     try {
       const { clientId = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c', apiUrl } = this.props.config || {};
@@ -144,6 +155,7 @@ class App extends Component {
         messages: []
       });
       
+      console.log(`👤 Visitor ID: ${sessionData.visitor_id}`);
       console.log('--- Initialization Complete ---');
 
       // Start onboarding in chat if needed, otherwise show welcome message
@@ -241,11 +253,11 @@ class App extends Component {
           'X-Client-Id': this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c'
         },
         body: JSON.stringify({
-          message: inputValue,
-          query: inputValue, // Add both for compatibility
-          sessionId: this.state.visitorId, // Add visitor session ID
+          query: inputValue,
+          visitorId: this.state.visitorId,
+          sessionId: this.state.sessionId,
           context: messages.slice(-5), // Last 5 messages for context
-          clientId: this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c'
+          onboardingAnswers: this.state.onboardingAnswers
         })
       });
 
