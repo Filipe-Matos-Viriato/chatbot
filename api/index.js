@@ -26,7 +26,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-User-Id', 'X-User-Role']
 }));
-app.use(express.json());
+// Increase payload size limit before parsing
+app.use(express.json({ limit: '500kb' }));
 
 // Middleware to load client configuration and attach it to the request
 const clientConfigMiddleware = async (req, res, next) => {

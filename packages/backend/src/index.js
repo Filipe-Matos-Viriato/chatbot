@@ -64,7 +64,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-User-Id', 'X-User-Role']
   }));
   
-  app.use(express.json());
+  // Increase payload size limit before parsing
+  app.use(express.json({ limit: '500kb' }));
 
   // Apply test middleware if provided (must be before clientConfigMiddleware)
   if (testMiddleware) {
@@ -1126,6 +1127,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.error(`Error fetching listing details for ID ${req.params.id}:`, error);
       res.status(500).json({ error: 'Failed to fetch listing details.' });
     }
+  });
+
+  // Global error handler to catch JSON parsing errors
+  app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+      console.error('Invalid JSON received:', err);
+      return res.status(400).send({ message: 'Invalid JSON payload passed to server.' });
+    }
+    // Pass other errors on
+    next(err);
   });
 
   return app;
