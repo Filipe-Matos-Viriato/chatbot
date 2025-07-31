@@ -8,6 +8,22 @@ class VisitorService {
   }
 
   async createVisitor(clientId, listingId) {
+    // Check if a visitor with this clientId already exists
+    const { data: existingVisitor, error: existingVisitorError } = await supabase
+      .from('visitors')
+      .select('visitor_id')
+      .eq('client_id', clientId)
+      .limit(1);
+
+    if (existingVisitorError) {
+      console.error('Error checking for existing visitor:', existingVisitorError);
+    }
+
+    if (existingVisitor && existingVisitor.length > 0) {
+      console.log(`Visitor already exists for client ${clientId}, returning existing visitor_id.`);
+      return existingVisitor[0];
+    }
+
     const visitorId = `visitor_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const newVisitor = {
       visitor_id: visitorId,
