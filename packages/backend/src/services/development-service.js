@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+import supabase from '../config/supabase.js';
 
 async function createDevelopment(developmentData) {
   const { data, error } = await supabase
@@ -62,7 +62,7 @@ async function deleteDevelopment(id) {
   return { message: 'Development deleted successfully' };
 }
 
-module.exports = {
+export {
   createDevelopment,
   getDevelopmentById,
   getDevelopmentsByClientId,

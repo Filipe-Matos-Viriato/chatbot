@@ -5,28 +5,45 @@
  * and upserting into the vector database.
  */
 
-const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { Pinecone } = require('@pinecone-database/pinecone');
-const supabase = require('../config/supabase'); // Import Supabase client
-const { getClientConfig } = require('./client-config-service'); // Import client config service
-const listingService = require('./listing-service'); // Import listing service
-const developmentService = require('./development-service'); // Import development service
-const { v4: uuidv4 } = require('uuid'); // For generating UUIDs
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+import { GoogleGenerativeAI } from '@google/generative-ai'; // Keep for other potential uses if needed
+import OpenAI from 'openai'; // Import OpenAI
+import { Pinecone } from '@pinecone-database/pinecone';
+import supabase from '../config/supabase.js'; // Import Supabase client
+import { getClientConfig } from './client-config-service.js'; // Import client config service
+import listingService from './listing-service.js'; // Import listing service (default export)
+import { createDevelopment, getDevelopmentById, getDevelopmentsByClientId, updateDevelopment, deleteDevelopment } from './development-service.js'; // Import named exports
+import { v4 as uuidv4 } from 'uuid'; // For generating UUIDs
 
 // Default instances (can be overridden for testing)
-let defaultGenAI;
+let defaultGenAI; // Keep for other potential uses if needed
+let defaultOpenAI; // New OpenAI instance
 let defaultPinecone;
 let defaultPineconeIndex;
 let defaultEmbeddingModel;
 
 // Initialize default clients if not already initialized (for production/non-test use)
 const initializeDefaultClients = () => {
-  if (!defaultGenAI) {
-    defaultGenAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+  if (!defaultOpenAI) { // Initialize OpenAI
+    defaultOpenAI = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  if (!defaultPinecone) {
     defaultPinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+  }
+  if (!defaultPineconeIndex) {
     defaultPineconeIndex = defaultPinecone.index(process.env.PINECONE_INDEX_NAME);
-    defaultEmbeddingModel = defaultGenAI.getGenerativeModel({ model: "text-embedding-004" });
+  }
+  if (!defaultEmbeddingModel) {
+    // Use OpenAI's embedding model
+    defaultEmbeddingModel = {
+      embedContent: async (params) => {
+        const response = await defaultOpenAI.embeddings.create({
+          model: "text-embedding-3-small",
+          input: params.content.parts[0].text,
+        });
+        return { embedding: { values: response.data[0].embedding } };
+      }
+    };
   }
 };
 
@@ -42,15 +59,10 @@ initializeDefaultClients();
  */
 const extractText = async (buffer, originalname, dependencies = {}) => {
   const {
-    mammoth = require('mammoth'), // Use require directly for default
-    pdf = require('pdf-parse'),   // Use require directly for default
+    pdf, // pdf is now passed as a direct dependency from the calling script
   } = dependencies;
 
-  if (originalname.endsWith('.docx')) {
-    // Pass Node.js Buffer directly to mammoth
-    const { value } = await mammoth.extractRawText({ buffer: buffer });
-    return value;
-  } else if (originalname.endsWith('.pdf')) {
+  if (originalname.endsWith('.pdf')) {
     const data = await pdf(buffer);
     return data.text;
   } else {
@@ -271,20 +283,23 @@ const applyClientTaggingRules = (documentText, originalname, taggingRules, curre
   const enrichedMetadata = { ...currentMetadata };
   const documentType = originalname.split('.').pop().toLowerCase();
 
+  // Ensure taggingRules is an object, default to empty if null or undefined
+  const rules = taggingRules || {};
+
   // Apply global tags
-  if (taggingRules.global_tags) {
-    taggingRules.global_tags.forEach(tag => {
+  if (rules.global_tags) {
+    rules.global_tags.forEach(tag => {
       enrichedMetadata[tag.field] = tag.value;
     });
   }
 
   // Apply document type specific tags
-  if (taggingRules.document_type_tags) {
-    for (const typeKey in taggingRules.document_type_tags) {
+  if (rules.document_type_tags) {
+    for (const typeKey in rules.document_type_tags) {
       // Check if the document matches the type (e.g., 'json', 'text/docx')
       // This is a simplified check; a more robust solution might map file extensions to types
       if (typeKey.includes(documentType) || (typeKey === 'json' && ['json'].includes(documentType)) || (typeKey === 'text/docx' && ['txt', 'docx', 'pdf'].includes(documentType))) {
-        const typeRules = taggingRules.document_type_tags[typeKey];
+        const typeRules = rules.document_type_tags[typeKey];
 
         if (typeRules.source_type === 'json' && documentType === 'json') {
           try {
@@ -380,13 +395,13 @@ const processDocument = async ({
   metadata,
 }, dependencies = {}) => {
   const {
-    genAI = defaultGenAI,
+    // genAI = defaultGenAI, // No longer directly used for embeddings
+    openai = defaultOpenAI, // Pass OpenAI instance
     pinecone = defaultPinecone,
     pineconeIndex = defaultPineconeIndex,
     embeddingModel = defaultEmbeddingModel,
-    mammoth, // Passed to extractText
-    pdf,     // Passed to extractText
     extractText: injectedExtractText, // Explicitly require extractText
+    pdf, // Ensure pdf is destructured here
   } = dependencies;
 const { originalname, buffer } = file;
 
@@ -414,13 +429,15 @@ const { originalname, buffer } = file;
 
     // Determine chunking strategy based on document type and client config
     const documentType = originalname.split('.').pop().toLowerCase();
-    const chunkingStrategy = clientConfig.chunking_rules?.document_types?.[documentType]?.strategy || 'semantic_paragraph';
-    const chunkSize = clientConfig.chunking_rules?.document_types?.[documentType]?.max_tokens || 1000;
-    const chunkOverlap = clientConfig.chunking_rules?.document_types?.[documentType]?.overlap_tokens || 200;
+    // Ensure chunking_rules is an object, default to empty if null or undefined
+    const chunkingRules = clientConfig.chunking_rules || {};
+    const chunkingStrategy = chunkingRules?.document_types?.[documentType]?.strategy || 'semantic_paragraph';
+    const chunkSize = chunkingRules?.document_types?.[documentType]?.max_tokens || 1000;
+    const chunkOverlap = chunkingRules?.document_types?.[documentType]?.overlap_tokens || 200;
 
     
     console.log(`[${clientConfig.clientName || clientConfig.clientId}] Extracting text from ${originalname}...`);
-    const documentText = await injectedExtractText(buffer, originalname, { mammoth, pdf });
+    const documentText = await injectedExtractText(buffer, originalname, { pdf });
 
     let currentListingId = null;
     let currentDevelopmentId = null;
@@ -486,13 +503,15 @@ const { originalname, buffer } = file;
         .from('listing_metrics')
         .upsert({
           listing_id: currentListingId,
-          chatbot_views: 0, // Initialize to 0
+          engaged_users: 0, // Initialize to 0, matches schema
           inquiries: 0,     // Initialize to 0
           unacknowledged_hot_leads: 0,     // Initialize to 0
-          conversion_rate: '0%', // Initialize to '0%'
+          conversion_rate: 0, // Initialize to 0, matches schema (numeric)
           lead_score_distribution_hot: 0,
           lead_score_distribution_warm: 0,
           lead_score_distribution_cold: 0,
+          total_conversions: 0, // Add, matches schema
+          client_id: clientConfig.clientId, // Add, matches schema
           // updated_at will default on the database side
         }, { onConflict: 'listing_id' }); // Upsert based on 'listing_id'
 
@@ -506,15 +525,15 @@ const { originalname, buffer } = file;
       if (!currentDevelopmentId) {
         // Create new development if ID not provided
         console.log(`[${clientConfig.clientName || clientConfig.clientId}] Creating new development in Supabase...`);
-        const { development, error } = await developmentService.createDevelopment({
+        const developmentResult = await createDevelopment({ // Use named import
           name: originalname.replace(/\.(pdf|docx)$/i, ''), // Use filename as name
           client_id: clientConfig.clientId,
         });
-        if (error) {
-          console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error creating new development in Supabase:`, error);
-          throw new Error(`Failed to create development: ${error.message}`);
+        if (developmentResult.error) {
+          console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error creating new development in Supabase:`, developmentResult.error);
+          throw new Error(`Failed to create development: ${developmentResult.error.message}`);
         }
-        currentDevelopmentId = development.id;
+        currentDevelopmentId = developmentResult.id;
         console.log(`[${clientConfig.clientName || clientConfig.clientId}] New development ${currentDevelopmentId} created in Supabase.`);
       } else {
         console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using existing development ID: ${currentDevelopmentId}.`);
@@ -540,9 +559,9 @@ const { originalname, buffer } = file;
     const vectors = [];
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      const embeddingResult = await embeddingModel.embedContent({
+      const embeddingResult = await embeddingModel.embedContent({ // Use the new embeddingModel structure
         content: { parts: [{ text: chunk }] },
-        taskType: "RETRIEVAL_DOCUMENT",
+        // taskType is not used by OpenAI embeddings, remove if not needed elsewhere
       });
 
       const vectorMetadata = {
@@ -596,7 +615,7 @@ const { originalname, buffer } = file;
   }
 };
 
-module.exports = {
+export {
   processDocument,
   extractText, // Export extractText for testing and potential external use
   extractStructuredMetadata, // Export for testing and potential external use

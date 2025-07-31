@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+import supabase from '../config/supabase.js';
 
 /**
  * Loads the configuration for a specific client from the database.
@@ -46,7 +46,7 @@ async function getClientConfig(clientId) {
   return clientConfig;
 }
 
-module.exports = {
+export {
   getClientConfig,
   createClientConfig,
   updateClientConfig,

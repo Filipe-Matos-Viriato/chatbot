@@ -1,8 +1,9 @@
-const dotenv = require('dotenv');
-const path = require('path'); // Add path module
-dotenv.config({ path: path.resolve(__dirname, '../.env') }); // Use absolute path
+import dotenv from 'dotenv';
+import path from 'path'; // Add path module
+dotenv.config(); // Load .env from current working directory
 
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid'; // Import uuidv4
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

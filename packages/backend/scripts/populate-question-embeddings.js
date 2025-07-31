@@ -1,22 +1,20 @@
-const dotenv = require('dotenv');
-const path = require('path');
-dotenv.config({ path: path.resolve(__dirname, '../.env') });
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(process.cwd(), './packages/backend/.env') });
 
-const { createClient } = require('@supabase/supabase-js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+import { createClient } from '@supabase/supabase-js';
+import ChatHistoryService from '../src/services/chat-history-service.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const googleApiKey = process.env.GOOGLE_API_KEY;
 
-if (!supabaseUrl || !supabaseServiceRoleKey || !googleApiKey) {
-  console.error('Supabase URL, Service Role Key, or Google API Key is missing in environment variables.');
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  console.error('Supabase URL or Service Role Key is missing in environment variables.');
   process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
-const genAI = new GoogleGenerativeAI(googleApiKey);
-const embeddingModel = genAI.getGenerativeModel({ model: "text-embedding-004" });
+const chatHistoryService = new ChatHistoryService();
 
 async function populateQuestionEmbeddings() {
   console.log('Populating question_embeddings table...');
@@ -39,14 +37,11 @@ async function populateQuestionEmbeddings() {
   const embeddingsToInsert = [];
   for (const q of questions) {
     try {
-      const embeddingResult = await embeddingModel.embedContent({
-        content: { parts: [{ text: q.question_text }] },
-        taskType: "RETRIEVAL_QUERY",
-      });
+      const embedding = await chatHistoryService.generateEmbedding(q.question_text);
       embeddingsToInsert.push({
         question_id: q.id,
         listing_id: q.listing_id,
-        embedding: embeddingResult.embedding.values,
+        embedding: embedding,
       });
     } catch (embedError) {
       console.error(`Error generating embedding for question "${q.question_text}" (ID: ${q.id}):`, embedError);

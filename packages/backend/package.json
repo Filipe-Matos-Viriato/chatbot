@@ -2,6 +2,7 @@
   "name": "@enterprise-rag-chatbot/backend",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "start": "node -r dotenv/config src/index.js",
@@ -22,11 +23,12 @@
     "form-data": "^4.0.3",
     "k-means": "^1.0.0",
     "langchain": "^0.3.29",
-    "mammoth": "^1.9.1",
     "ml-kmeans": "^6.0.0",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
-    "pdf-parse": "^1.1.1",
+    "openai": "^5.11.0",
+    "pdf-parse": "^1.1.0",
+    "pdfjs-dist": "^5.4.54",
     "sinon": "^21.0.0",
     "supertest": "^7.1.4"
   },
