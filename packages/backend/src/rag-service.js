@@ -270,13 +270,16 @@ async function generateResponse(query, clientConfig, externalContext = null, use
 
   const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, query, userContext);
 
-  if (!queryResponse || queryResponse.matches.length === 0) {
-    return clientConfig.prompts.fallbackResponse;
+  // Get context from search results, or use empty context if no matches
+  let context = '';
+  if (queryResponse && queryResponse.matches && queryResponse.matches.length > 0) {
+    context = queryResponse.matches
+      .map(match => match.metadata.text)
+      .join('\n\n---\n\n');
+  } else {
+    // For queries with no specific context (like greetings), we'll still use system prompt
+    context = 'Nenhum contexto específico de documentos encontrado para esta consulta.';
   }
-
-  const context = queryResponse.matches
-    .map(match => match.metadata.text)
-    .join('\n\n---\n\n');
 
   const templateVariables = {
     onboardingAnswers: onboardingAnswers || "Não disponível",

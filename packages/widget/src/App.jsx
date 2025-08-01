@@ -1,4 +1,5 @@
 import { h, Component, Fragment } from 'preact';
+import { marked } from 'marked';
 
 class App extends Component {
   constructor(props) {
@@ -853,9 +854,6 @@ class App extends Component {
               style: `
                 width: ${isMobile ? '32px' : '36px'};
                 height: ${isMobile ? '32px' : '36px'};
-                background: rgba(255,255,255,0.2);
-                border-radius: 0 !important;
-                border: 1px solid #3f3f3f !important;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -928,7 +926,9 @@ class App extends Component {
                 'aria-label': msg.ariaLabel || `${msg.sender === 'user' ? 'Your message' : 'Bot message'}: ${msg.text}`,
                 className: `widget-message widget-message-${msg.sender}`
               }, [
-                msg.text,
+                msg.sender === 'bot' 
+                  ? h('div', { dangerouslySetInnerHTML: { __html: marked.parse(msg.text) } })
+                  : msg.text,
                 msg.type === 'onboarding-question' && this.renderOnboardingQuestion(msg)
               ])
           ),

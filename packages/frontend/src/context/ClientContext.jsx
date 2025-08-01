@@ -10,7 +10,7 @@ export const ClientProvider = ({ children }) => {
     useEffect(() => {
         const fetchClients = async () => {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/v1/clients`);
+                const response = await fetch(`${API_BASE_URL}/v1/clients`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
