@@ -299,9 +299,37 @@ async function generateResponse(query, clientConfig, externalContext = null, use
   let retries = 3;
   while (retries > 0) {
     try {
+      // Parse chat history into message format
+      const chatMessagesArray = [];
+      if (chatHistory && chatHistory !== "Nenhum histórico anterior disponível") {
+        // Split the chat history by lines and convert to message objects
+        const historyLines = chatHistory.split('\n');
+        for (const line of historyLines) {
+          if (line.startsWith('Utilizador: ')) {
+            chatMessagesArray.push({
+              role: 'user',
+              content: line.replace('Utilizador: ', '')
+            });
+          } else if (line.startsWith('Assistente: ')) {
+            chatMessagesArray.push({
+              role: 'assistant',
+              content: line.replace('Assistente: ', '')
+            });
+          }
+        }
+      }
+
+      // Create the full messages array
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...chatMessagesArray,
+        { role: 'user', content: query }
+      ];
+
+      // Call the API with the complete conversation
       const completion = await openai.chat.completions.create({
         model: generativeModel,
-        messages: [{ role: 'system', content: systemPrompt }],
+        messages: messages,
       });
       return completion.choices[0].message.content;
     } catch (error) {
