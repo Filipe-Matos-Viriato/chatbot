@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+import supabase from '../config/supabase.js';
 
 /**
  * OnboardingService handles all onboarding-related operations
@@ -305,4 +305,4 @@ class OnboardingService {
   }
 }
 
-module.exports = new OnboardingService();
+export default new OnboardingService();

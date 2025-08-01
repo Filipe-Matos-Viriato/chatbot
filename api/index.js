@@ -494,18 +494,37 @@ app.get('/api/v1/clients/:id', async (req, res) => {
 app.put('/api/v1/clients/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updates = req.body;
 
-    // Debug: Log what we're trying to save
-    console.log(`🔄 Updating client ${id} with data:`, {
-      hasOnboardingQuestions: !!updateData.default_onboarding_questions,
-      onboardingQuestionCount: updateData.default_onboarding_questions?.questions?.length || 0,
-      dataKeys: Object.keys(updateData)
-    });
+    // Ensure complex fields are stringified if they are provided as objects
+    if (updates.prompts && typeof updates.prompts === 'object') {
+      updates.prompts = JSON.stringify(updates.prompts);
+    }
+    if (updates.lead_scoring_rules && typeof updates.lead_scoring_rules === 'object') {
+      updates.lead_scoring_rules = JSON.stringify(updates.lead_scoring_rules);
+    }
+    if (updates.document_extraction && typeof updates.document_extraction === 'object') {
+      updates.document_extraction = JSON.stringify(updates.document_extraction);
+    }
+    if (updates.chat_history_tagging_rules && typeof updates.chat_history_tagging_rules === 'object') {
+      updates.chat_history_tagging_rules = JSON.stringify(updates.chat_history_tagging_rules);
+    }
+    if (updates.default_onboarding_questions && typeof updates.default_onboarding_questions === 'object') {
+      updates.default_onboarding_questions = JSON.stringify(updates.default_onboarding_questions);
+    }
+    if (updates.widget_settings && typeof updates.widget_settings === 'object') {
+      updates.widget_settings = JSON.stringify(updates.widget_settings);
+    }
+     if (updates.chunking_rules && typeof updates.chunking_rules === 'object') {
+      updates.chunking_rules = JSON.stringify(updates.chunking_rules);
+    }
+     if (updates.tagging_rules && typeof updates.tagging_rules === 'object') {
+      updates.tagging_rules = JSON.stringify(updates.tagging_rules);
+    }
 
     const { data, error } = await supabase
       .from('clients')
-      .update(updateData)
+      .update(updates)
       .eq('client_id', id)
       .select()
       .single();
@@ -514,12 +533,6 @@ app.put('/api/v1/clients/:id', async (req, res) => {
       console.error('Error updating client:', error);
       return res.status(500).json({ error: 'Failed to update client.' });
     }
-
-    // Debug: Log what was saved
-    console.log(`✅ Client ${id} updated successfully:`, {
-      hasOnboardingQuestions: !!data.default_onboarding_questions,
-      onboardingQuestionCount: data.default_onboarding_questions?.questions?.length || 0
-    });
 
     res.json(data);
   } catch (error) {

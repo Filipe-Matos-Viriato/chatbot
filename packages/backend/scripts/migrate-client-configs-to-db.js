@@ -1,7 +1,13 @@
-const fs = require('fs').promises;
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
-const supabase = require('../src/config/supabase');
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+import supabase from '../src/config/supabase.js';
+
+// Recreate __dirname for ES Modules and configure dotenv
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 const configDirectory = path.join(__dirname, '..', 'configs');
 
@@ -62,7 +68,7 @@ async function migrateClientConfigs() {
                     default_onboarding_questions: default_onboarding_questions,
                     widget_settings: widgetSettings,
                     updated_at: new Date().toISOString() // Update timestamp on upsert
-                }, { onConflict: 'client_id', ignoreDuplicates: false })
+                }, { onConflict: 'client_id' })
                 .select();
 
             if (error) {

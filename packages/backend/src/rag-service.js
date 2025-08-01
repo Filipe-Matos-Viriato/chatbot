@@ -1,7 +1,8 @@
-const OpenAI = require('openai');
-const { Pinecone } = require('@pinecone-database/pinecone');
-const userService = require('./services/user-service');
-const listingService = require('./services/listing-service');
+import OpenAI from 'openai';
+import { Pinecone } from '@pinecone-database/pinecone';
+import { encode } from 'gpt-3-encoder';
+import * as userService from './services/user-service.js';
+import * as listingService from './services/listing-service.js';
 
 // Initialize clients
 const openai = new OpenAI({
@@ -12,6 +13,9 @@ const pineconeIndex = pinecone.index('rachatbot-1536'); // Use the new 1536-dime
 
 const embeddingModel = "text-embedding-3-small"; // Standardize on the 1536-dimension model
 const generativeModel = "gpt-3.5-turbo";
+const MAX_TOTAL_TOKENS = 4096; // Max tokens for gpt-3.5-turbo
+const MAX_RESPONSE_TOKENS = 1000;
+const CONTEXT_TOKEN_BUDGET = MAX_TOTAL_TOKENS - MAX_RESPONSE_TOKENS; // Reserve tokens for the response
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -284,66 +288,87 @@ async function generateResponse(query, clientConfig, externalContext = null, use
 
   const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, query, userContext, mergedFilters);
 
-  // Get context from search results, or use empty context if no matches
+  // --- Context and History Truncation Logic ---
+  let systemPromptTemplate = clientConfig.prompts.systemInstruction;
+  let remainingTokens = CONTEXT_TOKEN_BUDGET - encode(systemPromptTemplate).length - encode(query).length;
+
+  // Truncate retrieved context
   let context = '';
   if (queryResponse && queryResponse.matches && queryResponse.matches.length > 0) {
-    context = queryResponse.matches
-      .map(match => match.metadata.text)
-      .join('\n\n---\n\n');
+    const contextParts = [];
+    for (const match of queryResponse.matches) {
+        const chunk = match.metadata.text;
+        const chunkTokens = encode(chunk).length;
+        if (remainingTokens - chunkTokens > 0) {
+            contextParts.push(chunk);
+            remainingTokens -= chunkTokens;
+        } else {
+            break; // Stop adding chunks if we exceed the budget
+        }
+    }
+    context = contextParts.join('\n\n---\n\n');
   } else {
-    // For queries with no specific context (like greetings), we'll still use system prompt
-    context = 'Nenhum contexto específico de documentos encontrado para esta consulta.';
+    context = ''; // No context found, use an empty string
+  }
+  
+  // Truncate chat history
+  let truncatedChatHistory = '';
+  const chatMessagesArray = [];
+  if (chatHistory && chatHistory !== "Nenhum histórico anterior disponível") {
+    const historyLines = chatHistory.split('\n').reverse(); // Process from newest to oldest
+    const tempHistory = [];
+    for (const line of historyLines) {
+      const lineTokens = encode(line).length;
+      if (remainingTokens - lineTokens > 0) {
+        tempHistory.unshift(line); // Add to the beginning to maintain order
+        remainingTokens -= lineTokens;
+      } else {
+        break;
+      }
+    }
+    truncatedChatHistory = tempHistory.join('\n');
+    
+    // Create the messages array for the API call from the truncated history
+    for (const line of tempHistory) {
+      if (line.startsWith('Utilizador: ')) {
+        chatMessagesArray.push({ role: 'user', content: line.replace('Utilizador: ', '') });
+      } else if (line.startsWith('Assistente: ')) {
+        chatMessagesArray.push({ role: 'assistant', content: line.replace('Assistente: ', '') });
+      }
+    }
+  } else {
+      truncatedChatHistory = "Nenhum histórico anterior disponível";
   }
 
   const templateVariables = {
     onboardingAnswers: onboardingAnswers || "Não disponível",
-    chatHistory: chatHistory || "Nenhum histórico anterior disponível",
+    chatHistory: truncatedChatHistory,
     context: context + (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
     question: query
   };
-
-  let systemPrompt = clientConfig.prompts.systemInstruction;
+  
+  let systemPrompt = systemPromptTemplate;
   Object.keys(templateVariables).forEach(key => {
     const placeholder = `{${key}}`;
+    // We only replace placeholders in the system prompt template, not the final prompt itself
     systemPrompt = systemPrompt.replace(new RegExp(placeholder, 'g'), templateVariables[key]);
   });
+  
+  console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt. Final token estimate: ${MAX_TOTAL_TOKENS - remainingTokens}`);
 
-  console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt with context variables`);
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...chatMessagesArray,
+    { role: 'user', content: query }
+  ];
 
   let retries = 3;
   while (retries > 0) {
     try {
-      // Parse chat history into message format
-      const chatMessagesArray = [];
-      if (chatHistory && chatHistory !== "Nenhum histórico anterior disponível") {
-        // Split the chat history by lines and convert to message objects
-        const historyLines = chatHistory.split('\n');
-        for (const line of historyLines) {
-          if (line.startsWith('Utilizador: ')) {
-            chatMessagesArray.push({
-              role: 'user',
-              content: line.replace('Utilizador: ', '')
-            });
-          } else if (line.startsWith('Assistente: ')) {
-            chatMessagesArray.push({
-              role: 'assistant',
-              content: line.replace('Assistente: ', '')
-            });
-          }
-        }
-      }
-
-      // Create the full messages array
-      const messages = [
-        { role: 'system', content: systemPrompt },
-        ...chatMessagesArray,
-        { role: 'user', content: query }
-      ];
-
-      // Call the API with the complete conversation
       const completion = await openai.chat.completions.create({
         model: generativeModel,
         messages: messages,
+        max_tokens: MAX_RESPONSE_TOKENS,
       });
       return completion.choices[0].message.content;
     } catch (error) {
@@ -353,12 +378,14 @@ async function generateResponse(query, clientConfig, externalContext = null, use
         retries--;
       } else {
         console.error('Error generating response:', error);
-        return clientConfig.prompts.fallbackResponse;
+        // Re-throw the error to be handled by the global error handler in index.js
+        throw error;
       }
     }
   }
 
-  return clientConfig.prompts.fallbackResponse;
+  // If all retries fail, throw an error
+  throw new Error('Failed to generate response after multiple retries.');
 }
 
 async function generateSuggestedQuestions(clientConfig, externalContext = null, chatHistory = [], userContext = null) {
@@ -409,4 +436,4 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
   }
 }
 
-module.exports = { generateResponse, generateSuggestedQuestions, embeddingModel };
+export { generateResponse, generateSuggestedQuestions, embeddingModel };

@@ -1,11 +1,25 @@
 import supabase from '../config/supabase.js';
+import NodeCache from 'node-cache';
+
+// Initialize cache with a standard TTL of 15 minutes (900 seconds)
+const configCache = new NodeCache({ stdTTL: 900 });
 
 /**
  * Loads the configuration for a specific client from the database.
+ * It uses a cache to avoid repeated database calls.
  * @param {string} clientId The ID of the client to load configuration for.
  * @returns {Promise<object>} A promise that resolves to the client's configuration object.
  */
 async function getClientConfig(clientId) {
+  const cacheKey = `clientConfig_${clientId}`;
+  const cachedConfig = configCache.get(cacheKey);
+
+  if (cachedConfig) {
+    console.log(`[Cache] HIT for client: ${clientId}`);
+    return cachedConfig;
+  }
+
+  console.log(`[Cache] MISS for client: ${clientId}. Fetching from database.`);
   const { data, error } = await supabase
     .from('clients')
     .select('*')
@@ -43,15 +57,9 @@ async function getClientConfig(clientId) {
     }
   };
 
+  configCache.set(cacheKey, clientConfig);
   return clientConfig;
 }
-
-export {
-  getClientConfig,
-  createClientConfig,
-  updateClientConfig,
-  deleteClientConfig,
-};
 
 /**
  * Creates a new client configuration in the database.
@@ -69,11 +77,12 @@ async function createClientConfig(clientData) {
     console.error('Error creating client configuration:', error);
     throw new Error('Failed to create client configuration.');
   }
+  // No need to cache here, as a get will follow if needed.
   return data;
 }
 
 /**
- * Updates an existing client configuration in the database.
+ * Updates an existing client configuration in the database and invalidates the cache.
  * @param {string} clientId The ID of the client to update.
  * @param {object} updates The updates to apply to the client configuration.
  * @returns {Promise<object>} A promise that resolves to the updated client configuration object.
@@ -90,11 +99,17 @@ async function updateClientConfig(clientId, updates) {
     console.error(`Error updating client configuration for ${clientId}:`, error);
     throw new Error('Failed to update client configuration.');
   }
+
+  // Invalidate the cache for this client
+  const cacheKey = `clientConfig_${clientId}`;
+  configCache.del(cacheKey);
+  console.log(`[Cache] Invalidated for client: ${clientId}`);
+
   return data;
 }
 
 /**
- * Deletes a client configuration from the database.
+ * Deletes a client configuration from the database and invalidates the cache.
  * @param {string} clientId The ID of the client to delete.
  * @returns {Promise<void>} A promise that resolves when the client configuration is deleted.
  */
@@ -108,4 +123,16 @@ async function deleteClientConfig(clientId) {
     console.error(`Error deleting client configuration for ${clientId}:`, error);
     throw new Error('Failed to delete client configuration.');
   }
+
+  // Invalidate the cache for this client
+  const cacheKey = `clientConfig_${clientId}`;
+  configCache.del(cacheKey);
+  console.log(`[Cache] Deleted for client: ${clientId}`);
 }
+
+export {
+  getClientConfig,
+  createClientConfig,
+  updateClientConfig,
+  deleteClientConfig,
+};

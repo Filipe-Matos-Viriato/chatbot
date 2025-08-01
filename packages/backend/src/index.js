@@ -1,25 +1,24 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('./rag-service');
-const OpenAI = require('openai');
+import dotenv from 'dotenv';
+dotenv.config();
 
+import express from 'express';
+import cors from 'cors';
+import OpenAI from 'openai';
+import multer from 'multer';
+
+import { generateResponse, generateSuggestedQuestions } from './rag-service.js';
+import * as clientConfigServiceModule from './services/client-config-service.js';
+import { processDocument } from './services/ingestion-service.js';
+import listingService from './services/listing-service.js';
+import visitorService from './services/visitor-service.js';
+import onboardingService from './services/onboarding-service.js';
+import supabaseModule from './config/supabase.js';
+import ChatHistoryService from './services/chat-history-service.js';
+import * as developmentService from './services/development-service.js';
+import userService from './services/user-service.js';
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-// const cron = require('node-cron'); // Removed as clustering is now a separate script
-// const { clusterQuestions } = require('../scripts/cluster-questions'); // Removed as clustering is now a separate script
-const defaultClientConfigService = require('./services/client-config-service');
-const { processDocument: defaultProcessDocument } = require('./services/ingestion-service');
-const listingService = require('./services/listing-service'); // Import Listing Service
-const visitorService = require('./services/visitor-service');
-const onboardingService = require('./services/onboarding-service');
-const defaultSupabase = require('./config/supabase'); // Import Supabase client
-const ChatHistoryService = require('./services/chat-history-service');
-const developmentService = require('./services/development-service'); // Import Development Service
-const userService = require('./services/user-service'); // Import User Service
-
-const multer = require('multer');
 
 // Configure multer for in-memory file storage
 const upload = multer({ storage: multer.memoryStorage() });
@@ -53,9 +52,9 @@ const clientConfigMiddleware = (clientConfigService) => async (req, res, next) =
 // Function to create and configure the Express app
 const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMiddleware = null) => {
   const {
-    clientConfigService = defaultClientConfigService,
-    supabase = defaultSupabase,
-    ingestionService = { processDocument: defaultProcessDocument },
+    clientConfigService = clientConfigServiceModule,
+    supabase = supabaseModule,
+    ingestionService = { processDocument },
   } = dependencies;
 
   const app = express();
@@ -889,7 +888,29 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.put('/api/v1/clients/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
-      const updatedClient = await clientConfigService.updateClientConfig(id, req.body);
+      const updates = req.body;
+
+      // Ensure complex fields are stringified if they are provided as objects
+      if (updates.prompts && typeof updates.prompts === 'object') {
+        updates.prompts = JSON.stringify(updates.prompts);
+      }
+      if (updates.leadScoringRules && typeof updates.leadScoringRules === 'object') {
+        updates.leadScoringRules = JSON.stringify(updates.leadScoringRules);
+      }
+      if (updates.documentExtraction && typeof updates.documentExtraction === 'object') {
+        updates.documentExtraction = JSON.stringify(updates.documentExtraction);
+      }
+      if (updates.chatHistoryTaggingRules && typeof updates.chatHistoryTaggingRules === 'object') {
+        updates.chatHistoryTaggingRules = JSON.stringify(updates.chatHistoryTaggingRules);
+      }
+      if (updates.default_onboarding_questions && typeof updates.default_onboarding_questions === 'object') {
+        updates.default_onboarding_questions = JSON.stringify(updates.default_onboarding_questions);
+      }
+      if (updates.widgetSettings && typeof updates.widgetSettings === 'object') {
+        updates.widgetSettings = JSON.stringify(updates.widgetSettings);
+      }
+
+      const updatedClient = await clientConfigService.updateClientConfig(id, updates);
       res.json(updatedClient);
     } catch (error) {
       console.error('Error updating client:', error);
@@ -1178,12 +1199,11 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 };
 
 // Start the server if this file is run directly
-if (require.main === module) {
+if (import.meta.url.startsWith('file:') && process.argv[1] === new URL(import.meta.url).pathname) {
   const appInstance = createApp();
   appInstance.listen(port, () => {
     console.log(`Backend server listening at http://localhost:${port}`);
   });
 }
 
-
-module.exports = { createApp, clientConfigMiddleware, upload };
+export { createApp, clientConfigMiddleware, upload };
