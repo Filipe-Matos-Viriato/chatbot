@@ -74,7 +74,7 @@ class App extends Component {
       const { clientId = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c', apiUrl } = this.props.config || {};
       
       // Load widget config
-      const configResponse = await fetch(`${apiUrl}/api/v1/widget/config/${clientId}`);
+      const configResponse = await fetch(`${apiUrl}/api/v1/widget/config/${clientId}?cacheBust=${new Date().getTime()}`);
       if (!configResponse.ok) {
         throw new Error('Failed to load configuration');
       }
