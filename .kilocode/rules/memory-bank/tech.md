@@ -4,7 +4,8 @@
 - **Runtime:** Node.js
 - **Framework:** Express.js
 - **Key Dependencies:**
-  - `@google/generative-ai`: For accessing Google's `gemini-2.5-flash` and `text-embedding-004` models.
+  - `@google/generative-ai`: For accessing Google's `gemini-2.5-flash` models.
+  - `openai`: For accessing OpenAI's `text-embedding-3-small` model.
   - `@pinecone-database/pinecone`: For connecting to and querying a Pinecone vector database.
   - `cors`: To enable Cross-Origin Resource Sharing.
   - `dotenv`: To manage environment variables from a `.env` file.

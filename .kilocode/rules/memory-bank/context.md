@@ -73,6 +73,10 @@ The primary focus is on ensuring accurate and complete data ingestion into Supab
     - Split the `ingestion_pipeline` column in the Supabase `clients` table into two new JSONB columns: `chunking_rules` and `tagging_rules`.
     - Updated frontend components (`packages/frontend/src/dashboard/admin-dashboard/ClientManagementTab.jsx`, `packages/frontend/src/dashboard/admin-dashboard/components/EditClientForm.jsx`) to use the new `chunking_rules` and `tagging_rules` fields, and removed references to the old `ingestion_pipeline` field.
     - Created new React components `ChunkingRulesEditor.jsx` and `TaggingRulesEditor.jsx` to manage these new fields in the admin dashboard.
+- **Knowledge Base Re-upsert & Embedding Model Update:**
+    - Resolved `ENOENT` error by clarifying the location of `05-versions-space.pdf` (manual placement by user).
+    - Fixed `TypeError: pdf is not a function` by correctly importing and passing the `pdf-parse` function.
+    - Updated the embedding model in `ingestion-service.js` from Google's `text-embedding-004` to OpenAI's `text-embedding-3-small` to match the Pinecone index dimension (1536). All knowledge base documents were successfully re-upserted.
 
 ## Next Steps
 - **Test Chatbot Functionality:** Verify that the chatbot can now correctly answer aggregative price queries (e.g., "qual é o preço mais barato?", "qual é o preço mais caro?").

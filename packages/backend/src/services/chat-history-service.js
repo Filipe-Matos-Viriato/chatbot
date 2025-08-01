@@ -130,4 +130,4 @@ class ChatHistoryService {
   }
 }
 
-module.exports = ChatHistoryService;
+export default ChatHistoryService;

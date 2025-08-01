@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+import supabase from '../config/supabase.js';
 
 const ListingService = {
   async createListing(listingData) {
@@ -92,4 +92,4 @@ ListingService.getMaxPrice = async (clientId) => {
   return data ? data.price : null;
 };
 
-module.exports = ListingService;
+export default ListingService;

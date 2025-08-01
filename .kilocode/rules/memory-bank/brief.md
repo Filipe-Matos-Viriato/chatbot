@@ -10,7 +10,7 @@ This project addresses the need for intelligent, in-app support that goes beyond
 - **Monorepo Architecture:** The project is structured as a monorepo with a Node.js backend and a React frontend to streamline development and dependency management.
 - **RAG Pipeline:** The backend must implement a robust RAG pipeline utilizing:
     - **LLM:** Google's Gemini series for response generation.
-    - **Embedding Model:** Google's `text-embedding-004` for vectorizing queries.
+    - **Embedding Model:** OpenAI's `text-embedding-3-small` for vectorizing queries.
     - **Vector Database:** Pinecone for efficient, scalable storage and retrieval of knowledge base vectors.
 - **Embeddable Frontend:** The React-based frontend must be designed as a clean, intuitive chat widget that can be easily embedded into other web applications using an `<iframe>`.
 - **Context-Awareness:** The chatbot must be able to receive and utilize external context (e.g., user data, application state) from the parent webpage to provide more relevant and personalized responses. This communication is handled securely via the `postMessage` API.
