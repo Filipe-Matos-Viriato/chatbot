@@ -217,7 +217,7 @@ class App extends Component {
 
 
 
-  sendMessage = async () => {
+  sendMessage = async (isAutoTriggered = false) => {
     const { inputValue, messages, config } = this.state;
     const { apiUrl } = this.props.config || {};
     
@@ -229,22 +229,27 @@ class App extends Component {
     console.log('⚙️ Props config:', this.props.config);
     console.log('🎯 Target endpoint:', `${apiUrl}/api/chat`);
 
-    const userMessage = {
-      id: Date.now(),
-      text: inputValue,
-      sender: 'user',
-      timestamp: new Date(),
-      ariaLabel: `You said: ${inputValue}`
-    };
+    if (!isAutoTriggered) {
+      const userMessage = {
+        id: Date.now(),
+        text: inputValue,
+        sender: 'user',
+        timestamp: new Date(),
+        ariaLabel: `You said: ${inputValue}`
+      };
+
+      this.setState({
+        messages: [...messages, userMessage],
+      });
+
+      // Announce message sent to screen readers
+      this.announceToScreenReader('Message sent');
+    }
 
     this.setState({
-      messages: [...messages, userMessage],
       inputValue: '',
       isTyping: true
     });
-
-    // Announce message sent to screen readers
-    this.announceToScreenReader('Message sent');
 
     try {
       const response = await fetch(`${apiUrl}/api/chat`, {
@@ -460,6 +465,40 @@ class App extends Component {
 
       this.addBotMessage(completionMessage);
 
+      // Automatically fetch relevant listings based on the user's preferences
+      setTimeout(() => {
+        // Create a message that will trigger a search for relevant properties
+        const tipologiaValue = onboardingAnswers.tipologia || '';
+        const localValue = onboardingAnswers.localizacao || '';
+        const caracteristicasValue = onboardingAnswers.caracteristicas || [];
+        
+        // Construct a query based on onboarding answers
+        let searchQuery = "Mostre-me apartamentos";
+        
+        if (tipologiaValue) {
+          searchQuery += ` ${tipologiaValue}`;
+        }
+        
+        if (localValue) {
+          searchQuery += ` em ${localValue}`;
+        }
+        
+        if (Array.isArray(caracteristicasValue) && caracteristicasValue.length > 0) {
+          searchQuery += ` com ${caracteristicasValue.join(', ')}`;
+        } else if (typeof caracteristicasValue === 'string' && caracteristicasValue) {
+          searchQuery += ` com ${caracteristicasValue}`;
+        }
+        
+        console.log('🔍 Auto-triggering search with query:', searchQuery);
+        
+        // Add the message to the chat silently (without showing it to the user)
+        this.setState({
+          inputValue: searchQuery
+        }, () => {
+          this.sendMessage(true); // Pass true to indicate this is an auto-triggered search
+        });
+      }, 1000);
+
     } catch (error) {
       console.error('❌ Error submitting onboarding:', error);
       const errorMessage = {
@@ -512,7 +551,7 @@ class App extends Component {
       case 'multiple_choice':
       case 'range_select':
         return h('div', {
-          style: 'display: flex; flex-direction: column; gap: 8px;'
+          style: 'display: flex; flex-direction: column; gap: 8px; width: 100%;'
         }, question.options.map(option => 
           h('button', {
             key: option.value,
@@ -546,7 +585,7 @@ class App extends Component {
       case 'multiple_select':
         const selectedValues = Array.isArray(answer) ? answer : [];
         return h('div', {
-          style: 'display: flex; flex-direction: column; gap: 8px;'
+          style: 'display: flex; flex-direction: column; gap: 8px; width: 100%;'
         }, [
           ...question.options.map(option => {
             const isSelected = selectedValues.includes(option.value);
