@@ -9,7 +9,7 @@ const generateUUID = () => {
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState([
-    { from: 'bot', text: 'Hello! How can I help you today?' },
+    { from: 'bot', text: 'Olá! Sou o seu assistente virtual. Como posso ajudar?' },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);

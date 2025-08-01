@@ -50,29 +50,33 @@ class ChatHistoryService {
   async upsertMessage(message, clientConfig) {
     const { text, role, client_id, visitor_id, session_id, timestamp, turn_id } = message;
 
-    const embedding = await this.generateEmbedding(text);
-    const contentTags = this.applyContentTags(message, clientConfig);
-
-    const vector = {
-      id: `${session_id}-${turn_id}`,
-      values: embedding,
-      metadata: {
-        text,
-        role,
-        client_id,
-        visitor_id,
-        session_id,
-        timestamp,
-        turn_id,
-        ...contentTags,
-      },
-    };
-
     try {
+      const embedding = await this.generateEmbedding(text);
+      const contentTags = this.applyContentTags(message, clientConfig);
+
+      const vector = {
+        id: `${session_id}-${turn_id}`,
+        values: embedding,
+        metadata: {
+          text,
+          role,
+          client_id,
+          visitor_id,
+          session_id,
+          timestamp,
+          turn_id,
+          ...contentTags,
+        },
+      };
+
       await this.pineconeIndex.upsert([vector]);
       console.log(`Message upserted to Pinecone: ${vector.id}`);
     } catch (error) {
-      console.error("Error upserting message to Pinecone:", error);
+      console.error("Error in upsertMessage:", {
+        message: error.message,
+        stack: error.stack,
+        details: error.cause,
+      });
       throw error;
     }
   }

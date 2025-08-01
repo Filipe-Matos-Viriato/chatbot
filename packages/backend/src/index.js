@@ -2,6 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('./rag-service');
+const OpenAI = require('openai');
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 // const cron = require('node-cron'); // Removed as clustering is now a separate script
 // const { clusterQuestions } = require('../scripts/cluster-questions'); // Removed as clustering is now a separate script
 const defaultClientConfigService = require('./services/client-config-service');
@@ -265,16 +270,20 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
       // Upsert user message to Pinecone
-      await chatHistoryService.upsertMessage({
-        text: query,
-        role: 'user',
-        client_id: clientConfig.clientId,
-        visitor_id: visitorId,
-        session_id: sessionId,
-        timestamp: timestamp,
-        turn_id: `${turnId}-user`,
-      }, clientConfig);
-
+      try {
+        await chatHistoryService.upsertMessage({
+          text: query,
+          role: 'user',
+          client_id: clientConfig.clientId,
+          visitor_id: visitorId,
+          session_id: sessionId,
+          timestamp: timestamp,
+          turn_id: `${turnId}-user`,
+        }, clientConfig);
+      } catch (error) {
+        console.error('Failed to upsert user message, continuing without it.', error);
+      }
+      
       if (!query) {
         return res.status(400).json({ error: 'Query is required' });
       }
@@ -314,51 +323,53 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       );
 
       // Upsert assistant response to Pinecone
-      await chatHistoryService.upsertMessage({
-        text: responseText,
-        role: 'assistant',
-        client_id: clientConfig.clientId,
-        visitor_id: visitorId,
-        session_id: sessionId,
-        timestamp: new Date().toISOString(),
-        turn_id: `${turnId}-assistant`,
-      }, clientConfig);
+      try {
+        await chatHistoryService.upsertMessage({
+          text: responseText,
+          role: 'assistant',
+          client_id: clientConfig.clientId,
+          visitor_id: visitorId,
+          session_id: sessionId,
+          timestamp: new Date().toISOString(),
+          turn_id: `${turnId}-assistant`,
+        }, clientConfig);
+      } catch (error) {
+        console.error('Failed to upsert assistant message, continuing without it.', error);
+      }
 
       // Log the user's question and its embedding to the questions and question_embeddings tables
-      try {
+      /* try {
         const { data: insertedQuestion, error: insertQuestionError } = await supabase
           .from('questions')
           .insert([
             {
               question_text: query,
               chatbot_response: responseText,
-              listing_id: context?.listingId || null, // Assuming listingId is passed in context
-              status: 'answered', // Mark as answered since a response is generated
+              listing_id: context?.listingId || null, 
+              status: 'answered', 
               visitor_id: visitorId,
               session_id: sessionId,
             },
           ])
-          .select('id'); // Select the ID of the newly inserted question
+          .select('id'); 
 
         if (insertQuestionError) {
           console.error('Error inserting question into Supabase:', insertQuestionError);
         } else if (insertedQuestion && insertedQuestion.length > 0) {
           const questionId = insertedQuestion[0].id;
 
-          // Generate embedding for the question
-          const embeddingResult = await embeddingModel.embedContent({
-            content: { parts: [{ text: query }] },
-            taskType: "RETRIEVAL_QUERY",
+          const embeddingResult = await openai.embeddings.create({
+            model: embeddingModel, 
+            input: query,
           });
 
-          // Insert embedding into question_embeddings table
           const { error: insertEmbeddingError } = await supabase
             .from('question_embeddings')
             .insert([
               {
                 question_id: questionId,
-                embedding: embeddingResult.embedding.values,
-                ...(context?.listingId && { listing_id: context.listingId }), // Conditionally add listing_id
+                embedding: embeddingResult.data[0].embedding,
+                ...(context?.listingId && { listing_id: context.listingId }),
               },
             ]);
 
@@ -368,7 +379,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         }
       } catch (logError) {
         console.error('Error logging question or embedding:', logError);
-      }
+      } */
 
       res.json({ response: responseText });
     } catch (error) {

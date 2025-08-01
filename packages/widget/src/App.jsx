@@ -166,7 +166,7 @@ class App extends Component {
       } else {
         const welcomeMessage = {
           id: Date.now(),
-          text: config.widgetSettings?.welcomeMessage || 'Hello! How can I help you?',
+          text: config.widgetSettings?.welcomeMessage || 'Olá! Sou o seu assistente virtual. Como posso ajudar?',
           sender: 'bot',
           timestamp: new Date(),
           ariaLabel: 'Welcome message from chatbot'
