@@ -35,11 +35,11 @@ async function getClientConfig(clientId) {
     chunking_rules: data.chunking_rules,
     tagging_rules: data.tagging_rules,
     defaultOnboardingQuestions: data.default_onboarding_questions, // Add onboarding questions field
-    // Add widgetSettings derived from theme for widget consumption
-    widgetSettings: {
+    // Use widget_settings from the database, with a fallback to the old structure
+    widgetSettings: data.widget_settings || {
       primaryColor: data.theme?.primaryColor || "#007bff",
-      welcomeMessage: "Hello! How can I help you today?",
-      headerText: "Chat with us!"
+      welcomeMessage: "Olá! Como posso ajudar?",
+      headerText: "Fala conosco!"
     }
   };
 
