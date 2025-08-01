@@ -90,7 +90,7 @@ const ChatInterface = () => {
         </CardContent>
         <CardFooter className="flex items-center gap-2">
           <Input 
-            placeholder="Type your message..." 
+            placeholder="" 
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSend()}

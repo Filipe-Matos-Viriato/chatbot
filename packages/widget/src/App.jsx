@@ -968,7 +968,7 @@ class App extends Component {
             value: inputValue,
             onInput: (e) => this.setState({ inputValue: e.target.value }),
             onKeyPress: this.handleKeyPress,
-            placeholder: 'Type your message...',
+            placeholder: '...',
             style: Object.entries(styles.input).map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`).join('; '),
             rows: 1,
             'aria-label': 'Type your message here',
@@ -988,7 +988,7 @@ class App extends Component {
               'aria-label': 'Send message',
               'aria-disabled': !inputValue.trim(),
               className: 'widget-button widget-send-button'
-            }, isMobile ? '→' : 'Send')
+            }, isMobile ? '→' : 'Enviar')
         ])
       ]),
 

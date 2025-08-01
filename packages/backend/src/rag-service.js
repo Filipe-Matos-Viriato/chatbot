@@ -20,6 +20,18 @@ function extractListingIdFromQuery(query) {
   return match ? match[0] : null;
 }
 
+function mergeFilters(queryFilters, onboardingFilters) {
+  const merged = { ...onboardingFilters, ...queryFilters };
+  // A simple example of resolving conflicts, queryFilters take precedence
+  // You might want to implement more sophisticated logic here based on your needs
+  for (const key in queryFilters) {
+    if (onboardingFilters.hasOwnProperty(key)) {
+      console.log(`Overriding onboarding filter '${key}' with value from query.`);
+    }
+  }
+  return merged;
+}
+
 function extractQueryFilters(query, currentListingPrice = null) {
   const filters = {};
   const lowerCaseQuery = query.toLowerCase();
@@ -102,7 +114,7 @@ function extractQueryFilters(query, currentListingPrice = null) {
   return filters;
 }
 
-async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null) {
+async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}) {
   const baseFilter = {
     client_id: clientConfig.clientId,
   };
@@ -162,9 +174,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     console.log(`Found ${developmentMatches.length} matches in targeted search for development_id: ${contextDevelopmentId}.`);
   }
 
-  console.log("Performing broad query.");
-  const queryFilters = extractQueryFilters(originalQuery, currentListingPrice);
-  console.log("Extracted query filters:", JSON.stringify(queryFilters, null, 2));
+  console.log("Performing broad query with filters:", JSON.stringify(queryFilters, null, 2));
 
   let initialFilter = { ...baseFilter, ...queryFilters };
 
@@ -268,7 +278,11 @@ async function generateResponse(query, clientConfig, externalContext = null, use
     input: query,
   });
 
-  const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, query, userContext);
+  const queryFilters = extractQueryFilters(query);
+  const onboardingFilters = onboardingAnswers ? extractQueryFilters(JSON.stringify(onboardingAnswers)) : {};
+  const mergedFilters = mergeFilters(queryFilters, onboardingFilters);
+
+  const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, query, userContext, mergedFilters);
 
   // Get context from search results, or use empty context if no matches
   let context = '';
