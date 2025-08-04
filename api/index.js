@@ -4,6 +4,10 @@ const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('../packages/backend/src/rag-service');
+const OpenAI = require('openai');
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 const cron = require('node-cron');
 const { clusterQuestions } = require('../packages/backend/scripts/cluster-questions');
 // Import client configuration service for database lookups
@@ -266,7 +270,6 @@ app.put('/v1/clients/:clientId/onboarding-template', async (req, res) => {
 
 // ===== CHAT ENDPOINT =====
 
-// API endpoint to handle chat requests (updated with onboarding support)
 app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
   try {
     const { query, visitorId, sessionId, context, onboardingAnswers } = req.body;
@@ -279,126 +282,115 @@ app.post('/api/chat', clientConfigMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Query is required' });
     }
 
-    // Retrieve recent chat history for this visitor (across all sessions)
-    let chatHistory = null;
-    try {
-      if (visitorId) {
-        const recentMessages = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 10);
-        chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
-        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages for visitor ${visitorId}`);
-        console.log(`[${clientConfig.clientName || clientConfig.clientId}] Formatted Chat History:\n---\n${chatHistory}\n---`);
-      } else {
-        console.warn('No visitorId provided, skipping chat history retrieval');
-        chatHistory = "Nenhum histórico anterior disponível";
-      }
-    } catch (error) {
-      console.error('Error retrieving chat history:', error);
-      chatHistory = "Nenhum histórico anterior disponível";
-    }
+    // --- Refactored for Robustness ---
 
-    // Upsert user message to Pinecone if we have session info
-    if (sessionId && visitorId) {
-      try {
-        await chatHistoryService.upsertMessage({
-          text: query,
-          role: 'user',
-          client_id: clientConfig.clientId,
-          visitor_id: visitorId,
-          session_id: sessionId,
-          timestamp: timestamp,
-          turn_id: `${turnId}-user`,
-        }, clientConfig);
-      } catch (error) {
-        console.error('Error storing user message to chat history:', error);
-      }
-    }
-
-    // Get onboarding answers if not provided but visitorId is available
-    let formattedOnboardingAnswers = null;
-    try {
-      if (onboardingAnswers) {
-        formattedOnboardingAnswers = onboardingAnswers;
-      } else if (visitorId) {
-        const onboardingStatus = await onboardingService.getVisitorOnboardingStatus(visitorId, clientConfig.clientId);
-        if (onboardingStatus.completed && onboardingStatus.answers && onboardingStatus.questions) {
-          formattedOnboardingAnswers = onboardingService.formatOnboardingAnswersForRAG(
-            onboardingStatus.answers,
-            onboardingStatus.questions
-          );
+    // 1. Await critical data fetches in parallel
+    const [queryEmbedding, chatHistory, formattedOnboardingAnswers] = await Promise.all([
+      // Embedding
+      (async () => {
+        try {
+          return await openai.embeddings.create({
+            model: embeddingModel,
+            input: query,
+          });
+        } catch (error) {
+          console.error('Error generating embedding:', error);
+          throw new Error(`Failed to generate embedding: ${error.message}`);
         }
-      }
-    } catch (error) {
-      console.warn('Could not retrieve onboarding answers for visitor:', error.message);
+      })(),
+      // Chat History
+      (async () => {
+        if (visitorId) {
+          try {
+            const recentMessages = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 10);
+            return chatHistoryService.formatChatHistoryForPrompt(recentMessages);
+          } catch (error) {
+            console.error('Error retrieving chat history:', error);
+            return "Nenhum histórico anterior disponível";
+          }
+        }
+        return "Nenhum histórico anterior disponível";
+      })(),
+      // Onboarding Answers
+      (async () => {
+        if (onboardingAnswers) return onboardingAnswers;
+        if (visitorId) {
+          try {
+            const onboardingStatus = await onboardingService.getVisitorOnboardingStatus(visitorId, clientConfig.clientId);
+            if (onboardingStatus.completed && onboardingStatus.answers && onboardingStatus.questions) {
+              return onboardingService.formatOnboardingAnswersForRAG(onboardingStatus.answers, onboardingStatus.questions);
+            }
+          } catch (error) {
+            console.warn('Could not retrieve onboarding answers for visitor:', error.message);
+          }
+        }
+        return null;
+      })()
+    ]);
+
+    // 2. Upsert user message (fire and forget, no longer in main promise block)
+    if (sessionId && visitorId) {
+      chatHistoryService.upsertMessage({
+        text: query,
+        role: 'user',
+        client_id: clientConfig.clientId,
+        visitor_id: visitorId,
+        session_id: sessionId,
+        timestamp: timestamp,
+        turn_id: `${turnId}-user`,
+      }, clientConfig).catch(error => {
+        console.error('Error storing user message to chat history:', error);
+      });
     }
 
+    // 3. Validate embedding vector
+    if (!queryEmbedding || !queryEmbedding.data || !queryEmbedding.data[0] || !queryEmbedding.data[0].embedding) {
+      console.error('Invalid embedding response from OpenAI:', queryEmbedding);
+      return res.status(500).json({ 
+        error: 'Failed to generate embedding for query',
+        details: 'The embedding service returned an invalid response'
+      });
+    }
+
+    const embeddingVector = queryEmbedding.data[0].embedding;
+    
+    // Validate that embedding is an array of numbers
+    if (!Array.isArray(embeddingVector) || embeddingVector.length === 0 || typeof embeddingVector[0] !== 'number') {
+      console.error('Invalid embedding vector format:', embeddingVector);
+      return res.status(500).json({ 
+        error: 'Invalid embedding vector format',
+        details: 'The embedding vector is not properly formatted'
+      });
+    }
+
+    console.log(`[${clientConfig.clientName}] Generated embedding vector with ${embeddingVector.length} dimensions`);
+
+    // 4. Generate the main response
     const responseText = await generateResponse(
-      query, 
-      clientConfig, 
-      context, 
+      query,
+      clientConfig,
+      embeddingVector, // Pass the validated embedding vector
+      context,
       null, // userContext
-      chatHistory, // Now using actual chat history
+      chatHistory,
       formattedOnboardingAnswers
     );
-
-    // Upsert assistant response to Pinecone if we have session info
+    
+    // Upsert assistant response to Pinecone (fire and forget)
     if (sessionId && visitorId) {
-      try {
-        await chatHistoryService.upsertMessage({
-          text: responseText,
-          role: 'assistant',
-          client_id: clientConfig.clientId,
-          visitor_id: visitorId,
-          session_id: sessionId,
-          timestamp: new Date().toISOString(),
-          turn_id: `${turnId}-assistant`,
-        }, clientConfig);
-      } catch (error) {
+      chatHistoryService.upsertMessage({
+        text: responseText,
+        role: 'assistant',
+        client_id: clientConfig.clientId,
+        visitor_id: visitorId,
+        session_id: sessionId,
+        timestamp: new Date().toISOString(),
+        turn_id: `${turnId}-assistant`,
+      }, clientConfig).catch(error => {
         console.error('Error storing assistant message to chat history:', error);
-      }
+      });
     }
-
-    // Log the user's question and its embedding
-    try {
-      const { data: insertedQuestion, error: insertQuestionError } = await supabase
-        .from('questions')
-        .insert([
-          {
-            question_text: query,
-            listing_id: context?.listingId || null,
-            status: 'answered',
-            visitor_id: visitorId || sessionId,
-          },
-        ])
-        .select('id');
-
-      if (insertQuestionError) {
-        console.error('Error inserting question into Supabase:', insertQuestionError);
-      } else if (insertedQuestion && insertedQuestion.length > 0) {
-        const questionId = insertedQuestion[0].id;
-
-        const embeddingResult = await embeddingModel.embedContent({
-          content: { parts: [{ text: query }] },
-          taskType: "RETRIEVAL_QUERY",
-        });
-
-        const { error: insertEmbeddingError } = await supabase
-          .from('question_embeddings')
-          .insert([
-            {
-              question_id: questionId,
-              listing_id: context?.listingId || null,
-              embedding: embeddingResult.embedding.values,
-            },
-          ]);
-
-        if (insertEmbeddingError) {
-          console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
-        }
-      }
-    } catch (logError) {
-      console.error('Error logging question or embedding:', logError);
-    }
-
+    
     res.json({ response: responseText });
   } catch (error) {
     console.error('Error processing chat request:', error);
@@ -583,16 +575,47 @@ app.get('/api/debug/pinecone/:clientId', async (req, res) => {
     console.log(`[DEBUG] Test query: ${testQuery}`);
     
     // Generate embedding for test query
-    const queryEmbedding = await embeddingModel.embedContent({
-      content: { parts: [{ text: testQuery }] },
-      taskType: "RETRIEVAL_QUERY",
-    });
+    let queryEmbedding;
+    try {
+      queryEmbedding = await embeddingModel.embedContent({
+        content: { parts: [{ text: testQuery }] },
+        taskType: "RETRIEVAL_QUERY",
+      });
+    } catch (error) {
+      console.error('[DEBUG] Error generating embedding:', error);
+      return res.status(500).json({ 
+        error: 'Failed to generate embedding for debug query',
+        details: error.message
+      });
+    }
+    
+    // Validate embedding format
+    if (!queryEmbedding || !queryEmbedding.embedding || !queryEmbedding.embedding.values) {
+      console.error('[DEBUG] Invalid embedding response from Google:', queryEmbedding);
+      return res.status(500).json({ 
+        error: 'Failed to generate embedding for debug query',
+        details: 'The embedding service returned an invalid response'
+      });
+    }
+
+    const embeddingVector = queryEmbedding.embedding.values;
+    
+    // Validate that embedding is an array of numbers
+    if (!Array.isArray(embeddingVector) || embeddingVector.length === 0 || typeof embeddingVector[0] !== 'number') {
+      console.error('[DEBUG] Invalid embedding vector format:', embeddingVector);
+      return res.status(500).json({ 
+        error: 'Invalid embedding vector format',
+        details: 'The embedding vector is not properly formatted'
+      });
+    }
+
+    console.log(`[DEBUG] Generated embedding vector with ${embeddingVector.length} dimensions`);
     
     // Test search with client filter
     const searchResponse = await pineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
       .query({
-        vector: queryEmbedding.embedding.values,
+        vector: embeddingVector,
         topK: 10,
         includeMetadata: true,
         filter: { client_id: clientId },
@@ -602,7 +625,7 @@ app.get('/api/debug/pinecone/:clientId', async (req, res) => {
     const allDataResponse = await pineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
       .query({
-        vector: queryEmbedding.embedding.values,
+        vector: embeddingVector,
         topK: 5,
         includeMetadata: true,
       });

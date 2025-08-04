@@ -119,6 +119,29 @@ function extractQueryFilters(query, currentListingPrice = null) {
 }
 
 async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}) {
+  // Validate search vector before proceeding
+  if (!searchVector) {
+    console.error('Search vector is null or undefined');
+    throw new Error('Invalid search vector: vector is required for Pinecone queries');
+  }
+  
+  if (!Array.isArray(searchVector)) {
+    console.error('Search vector is not an array:', typeof searchVector);
+    throw new Error('Invalid search vector: must be an array of numbers');
+  }
+  
+  if (searchVector.length === 0) {
+    console.error('Search vector is empty');
+    throw new Error('Invalid search vector: vector cannot be empty');
+  }
+  
+  if (typeof searchVector[0] !== 'number' || isNaN(searchVector[0])) {
+    console.error('Search vector contains invalid values:', searchVector.slice(0, 5));
+    throw new Error('Invalid search vector: must contain numeric values');
+  }
+  
+  console.log(`[${clientConfig.clientName}] Using search vector with ${searchVector.length} dimensions`);
+
   const baseFilter = {
     client_id: clientConfig.clientId,
   };
@@ -137,60 +160,73 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     }
   }
 
-  let currentListingPrice = null;
   const contextListingId = externalContext?.type === 'listing' ? externalContext.value : null;
   const contextDevelopmentId = externalContext?.type === 'development' ? externalContext.value : null;
-  let matches = [];
-  let broadMatches = [];
-  let developmentMatches = [];
+  
+  const queries = [];
 
+  // 1. Targeted Listing Query
   if (contextListingId) {
-    console.log(`Performing targeted query for listing_id: ${contextListingId}`);
-    const targetedQueryResponse = await pineconeIndex
+    console.log(`Queueing targeted query for listing_id: ${contextListingId}`);
+    queries.push(pineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
       .query({
         vector: searchVector,
         topK: 10,
         includeMetadata: true,
         filter: { ...baseFilter, listing_id: contextListingId },
-      });
-
-    matches = targetedQueryResponse.matches || [];
-    console.log(`Found ${matches.length} matches in targeted search for ${contextListingId}.`);
-    const priceMatch = matches.find(match => match.metadata.price_eur !== undefined);
-    if (priceMatch) {
-      currentListingPrice = priceMatch.metadata.price_eur;
-      console.log(`Current listing (${contextListingId}) price from targeted search: ${currentListingPrice}`);
-    }
+      })
+    );
+  } else {
+    queries.push(Promise.resolve({ matches: [] })); // Add empty promise to keep array order
   }
 
+  // 2. Targeted Development Query
   if (contextDevelopmentId) {
-    console.log(`Performing targeted query for development_id: ${contextDevelopmentId}`);
-    const developmentQueryResponse = await pineconeIndex
+    console.log(`Queueing targeted query for development_id: ${contextDevelopmentId}`);
+    queries.push(pineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
       .query({
         vector: searchVector,
         topK: 10,
         includeMetadata: true,
         filter: { ...baseFilter, development_id: contextDevelopmentId },
-      });
-    developmentMatches = developmentQueryResponse.matches || [];
-    console.log(`Found ${developmentMatches.length} matches in targeted search for development_id: ${contextDevelopmentId}.`);
+      })
+    );
+  } else {
+    queries.push(Promise.resolve({ matches: [] })); // Add empty promise
   }
 
-  console.log("Performing broad query with filters:", JSON.stringify(queryFilters, null, 2));
-
-  let initialFilter = { ...baseFilter, ...queryFilters };
-
-  const broadQueryResponse = await pineconeIndex
+  // 3. Broad Query
+  console.log("Queueing broad query with filters:", JSON.stringify(queryFilters, null, 2));
+  const initialFilter = { ...baseFilter, ...queryFilters };
+  queries.push(pineconeIndex
     .namespace(process.env.PINECONE_NAMESPACE)
     .query({
-      vector: searchVector,
-      topK: 50,
-      includeMetadata: true,
-      filter: initialFilter,
-    });
-  broadMatches = broadQueryResponse.matches || [];
+        vector: searchVector,
+        topK: 50,
+        includeMetadata: true,
+        filter: initialFilter,
+    })
+  );
+
+  // Execute all queries in parallel
+  const [listingResponse, developmentResponse, broadResponse] = await Promise.all(queries);
+
+  let matches = listingResponse.matches || [];
+  const developmentMatches = developmentResponse.matches || [];
+  const broadMatches = broadResponse.matches || [];
+
+  console.log(`Found ${matches.length} matches in targeted listing search.`);
+  console.log(`Found ${developmentMatches.length} matches in targeted development search.`);
+  console.log(`Found ${broadMatches.length} matches in broad search.`);
+
+  const priceMatch = matches.find(match => match.metadata.price_eur !== undefined);
+  let currentListingPrice = null;
+  if (priceMatch) {
+    currentListingPrice = priceMatch.metadata.price_eur;
+    console.log(`Current listing (${contextListingId}) price from targeted search: ${currentListingPrice}`);
+  }
 
   const combinedMatches = [...matches, ...developmentMatches];
   const existingIds = new Set(combinedMatches.map(m => m.id));
@@ -258,7 +294,7 @@ function isAggregativePriceQuery(query) {
   );
 }
 
-async function generateResponse(query, clientConfig, externalContext = null, userContext = null, chatHistory = null, onboardingAnswers = null) {
+async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, onboardingAnswers = null) {
   let aggregativeContext = '';
 
   if (isAggregativePriceQuery(query)) {
@@ -277,39 +313,24 @@ async function generateResponse(query, clientConfig, externalContext = null, use
     }
   }
 
-  const queryEmbedding = await openai.embeddings.create({
-    model: embeddingModel,
-    input: query,
-  });
-
   const queryFilters = extractQueryFilters(query);
   const onboardingFilters = onboardingAnswers ? extractQueryFilters(JSON.stringify(onboardingAnswers)) : {};
   const mergedFilters = mergeFilters(queryFilters, onboardingFilters);
 
-  const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, query, userContext, mergedFilters);
-
-  // --- Context and History Truncation Logic ---
-  let systemPromptTemplate = clientConfig.prompts.systemInstruction;
-  let remainingTokens = CONTEXT_TOKEN_BUDGET - encode(systemPromptTemplate).length - encode(query).length;
-
-  // Truncate retrieved context
-  let context = '';
-  if (queryResponse && queryResponse.matches && queryResponse.matches.length > 0) {
-    const contextParts = [];
-    for (const match of queryResponse.matches) {
-        const chunk = match.metadata.text;
-        const chunkTokens = encode(chunk).length;
-        if (remainingTokens - chunkTokens > 0) {
-            contextParts.push(chunk);
-            remainingTokens -= chunkTokens;
-        } else {
-            break; // Stop adding chunks if we exceed the budget
-        }
-    }
-    context = contextParts.join('\n\n---\n\n');
-  } else {
-    context = ''; // No context found, use an empty string
+  let queryResponse;
+  try {
+    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, mergedFilters);
+  } catch (error) {
+    console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
+    // Return empty matches if search fails due to invalid embedding
+    queryResponse = { matches: [] };
   }
+  
+  let context = queryResponse.matches.map(m => m.metadata.text).join('\n\n---\n\n');
+  let remainingTokens = CONTEXT_TOKEN_BUDGET;
+  
+  const contextTokens = encode(context).length;
+  remainingTokens -= contextTokens;
   
   // Truncate chat history
   let truncatedChatHistory = '';
@@ -340,13 +361,17 @@ async function generateResponse(query, clientConfig, externalContext = null, use
       truncatedChatHistory = "Nenhum histórico anterior disponível";
   }
 
+  const systemPromptTemplate = clientConfig.prompts.systemInstruction;
+  if (!systemPromptTemplate) {
+      throw new Error("System prompt is not defined in the client configuration.");
+  }
+  
   const templateVariables = {
     onboardingAnswers: onboardingAnswers || "Não disponível",
     chatHistory: truncatedChatHistory,
     context: context + (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
     question: query
   };
-  
   let systemPrompt = systemPromptTemplate;
   Object.keys(templateVariables).forEach(key => {
     const placeholder = `{${key}}`;
@@ -396,12 +421,30 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
     searchQuery = chatHistory.map(m => m.text).join(' ');
   }
 
-  const queryEmbedding = await openai.embeddings.create({
-    model: embeddingModel,
-    input: searchQuery,
-  });
+  let queryEmbedding;
+  try {
+    queryEmbedding = await openai.embeddings.create({
+      model: embeddingModel,
+      input: searchQuery,
+    });
+  } catch (error) {
+    console.error(`[${clientConfig.clientName}] Error generating embedding for suggested questions:`, error);
+    return [];
+  }
 
-  const queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, searchQuery, userContext);
+  // Validate embedding before using it
+  if (!queryEmbedding || !queryEmbedding.data || !queryEmbedding.data[0] || !queryEmbedding.data[0].embedding) {
+    console.error(`[${clientConfig.clientName}] Invalid embedding response for suggested questions:`, queryEmbedding);
+    return [];
+  }
+
+  let queryResponse;
+  try {
+    queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, searchQuery, userContext);
+  } catch (error) {
+    console.error(`[${clientConfig.clientName}] Error in performHybridSearch for suggested questions:`, error);
+    return [];
+  }
 
   if (!queryResponse || queryResponse.matches.length === 0) {
     return [];

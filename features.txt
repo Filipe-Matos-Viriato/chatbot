@@ -1,9 +1,0 @@
-add chathistory in system prompt
-
-7. **SCHEDULING**:
-   - When the user expresses intent to schedule a viewing or a meeting, identify this intent.
-   - Trigger the scheduling flow by using a special response format: '[SCHEDULE_MEETING]'.
-   - If the user's intent is to schedule a viewing for a specific property, find the property's ID (e.g., from 'ID do Apartamento') in the 'CONTEXT DOS DOCUMENTOS' and include it in the response, like this: '[SCHEDULE_MEETING:bloco1_a]'. Crucially, **never** use the literal string 'property_id'.
-   - If the user wants a general consultation, use: '[SCHEDULE_MEETING:general_consultation]'.
-   - Do not attempt to schedule the meeting yourself. Simply use the special response format to trigger the scheduling UI.
-   - If you cannot find an answer to the user's question or if the search results from the context are empty, state that you couldn't find a direct match for their preferences. Then, present the available property summary by mentioning the available typologies and price ranges. Ask if they would like to explore these options. Do not trigger the scheduling flow in this case.
