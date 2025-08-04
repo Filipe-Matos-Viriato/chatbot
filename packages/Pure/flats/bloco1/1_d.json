@@ -1,0 +1,27 @@
+{
+  "piso": "0",
+  "bloco": "1",
+  "tipologia": "T2",
+  "fracao": "D",
+  "lugares_garagem": 1,
+  "preco": "237,969.00",
+  "area_bruta_m2": 165.43,
+  "area_privativa_m2": 79.02,
+  "terracos_m2": 82.70,
+  "descricao": {
+    "divisoes": [
+      { "nome": "Sala e Cozinha", "area_m2": 25.51 },
+      { "nome": "Quarto", "area_m2": 13.50 },
+      { "nome": "Quarto Suite", "area_m2": 15.85 },
+      { "nome": "Casa de banho", "area_m2": 3.65 },
+      { "nome": "Casa de banho Suite", "area_m2": 4.95 }
+    ],
+    "luz_natural": "Luz natural abundante em sala e quartos",
+    "detalhes_extra": [
+      "Cozinha totalmente equipada",
+      "Lugar de garagem",
+      "Arrecadação",
+      "Vidros duplos"
+    ]
+  }
+}

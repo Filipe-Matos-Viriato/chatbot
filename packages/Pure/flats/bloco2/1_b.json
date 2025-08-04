@@ -1,0 +1,25 @@
+{
+  "piso": "0",
+  "bloco": "2",
+  "tipologia": "T1",
+  "fracao": "B",
+  "lugares_garagem": 1,
+  "preco": "199,230.00",
+  "area_bruta_m2": 80.94,
+  "area_privativa_m2": 66.61,
+  "terracos_m2": 100.81,
+  "descricao": {
+    "divisoes": [
+      { "nome": "Sala e cozinha (open-space)", "area_m2": 56.84 },
+      { "nome": "Quarto", "area_m2": 10.48 },
+      { "nome": "Casa de banho", "area_m2": 4.88 }
+    ],
+    "luz_natural": "Luz natural abundante em todas as divisões, através de amplas janelas",
+    "detalhes_extra": [
+      "Cozinha totalmente equipada",
+      "Lugar de garagem",
+      "Arrecadação",
+      "Vidros duplos"
+    ]
+  }
+}

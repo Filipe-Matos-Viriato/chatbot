@@ -1,0 +1,97 @@
+{
+    "empreendimento": {
+      "nome": "Evergreen Pure",
+      "taglines": [
+        "Um refúgio onde o conforto se encontra com a inspiração",
+        "Sofisticação e conforto no coração de Aveiro",
+        "Redefine o estilo de vida cosmopolita"
+      ],
+      "descricao": [
+        "Projeto exclusivo localizado a 5 minutos do centro de Aveiro",
+        "Combina charme, modernidade e funcionalidade",
+        "Harmonia perfeita entre design e vida urbana",
+        "Refúgio de sofisticação, conforto e tranquilidade próximo ao centro vibrante"
+      ]
+    },
+    "localizacao": {
+      "proximidade_centro_minutos": 5,
+      "acessos": {
+        "rodovias": ["A25", "A1"],
+        "ferroviarios": "Estações de comboio próximas",
+        "aereos": "Aeroportos próximos"
+      }
+    },
+    "tipologias": {
+      "blocos": 2,
+      "apartamentos_por_bloco": 8,
+      "tipos_apartamento": [
+        { "tipologia": "T1", "area_min_m2": 68 },
+        { "tipologia": "T2", "area_min_m2": null },
+        { "tipologia": "T3", "area_min_m2": null },
+        { "tipologia": "T3 duplex", "area_max_m2": 218 }
+      ],
+      "acabamentos": "Elevados padrões de qualidade e minimalismo",
+      "iluminacao_natural": true
+    },
+    "cidade": {
+      "nome": "Aveiro",
+      "apelido": "Veneza de Portugal",
+      "caracteristicas": [
+        "Canais pitorescos",
+        "Barcos moliceiros",
+        "Arquitetura Arte Nova",
+        "Ovos moles",
+        "Pateira de Fermentelos",
+        "Ria de Aveiro",
+        "Residência estudantil vibrante"
+      ],
+      "gastronomia": ["Restaurantes diversos", "Ovos moles"],
+      "natureza": ["Pateira de Fermentelos", "Dunas de São Jacinto", "Praias atlânticas"],
+      "transportes": {
+        "rodovias": ["A1", "A25", "A17"],
+        "proximas_cidades": ["Porto", "Coimbra", "Lisboa"]
+      },
+      "eventos": ["Festival dos Canais"],
+      "qualidade_de_vida": {
+        "seguranca": true,
+        "oferta_educativa": true,
+        "atividades_ao_ar_livre": true
+      }
+    },
+    "distrito": {
+      "nome": "Aveiro",
+      "regiao": "Centro-norte de Portugal",
+      "historico": ["Produção de sal desde a época romana", "Patrimônio medieval"],
+      "economia": ["Pesca", "Cerâmica", "Têxteis", "Inovação tecnológica", "Turismo"],
+      "atracoes_turisticas": [
+        "Ria de Aveiro",
+        "Praia da Barra",
+        "Costa Nova",
+        "Salinas de Aveiro",
+        "Cascata da Cabreia"
+      ]
+    },
+    "praias": {
+      "principais": [
+        { "nome": "Costa Nova", "destaque": "Casas coloridas às riscas" },
+        { "nome": "Praia da Barra", "destaque": "Farol mais alto de Portugal" }
+      ],
+      "atividades": ["Desportos náuticos", "Eventos culturais e festivais de verão"]
+    },
+    "agueda": {
+      "descricao": "Combina herança rural com criatividade contemporânea",
+      "festivais": ["Festival de Arte Urbana", "Exposição de guarda-chuvas suspensos"],
+      "naturaleza": ["Pateira de Fermentelos", "Serra do Caramulo"],
+      "economia": ["Agricultura", "Indústria têxtil", "Empreendedorismo"],
+      "qualidade_de_vida": true
+    },
+    "desenvolvedor": {
+      "nome": "UpInvestments",
+      "grupo": "Loureiro Firm",
+      "experiencia_anos": 80,
+      "principios": ["Dedicação", "Integridade", "Valores sólidos"],
+      "parceiros": ["Grupo Casais", "Viriato & Viriato"],
+      "missao": "Desenvolver projetos imobiliários excecionais com qualidade e inovação"
+    }
+  }
+  

@@ -1,0 +1,29 @@
+{
+  "piso": "1 e 2",
+  "bloco": "1",
+  "tipologia": "T3 duplex",
+  "fracao": "H",
+  "lugares_garagem": 3,
+  "preco": "427,320.00",
+  "area_bruta_m2": 217.66,
+  "area_privativa_m2": 142.44,
+  "terracos_m2": 74.52,
+  "descricao": {
+    "divisoes": [
+      { "nome": "Sala e Cozinha", "area_m2": 43.75 },
+      { "nome": "Quarto 1", "area_m2": 10.77 },
+      { "nome": "Quarto 2", "area_m2": 11.69 },
+      { "nome": "Quarto Suite", "area_m2": 16 },
+      { "nome": "Casa de banho 1", "area_m2": 4.82 },
+      { "nome": "Casa de banho 2", "area_m2": 4.10 },
+      { "nome": "Casa de banho Suite", "area_m2": 3.96 }
+    ],
+    "luz_natural": "Luz natural abundante em todas as divisões, aproveitando as duas frentes",
+    "detalhes_extra": [
+      "Cozinha totalmente equipada",
+      "Lugar de garagem duplo",
+      "Arrecadação",
+      "Vidros duplos"
+    ]
+  }
+}
