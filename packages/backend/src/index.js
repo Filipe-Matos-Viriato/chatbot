@@ -6,7 +6,7 @@ import cors from 'cors';
 import OpenAI from 'openai';
 import multer from 'multer';
 
-import { generateResponse, generateSuggestedQuestions } from './rag-service.js';
+import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
 import * as clientConfigServiceModule from './services/client-config-service.js';
 import { processDocument } from './services/ingestion-service.js';
 import listingService from './services/listing-service.js';
@@ -290,6 +290,43 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received query: ${query}`);
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
 
+      // Generate embedding for the query
+      let queryEmbedding;
+      try {
+        queryEmbedding = await openai.embeddings.create({
+          model: embeddingModel,
+          input: query,
+        });
+      } catch (error) {
+        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error generating embedding:`, error);
+        return res.status(500).json({ 
+          error: 'Failed to generate embedding for query',
+          details: error.message
+        });
+      }
+
+      // Validate embedding before proceeding
+      if (!queryEmbedding || !queryEmbedding.data || !queryEmbedding.data[0] || !queryEmbedding.data[0].embedding) {
+        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Invalid embedding response:`, queryEmbedding);
+        return res.status(500).json({ 
+          error: 'Failed to generate embedding for query',
+          details: 'The embedding service returned an invalid response'
+        });
+      }
+
+      const embeddingVector = queryEmbedding.data[0].embedding;
+      
+      // Validate that embedding is an array of numbers
+      if (!Array.isArray(embeddingVector) || embeddingVector.length === 0 || typeof embeddingVector[0] !== 'number') {
+        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Invalid embedding vector format:`, embeddingVector);
+        return res.status(500).json({ 
+          error: 'Invalid embedding vector format',
+          details: 'The embedding vector is not properly formatted'
+        });
+      }
+
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generated embedding vector with ${embeddingVector.length} dimensions`);
+
       // Get and format onboarding answers for better context
       let formattedOnboardingAnswers = null;
       try {
@@ -315,7 +352,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const responseText = await generateResponse(
         query, 
         clientConfig, 
-        context, 
+        embeddingVector,           // Pass the actual embedding vector
+        context,                   // External context 
         userContext, 
         chatHistory, 
         formattedOnboardingAnswers

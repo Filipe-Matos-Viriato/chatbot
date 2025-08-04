@@ -336,7 +336,9 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   let truncatedChatHistory = '';
   const chatMessagesArray = [];
   if (chatHistory && chatHistory !== "Nenhum histórico anterior disponível") {
-    const historyLines = chatHistory.split('\n').reverse(); // Process from newest to oldest
+    // Ensure chatHistory is a string
+    const chatHistoryString = typeof chatHistory === 'string' ? chatHistory : JSON.stringify(chatHistory);
+    const historyLines = chatHistoryString.split('\n').reverse(); // Process from newest to oldest
     const tempHistory = [];
     for (const line of historyLines) {
       const lineTokens = encode(line).length;
