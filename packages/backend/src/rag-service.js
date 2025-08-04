@@ -115,6 +115,13 @@ function extractQueryFilters(query, currentListingPrice = null) {
   if (lowerCaseQuery.includes('carregamento elétrico')) filters.has_electric_car_charging = true;
   if (lowerCaseQuery.includes('animais permitidos')) filters.pets_allowed = true;
 
+  // Debug what filters were extracted
+  if (Object.keys(filters).length > 0) {
+    console.log(`🔍 extractQueryFilters extracted: ${JSON.stringify(filters, null, 2)} from query: "${query}"`);
+  } else {
+    console.log(`🔍 extractQueryFilters found no filters in query: "${query}"`);
+  }
+  
   return filters;
 }
 
@@ -220,6 +227,17 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   console.log(`Found ${matches.length} matches in targeted listing search.`);
   console.log(`Found ${developmentMatches.length} matches in targeted development search.`);
   console.log(`Found ${broadMatches.length} matches in broad search.`);
+  
+  // Add detailed debugging for broad search
+  console.log(`🔍 DEBUGGING - Broad Search Details:`);
+  console.log(`  Base filter: ${JSON.stringify(baseFilter, null, 2)}`);
+  console.log(`  Initial filter (base + query): ${JSON.stringify(initialFilter, null, 2)}`);
+  console.log(`  Vector dimensions: ${searchVector.length}`);
+  console.log(`  TopK requested: 50`);
+  if (broadMatches.length > 0) {
+    console.log(`  Best match score: ${broadMatches[0].score}`);
+    console.log(`  Worst match score: ${broadMatches[broadMatches.length - 1].score}`);
+  }
 
   const priceMatch = matches.find(match => match.metadata.price_eur !== undefined);
   let currentListingPrice = null;
@@ -316,6 +334,14 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   const queryFilters = extractQueryFilters(query);
   const onboardingFilters = onboardingAnswers ? extractQueryFilters(JSON.stringify(onboardingAnswers)) : {};
   const mergedFilters = mergeFilters(queryFilters, onboardingFilters);
+  
+  // Add debugging for filters
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUGGING - Filters Applied:`);
+  console.log(`  Query filters: ${JSON.stringify(queryFilters, null, 2)}`);
+  console.log(`  Onboarding filters: ${JSON.stringify(onboardingFilters, null, 2)}`);
+  console.log(`  Merged filters: ${JSON.stringify(mergedFilters, null, 2)}`);
+  console.log(`  Original query: "${query}"`);
+  console.log(`  Onboarding answers: ${JSON.stringify(onboardingAnswers, null, 2)}`);
 
   let queryResponse;
   try {
@@ -326,8 +352,33 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     queryResponse = { matches: [] };
   }
   
+  // Add debugging for matches found
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUGGING - Search Results:`);
+  console.log(`  Total matches found: ${queryResponse.matches.length}`);
+  if (queryResponse.matches.length > 0) {
+    console.log(`  First match score: ${queryResponse.matches[0].score}`);
+    console.log(`  Match metadata keys: ${Object.keys(queryResponse.matches[0].metadata || {})}`);
+    queryResponse.matches.slice(0, 3).forEach((match, index) => {
+      console.log(`    Match ${index + 1}: ${match.metadata.listing_id || match.metadata.development_id || 'Unknown ID'} (score: ${match.score})`);
+    });
+  } else {
+    console.log(`  ⚠️ No matches found in Pinecone for query: "${query}"`);
+    console.log(`  Applied filters: ${JSON.stringify(mergedFilters, null, 2)}`);
+  }
+  
+  // Check if we have no matches and handle accordingly
+  if (queryResponse.matches.length === 0) {
+    console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
+  }
+  
   let context = queryResponse.matches.map(m => m.metadata.text).join('\n\n---\n\n');
   let remainingTokens = CONTEXT_TOKEN_BUDGET;
+  
+  // Handle empty context case to prevent hallucination
+  if (queryResponse.matches.length === 0) {
+    context = "IMPORTANTE: Não foram encontradas propriedades na base de dados que correspondam aos critérios especificados. NÃO INVENTE ou CRIE informações sobre apartamentos que não existem nos documentos. Informe o utilizador que não há propriedades disponíveis que correspondam aos critérios e ofereça alternativas.";
+    console.log(`[${clientConfig.clientName}] 📝 Using empty context warning to prevent hallucination`);
+  }
   
   const contextTokens = encode(context).length;
   remainingTokens -= contextTokens;
