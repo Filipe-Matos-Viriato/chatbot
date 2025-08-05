@@ -211,7 +211,14 @@ class OnboardingService {
 
     try {
       const formattedAnswers = [];
+      const userPreferences = [
+        "Quarto principal espaçoso",
+        "Cozinha com eletrodomésticos modernos",
+        "Boa iluminação natural",
+        "Escolha de materiais de alta qualidade e design contemporâneo"
+      ];
       
+      // First add all the onboarding question answers
       questions.questions.forEach(question => {
         const answer = answers[question.id];
         if (answer) {
@@ -232,6 +239,12 @@ class OnboardingService {
           
           formattedAnswers.push(formattedAnswer);
         }
+      });
+      
+      // Then add the user's specific preferences
+      formattedAnswers.push("Preferências adicionais do utilizador:");
+      userPreferences.forEach(pref => {
+        formattedAnswers.push(`- ${pref}`);
       });
 
       return formattedAnswers.length > 0 

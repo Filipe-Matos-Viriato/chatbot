@@ -867,7 +867,7 @@ class App extends Component {
         }, chatIcon),
         h('span', { 
           style: `font-size: ${isMobile ? '12px' : '14px'}; font-weight: 600; white-space: nowrap;` 
-        }, 'Assistente IA')
+        }, 'Olivia - Assistente Virtual')
       ]),
 
       // Chat Window
@@ -1007,7 +1007,7 @@ class App extends Component {
             value: inputValue,
             onInput: (e) => this.setState({ inputValue: e.target.value }),
             onKeyPress: this.handleKeyPress,
-            placeholder: '...',
+            placeholder: 'Escreva aqui...',
             style: Object.entries(styles.input).map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`).join('; '),
             rows: 1,
             'aria-label': 'Type your message here',

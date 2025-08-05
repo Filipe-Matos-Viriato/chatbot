@@ -47,6 +47,21 @@ const initializeDefaultClients = () => {
   }
 };
 
+/**
+ * Get the appropriate Pinecone index based on client config
+ * @param {object} clientConfig The client configuration
+ * @returns {object} The Pinecone index to use
+ */
+const getPineconeIndexForClient = (clientConfig) => {
+  if (clientConfig && clientConfig.pineconeIndex) {
+    console.log(`Using client-specific Pinecone index: ${clientConfig.pineconeIndex} for ingestion`);
+    return defaultPinecone.index(clientConfig.pineconeIndex);
+  }
+  
+  console.log(`Using default Pinecone index: ${process.env.PINECONE_INDEX_NAME} for ingestion`);
+  return defaultPineconeIndex;
+};
+
 // Call this once to initialize defaults for non-test environments
 initializeDefaultClients();
 
@@ -597,12 +612,16 @@ const { originalname, buffer } = file;
     }
 
     // 5. Upsert chunks with metadata into the vector database
+    // Get the client-specific index if available
+    const index = dependencies.pineconeIndex || getPineconeIndexForClient(clientConfig);
+    const indexName = clientConfig.pineconeIndex || process.env.PINECONE_INDEX_NAME;
+    
     console.log(
       `[${clientConfig.clientName || clientConfig.clientId}] Upserting ${
       vectors.length
-      } vectors into Pinecone index '${process.env.PINECONE_INDEX_NAME}' namespace '${process.env.PINECONE_NAMESPACE}'...`
+      } vectors into Pinecone index '${indexName}' namespace '${process.env.PINECONE_NAMESPACE}'...`
     );
-    await pineconeIndex.namespace(process.env.PINECONE_NAMESPACE).upsert(vectors);
+    await index.namespace(process.env.PINECONE_NAMESPACE).upsert(vectors);
 
     console.log(`[${clientConfig.clientName || clientConfig.clientId}] Document processing completed successfully.`);
     return { success: true, message: 'Document processed successfully.' };

@@ -9,7 +9,14 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-const pineconeIndex = pinecone.index('rachatbot-1536'); // Use the new 1536-dimension index
+
+// Function to get the appropriate Pinecone index based on client config
+function getPineconeIndex(clientConfig) {
+  // Use client-specific index if available, otherwise fall back to shared index
+  const indexName = clientConfig?.pineconeIndex || 'rachatbot-1536';
+  console.log(`Using Pinecone index: ${indexName} for client: ${clientConfig?.clientName || 'Unknown'}`);
+  return pinecone.index(indexName);
+}
 
 const embeddingModel = "text-embedding-3-small"; // Standardize on the 1536-dimension model
 const generativeModel = "gpt-3.5-turbo";
@@ -149,6 +156,11 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   
   console.log(`[${clientConfig.clientName}] Using search vector with ${searchVector.length} dimensions`);
 
+  // Get the client-specific Pinecone index
+  const clientPineconeIndex = getPineconeIndex(clientConfig);
+  
+  // For client-specific indexes, we don't need to filter by client_id since the entire index
+  // is dedicated to this client, but we'll keep it for backward compatibility
   const baseFilter = {
     client_id: clientConfig.clientId,
   };
@@ -168,14 +180,14 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   }
 
   const contextListingId = externalContext?.type === 'listing' ? externalContext.value : null;
-  const contextDevelopmentId = externalContext?.type === 'development' ? externalContext.value : null;
+  const contextDevelopmentId = externalContext?.type === 'development' ? externalContext.value : clientConfig.defaultDevelopmentId;
   
   const queries = [];
 
   // 1. Targeted Listing Query
   if (contextListingId) {
     console.log(`Queueing targeted query for listing_id: ${contextListingId}`);
-    queries.push(pineconeIndex
+    queries.push(clientPineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
       .query({
         vector: searchVector,
@@ -191,7 +203,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   // 2. Targeted Development Query
   if (contextDevelopmentId) {
     console.log(`Queueing targeted query for development_id: ${contextDevelopmentId}`);
-    queries.push(pineconeIndex
+    queries.push(clientPineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
       .query({
         vector: searchVector,
@@ -207,7 +219,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   // 3. Broad Query
   console.log("Queueing broad query with filters:", JSON.stringify(queryFilters, null, 2));
   const initialFilter = { ...baseFilter, ...queryFilters };
-  queries.push(pineconeIndex
+  queries.push(clientPineconeIndex
     .namespace(process.env.PINECONE_NAMESPACE)
     .query({
         vector: searchVector,
@@ -376,9 +388,12 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   
   // Handle empty context case to prevent hallucination
   if (queryResponse.matches.length === 0) {
-    context = "IMPORTANTE: Não foram encontradas propriedades na base de dados que correspondam aos critérios especificados. NÃO INVENTE ou CRIE informações sobre apartamentos que não existem nos documentos. Informe o utilizador que não há propriedades disponíveis que correspondam aos critérios e ofereça alternativas.";
+    context = "IMPORTANTE: Não foram encontradas propriedades na base de dados que correspondam aos critérios especificados. NÃO INVENTE ou CRIE informações sobre apartamentos que não existem nos documentos. Informe o utilizador que não há propriedades disponíveis que correspondam aos critérios. Apenas mencione propriedades específicas da Up Investments (client_id: e6f484a3-c3cb-4e01-b8ce-a276f4b7355c) e não de outros clientes.";
     console.log(`[${clientConfig.clientName}] 📝 Using empty context warning to prevent hallucination`);
   }
+  
+  // Add client filter reminder to prevent incorrect listings
+  context += "\n\nIMPORTANTE: Apenas mencione e recomende propriedades que pertencem ao cliente atual (" + clientConfig.clientName + "). NÃO RECOMENDE propriedades ou listagens que não pertencem a este cliente. Se não houver propriedades disponíveis que correspondam aos critérios, informe o utilizador de forma clara.";
   
   const contextTokens = encode(context).length;
   remainingTokens -= contextTokens;

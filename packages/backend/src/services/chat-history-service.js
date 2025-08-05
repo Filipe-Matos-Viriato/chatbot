@@ -13,12 +13,24 @@ const pinecone = new Pinecone({
 });
 
 const embeddingModel = 'text-embedding-3-small';
-const pineconeIndexName = 'chat-history-1536';
+const defaultPineconeIndexName = 'chat-history-1536';
 
 class ChatHistoryService {
   constructor() {
-    this.pineconeIndex = pinecone.Index(pineconeIndexName);
-    this.embeddingDimension = 1536; 
+    this.pinecone = pinecone;
+    this.embeddingDimension = 1536;
+    this.defaultPineconeIndex = pinecone.Index(defaultPineconeIndexName);
+  }
+  
+  // Get the appropriate Pinecone index based on client config
+  getPineconeIndex(clientConfig) {
+    if (clientConfig?.pineconeIndex) {
+      console.log(`Using client-specific Pinecone index: ${clientConfig.pineconeIndex} for chat history`);
+      return this.pinecone.Index(clientConfig.pineconeIndex);
+    }
+    
+    console.log(`Using default Pinecone index: ${defaultPineconeIndexName} for chat history`);
+    return this.defaultPineconeIndex;
   }
 
   async generateEmbedding(text) {
@@ -69,8 +81,11 @@ class ChatHistoryService {
         },
       };
 
-      await this.pineconeIndex.upsert([vector]);
-      console.log(`Message upserted to Pinecone: ${vector.id}`);
+      // Get the appropriate index based on client config
+      const index = this.getPineconeIndex(clientConfig);
+      
+      await index.upsert([vector]);
+      console.log(`Message upserted to Pinecone index ${clientConfig?.pineconeIndex || defaultPineconeIndexName}: ${vector.id}`);
     } catch (error) {
       console.error("Error in upsertMessage:", {
         message: error.message,
@@ -81,11 +96,20 @@ class ChatHistoryService {
     }
   }
 
-  async getVisitorChatHistory(visitorId, clientId, limit = 10) {
+  async getVisitorChatHistory(visitorId, clientId, limit = 10, clientConfig = null) {
     try {
       console.log(`Retrieving visitor chat history for visitor: ${visitorId}, client: ${clientId}`);
       
-      const queryResponse = await this.pineconeIndex.query({
+      // If clientConfig is not provided, try to retrieve it from the client ID
+      let index = this.defaultPineconeIndex;
+      if (clientConfig) {
+        index = this.getPineconeIndex(clientConfig);
+      } else {
+        // For backward compatibility, we'll use default index when clientConfig isn't provided
+        console.log(`No clientConfig provided, using default index for chat history`);
+      }
+      
+      const queryResponse = await index.query({
         topK: limit * 2,
         includeMetadata: true,
         filter: {
