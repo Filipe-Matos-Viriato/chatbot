@@ -74,6 +74,7 @@ async function migrateData(sourceIndex, targetIndex, clientId, namespace = proce
     }
     
     // Get vectors from source index
+    console.log('Querying source index with params:', JSON.stringify(queryParams, null, 2));
     const queryResult = await sourceIndex.namespace(namespace).query(queryParams);
     
     // If no matches found, we're done
@@ -89,6 +90,11 @@ async function migrateData(sourceIndex, targetIndex, clientId, namespace = proce
     }));
     
     // Upsert vectors to target index
+    console.log(`Upserting ${vectors.length} vectors to target index.`);
+    if (vectors.length > 0) {
+      const sampleVector = { ...vectors[0], values: `[${vectors[0].values.length} dimensions]` };
+      console.log('Sample vector being upserted:', JSON.stringify(sampleVector, null, 2));
+    }
     await targetIndex.namespace(namespace).upsert(vectors);
     
     // Update counters

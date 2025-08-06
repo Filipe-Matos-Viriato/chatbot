@@ -1,10 +1,14 @@
-const fs = require('fs').promises;
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') }); // Load environment variables
-const { processDocument, extractText } = require('../src/services/ingestion-service');
-const { getClientConfig } = require('../src/services/client-config-service');
-const developmentService = require('../src/services/development-service'); // Import development service
-const { v4: uuidv4 } = require('uuid'); // For generating UUIDs
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { processDocument, extractText } from '../src/services/ingestion-service.js';
+import { getClientConfig } from '../src/services/client-config-service.js';
+import * as developmentService from '../src/services/development-service.js';
+import { v4 as uuidv4 } from 'uuid';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 
 const CLIENT_ID = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c'; // Up Investments client_id
 const KNOWLEDGE_BASE_PATH = path.join(__dirname, '../client-data/Up Investments/knowledge-base');

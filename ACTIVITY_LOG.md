@@ -15,3 +15,11 @@
   - Updated `ingestion-service.js` to use client-specific indexes
   - Created migration script to transfer data to client-specific indexes
   - Added documentation for setting up client-specific indexes
+- Added console logs to the migration script to debug Pinecone queries and upserts.
+- Added detailed console logs to the RAG service to debug the vector search process.
+- Created a script to delete vectors by `client_id` from a Pinecone index to resolve data leakage.
+- Deleted the unsafe `ingest-test-data.js` script to prevent future data contamination.
+- Implemented a new filter conversion function (`convertOnboardingToFilters`) to correctly use onboarding answers in Pinecone searches.
+- Refined the RAG service to apply more specific filters, improving search accuracy and efficiency.
+- Created a new script to ingest the Up Investments knowledge base into Pinecone.
+- Corrected the OpenAI API key and attempted to rerun the ingestion script.

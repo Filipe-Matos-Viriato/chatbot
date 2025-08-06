@@ -47,8 +47,14 @@ function extractQueryFilters(query, currentListingPrice = null) {
   const filters = {};
   const lowerCaseQuery = query.toLowerCase();
 
+  // Handle direct query for typology, e.g., "T1" or "t2"
+  const typologyMatch = lowerCaseQuery.match(/\b(t\d)\b/i);
+  if (typologyMatch) {
+    filters.type = typologyMatch[1].toUpperCase();
+  }
+
   // Number of Bedrooms (exact, greater than, less than)
-  let match = lowerCaseQuery.match(/(\d+)\s*(quartos|t\d)/);
+  let match = lowerCaseQuery.match(/(\d+)\s*quartos/);
   if (match) {
     const num = parseInt(match[1], 10);
     if (!isNaN(num)) {
@@ -132,6 +138,58 @@ function extractQueryFilters(query, currentListingPrice = null) {
   return filters;
 }
 
+/**
+ * Converts onboarding answers into a Pinecone metadata filter object.
+ * @param {object} onboardingAnswers - The user's answers from the onboarding process.
+ * @returns {object} A Pinecone filter object.
+ */
+function convertOnboardingToFilters(onboardingAnswers) {
+  if (!onboardingAnswers) {
+    return {};
+  }
+
+  const filters = {};
+  const { tipologia, orcamento, localizacao, caracteristicas } = onboardingAnswers;
+
+  // Type (T1, T2, etc.) - maps to 'type' metadata field
+  if (tipologia) {
+    filters.type = tipologia;
+  }
+
+  // Budget - maps to 'price_eur' metadata field
+  if (orcamento) {
+    const range = orcamento.match(/(\d+)k-(\d+)k/);
+    if (range) {
+      const min = parseInt(range[1], 10) * 1000;
+      const max = parseInt(range[2], 10) * 1000;
+      filters.price_eur = { "$gte": min, "$lte": max };
+    } else if (orcamento.includes('<')) {
+      const max = parseInt(orcamento.replace(/[<k]/g, ''), 10) * 1000;
+      filters.price_eur = { "$lte": max };
+    } else if (orcamento.includes('>')) {
+      const min = parseInt(orcamento.replace(/[>k]/g, ''), 10) * 1000;
+      filters.price_eur = { "$gte": min };
+    }
+  }
+
+  // Location - maps to 'location' metadata field
+  if (localizacao) {
+    filters.location = localizacao.replace(/_/g, ' ');
+  }
+
+  // Characteristics (e.g., 'garagem') - maps to boolean 'has_garagem' metadata field
+  if (caracteristicas && Array.isArray(caracteristicas)) {
+    caracteristicas.forEach(feature => {
+      if (feature) {
+        filters[`has_${feature}`] = true;
+      }
+    });
+  }
+  
+  console.log(`🔍 Converted onboarding answers to filters: ${JSON.stringify(filters, null, 2)}`);
+  return filters;
+}
+
 async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}) {
   // Validate search vector before proceeding
   if (!searchVector) {
@@ -187,14 +245,16 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   // 1. Targeted Listing Query
   if (contextListingId) {
     console.log(`Queueing targeted query for listing_id: ${contextListingId}`);
+    const listingQueryParams = {
+      vector: searchVector,
+      topK: 10,
+      includeMetadata: true,
+      filter: { ...baseFilter, listing_id: contextListingId },
+    };
+    console.log('Listing Query Params:', JSON.stringify(listingQueryParams, null, 2));
     queries.push(clientPineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
-      .query({
-        vector: searchVector,
-        topK: 10,
-        includeMetadata: true,
-        filter: { ...baseFilter, listing_id: contextListingId },
-      })
+      .query(listingQueryParams)
     );
   } else {
     queries.push(Promise.resolve({ matches: [] })); // Add empty promise to keep array order
@@ -203,14 +263,16 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   // 2. Targeted Development Query
   if (contextDevelopmentId) {
     console.log(`Queueing targeted query for development_id: ${contextDevelopmentId}`);
+    const developmentQueryParams = {
+      vector: searchVector,
+      topK: 10,
+      includeMetadata: true,
+      filter: { ...baseFilter, development_id: contextDevelopmentId },
+    };
+    console.log('Development Query Params:', JSON.stringify(developmentQueryParams, null, 2));
     queries.push(clientPineconeIndex
       .namespace(process.env.PINECONE_NAMESPACE)
-      .query({
-        vector: searchVector,
-        topK: 10,
-        includeMetadata: true,
-        filter: { ...baseFilter, development_id: contextDevelopmentId },
-      })
+      .query(developmentQueryParams)
     );
   } else {
     queries.push(Promise.resolve({ matches: [] })); // Add empty promise
@@ -219,14 +281,16 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   // 3. Broad Query
   console.log("Queueing broad query with filters:", JSON.stringify(queryFilters, null, 2));
   const initialFilter = { ...baseFilter, ...queryFilters };
+  const broadQueryParams = {
+      vector: searchVector,
+      topK: 50,
+      includeMetadata: true,
+      filter: initialFilter,
+  };
+  console.log('Broad Query Params:', JSON.stringify(broadQueryParams, null, 2));
   queries.push(clientPineconeIndex
     .namespace(process.env.PINECONE_NAMESPACE)
-    .query({
-        vector: searchVector,
-        topK: 50,
-        includeMetadata: true,
-        filter: initialFilter,
-    })
+    .query(broadQueryParams)
   );
 
   // Execute all queries in parallel
@@ -344,7 +408,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
 
   const queryFilters = extractQueryFilters(query);
-  const onboardingFilters = onboardingAnswers ? extractQueryFilters(JSON.stringify(onboardingAnswers)) : {};
+  const onboardingFilters = convertOnboardingToFilters(onboardingAnswers);
   const mergedFilters = mergeFilters(queryFilters, onboardingFilters);
   
   // Add debugging for filters
