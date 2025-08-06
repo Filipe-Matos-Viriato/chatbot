@@ -5,6 +5,11 @@ import dotenv from 'dotenv';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+console.log('[DEBUG] Dotenv config loaded. Checking environment variables...');
+console.log(`[DEBUG] OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? 'Loaded' : 'Not Loaded'}`);
+console.log(`[DEBUG] PINECONE_API_KEY: ${process.env.PINECONE_API_KEY ? 'Loaded' : 'Not Loaded'}`);
+console.log(`[DEBUG] SUPABASE_URL: ${process.env.SUPABASE_URL ? 'Loaded' : 'Not Loaded'}`);
+console.log(`[DEBUG] SUPABASE_ANON_KEY: ${process.env.SUPABASE_ANON_KEY ? 'Loaded' : 'Not Loaded'}`);
 
 import express from 'express';
 import cors from 'cors';
@@ -21,6 +26,7 @@ import supabaseModule from './config/supabase.js';
 import ChatHistoryService from './services/chat-history-service.js';
 import * as developmentService from './services/development-service.js';
 import userService from './services/user-service.js';
+console.log('[DEBUG] All imports in index.js completed.');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -30,6 +36,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 const port = process.env.PORT || 3007; // Changed default port to 3007 to match frontend
+console.log(`[DEBUG] process.env.PORT is: ${process.env.PORT}`);
 
 // Middleware to load client configuration and attach it to the request, along with a placeholder user context
 const clientConfigMiddleware = (clientConfigService) => async (req, res, next) => {
@@ -1241,7 +1248,10 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 };
 
 // Start the server if this file is run directly
-if (import.meta.url.startsWith('file:') && process.argv[1] === new URL(import.meta.url).pathname) {
+console.log(`[DEBUG] process.argv[1]: ${process.argv[1]}`);
+console.log(`[DEBUG] new URL(import.meta.url).pathname: ${new URL(import.meta.url).pathname}`);
+if (import.meta.url.startsWith('file:') && path.resolve(process.argv[1]) === __filename) {
+  console.log('[DEBUG] Creating app instance...');
   const appInstance = createApp();
   console.log(`Attempting to start backend server on port: ${port}`);
   appInstance.listen(port, () => {

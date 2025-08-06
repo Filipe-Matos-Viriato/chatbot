@@ -612,4 +612,3 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
 }
 
 export { generateResponse, generateSuggestedQuestions, embeddingModel };
-export { generateResponse, generateSuggestedQuestions, embeddingModel };
