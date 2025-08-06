@@ -431,4 +431,3 @@ async acknowledgeLeads(visitorIds) {
   }
 }
 export default new VisitorService();
-export default new VisitorService();
