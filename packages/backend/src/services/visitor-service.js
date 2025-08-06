@@ -162,6 +162,16 @@ class VisitorService {
     }
 
     // --- NEW LOGIC FOR ENGAGED_USERS AND TOTAL_CONVERSIONS ---
+    let clientName = null;
+    try {
+      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      if (clientConfig && clientConfig.clientName) {
+        clientName = clientConfig.name;
+      }
+    } catch (error) {
+      console.error(`Error fetching client name for client ${clientId}:`, error);
+    }
+
     if (listingId) {
       // Check if this is the first event for this visitor on this listing
       const { count: existingEventsCount, error: countError } = await supabase
@@ -235,6 +245,9 @@ class VisitorService {
       if (Object.keys(metricsToUpdate).length > 0) {
         metricsToUpdate.listing_id = listingId;
         metricsToUpdate.updated_at = new Date().toISOString();
+        if (clientName) {
+          metricsToUpdate.client_name = clientName;
+        }
 
         const { error: updateMetricsError } = await supabase
           .from('listing_metrics')
