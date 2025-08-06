@@ -193,7 +193,7 @@ function convertOnboardingToFilters(onboardingAnswers) {
 async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}) {
   // Validate search vector before proceeding
   if (!searchVector) {
-    console.error('Search vector is null or undefined');
+    console.error(`[${clientConfig.clientName}] ❌ FATAL ERROR: Search vector is null or undefined`);
     throw new Error('Invalid search vector: vector is required for Pinecone queries');
   }
   
@@ -222,6 +222,22 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   const baseFilter = {
     client_id: clientConfig.clientId,
   };
+  
+  // Now that baseFilter is initialized, we can log it
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Base filter being used: ${JSON.stringify(baseFilter)}`);
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Client config: ${JSON.stringify({
+    clientId: clientConfig.clientId,
+    clientName: clientConfig.clientName,
+    defaultDevelopmentId: clientConfig.defaultDevelopmentId,
+    pineconeIndex: clientConfig.pineconeIndex || 'default'
+  })}`);
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: External context: ${JSON.stringify(externalContext)}`);
+  
+  const contextListingId = externalContext?.type === 'listing' ? externalContext.value : null;
+  const contextDevelopmentId = externalContext?.type === 'development' ? externalContext.value : clientConfig.defaultDevelopmentId;
+  
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Context listing ID: ${contextListingId || 'none'}`);
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Context development ID: ${contextDevelopmentId || 'none'}`);
 
   if (userContext && userContext.role === 'promoter') {
     try {
@@ -237,9 +253,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     }
   }
 
-  const contextListingId = externalContext?.type === 'listing' ? externalContext.value : null;
-  const contextDevelopmentId = externalContext?.type === 'development' ? externalContext.value : clientConfig.defaultDevelopmentId;
-  
+  // The actual context IDs were moved up to the debug section
   const queries = [];
 
   // 1. Targeted Listing Query
@@ -252,9 +266,9 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       filter: { ...baseFilter, listing_id: contextListingId },
     };
     console.log('Listing Query Params:', JSON.stringify(listingQueryParams, null, 2));
-    queries.push(clientPineconeIndex
-      .namespace(process.env.PINECONE_NAMESPACE)
-      .query(listingQueryParams)
+    queries.push(
+      clientPineconeIndex
+        .query(listingQueryParams)
     );
   } else {
     queries.push(Promise.resolve({ matches: [] })); // Add empty promise to keep array order
@@ -270,9 +284,9 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       filter: { ...baseFilter, development_id: contextDevelopmentId },
     };
     console.log('Development Query Params:', JSON.stringify(developmentQueryParams, null, 2));
-    queries.push(clientPineconeIndex
-      .namespace(process.env.PINECONE_NAMESPACE)
-      .query(developmentQueryParams)
+    queries.push(
+      clientPineconeIndex
+        .query(developmentQueryParams)
     );
   } else {
     queries.push(Promise.resolve({ matches: [] })); // Add empty promise
@@ -288,13 +302,30 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       filter: initialFilter,
   };
   console.log('Broad Query Params:', JSON.stringify(broadQueryParams, null, 2));
-  queries.push(clientPineconeIndex
-    .namespace(process.env.PINECONE_NAMESPACE)
-    .query(broadQueryParams)
+  queries.push(
+    clientPineconeIndex
+      .query(broadQueryParams)
   );
 
   // Execute all queries in parallel
-  const [listingResponse, developmentResponse, broadResponse] = await Promise.all(queries);
+  console.log(`[${clientConfig.clientName}] 🔍 EXTENSIVE DEBUG - Executing Pinecone queries...`);
+  
+  let listingResponse, developmentResponse, broadResponse;
+  try {
+    [listingResponse, developmentResponse, broadResponse] = await Promise.all(queries);
+    
+    console.log(`[${clientConfig.clientName}] 🔍 QUERY RESULTS:`);
+    console.log(`  - Listing query matches: ${listingResponse?.matches?.length || 0}`);
+    console.log(`  - Development query matches: ${developmentResponse?.matches?.length || 0}`);
+    console.log(`  - Broad query matches: ${broadResponse?.matches?.length || 0}`);
+    
+    if (broadResponse?.matches?.length > 0) {
+      console.log(`  - First broad match metadata: ${JSON.stringify(broadResponse.matches[0].metadata)}`);
+    }
+  } catch (error) {
+    console.error(`[${clientConfig.clientName}] ❌ ERROR EXECUTING PINECONE QUERIES:`, error);
+    throw error;
+  }
 
   let matches = listingResponse.matches || [];
   const developmentMatches = developmentResponse.matches || [];

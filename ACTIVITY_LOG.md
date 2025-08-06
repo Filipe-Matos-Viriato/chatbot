@@ -23,3 +23,7 @@
 - Refined the RAG service to apply more specific filters, improving search accuracy and efficiency.
 - Created a new script to ingest the Up Investments knowledge base into Pinecone.
 - Corrected the OpenAI API key and attempted to rerun the ingestion script.
+- Added explicit dotenv loading in `src/config/supabase.js` to support standalone scripts.
+- Successfully ingested the Up Investments knowledge base into the `rachatbot-1536` index via `scripts/up_investments-ingest-test-data.js`, processing text and JSON files and upserting embeddings.
+- Created new focused ingestion script `ingest-up-investments-knowledge-base.js` that only processes files from the Up Investments knowledge-base directory, preventing ImoPrime test-data contamination.
+- Deleted the old `up_investments-ingest-test-data.js` script and replaced it with the cleaner, more focused version.
