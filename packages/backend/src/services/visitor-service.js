@@ -60,7 +60,7 @@ class VisitorService {
 
   async getClientScoringRules(clientId) {
     try {
-      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      const clientConfig = await getClientConfig(clientId);
       if (!clientConfig || !clientConfig.leadScoringRules) {
         console.warn(`No scoring rules found for client ${clientId}`);
         return null;

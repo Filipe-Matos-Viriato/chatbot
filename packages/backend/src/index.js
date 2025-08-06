@@ -5,6 +5,11 @@ import dotenv from 'dotenv';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+console.log('[DEBUG] Dotenv config loaded. Checking environment variables...');
+console.log(`[DEBUG] OPENAI_API_KEY: ${process.env.OPENAI_API_KEY ? 'Loaded' : 'Not Loaded'}`);
+console.log(`[DEBUG] PINECONE_API_KEY: ${process.env.PINECONE_API_KEY ? 'Loaded' : 'Not Loaded'}`);
+console.log(`[DEBUG] SUPABASE_URL: ${process.env.SUPABASE_URL ? 'Loaded' : 'Not Loaded'}`);
+console.log(`[DEBUG] SUPABASE_ANON_KEY: ${process.env.SUPABASE_ANON_KEY ? 'Loaded' : 'Not Loaded'}`);
 
 import express from 'express';
 import cors from 'cors';
@@ -21,6 +26,7 @@ import supabaseModule from './config/supabase.js';
 import ChatHistoryService from './services/chat-history-service.js';
 import * as developmentService from './services/development-service.js';
 import userService from './services/user-service.js';
+console.log('[DEBUG] All imports in index.js completed.');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -30,6 +36,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 const port = process.env.PORT || 3007; // Changed default port to 3007 to match frontend
+console.log(`[DEBUG] process.env.PORT is: ${process.env.PORT}`);
 
 // Middleware to load client configuration and attach it to the request, along with a placeholder user context
 const clientConfigMiddleware = (clientConfigService) => async (req, res, next) => {
@@ -240,8 +247,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // Load client configuration for all API routes
-  // Removed global application of clientConfigMiddleware
+
 
   app.get('/', (req, res) => {
     res.send('Backend server is running!');
@@ -693,7 +699,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
       const developmentData = { name, location, amenities, client_id: clientConfig.clientId };
-      const newDevelopment = await developmentService.createDevelopment(developmentData);
+      const newDevelopment = await createDevelopment(developmentData);
       console.log('[DEBUG] POST /v1/developments response:', newDevelopment);
       res.status(201).json(newDevelopment);
     } catch (error) {
@@ -705,7 +711,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
-      const development = await developmentService.getDevelopmentById(id);
+      const development = await getDevelopmentById(id);
       if (!development || development.client_id !== req.clientConfig.clientId) {
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
@@ -719,7 +725,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
-      const developments = await developmentService.getDevelopmentsByClientId(clientConfig.clientId);
+      const developments = await getDevelopmentsByClientId(clientConfig.clientId);
       res.json(developments);
     } catch (error) {
       console.error('Error fetching developments by client ID:', error);
@@ -733,7 +739,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       if (clientId !== req.clientConfig.clientId) {
         return res.status(403).json({ error: 'Unauthorized access to client developments.' });
       }
-      const developments = await developmentService.getDevelopmentsByClientId(clientId);
+      const developments = await getDevelopmentsByClientId(clientId);
       console.log('[DEBUG] GET /v1/clients/:clientId/developments response:', developments);
       res.json(developments);
     } catch (error) {
@@ -752,7 +758,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      const updatedDevelopment = await developmentService.updateDevelopment(id, req.body);
+      const updatedDevelopment = await updateDevelopment(id, req.body);
       res.json(updatedDevelopment);
     } catch (error) {
       console.error('Error updating development:', error);
@@ -770,7 +776,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      await developmentService.deleteDevelopment(id);
+      await deleteDevelopment(id);
       res.json({ success: true, message: 'Development deleted successfully.' });
     } catch (error) {
       console.error('Error deleting development:', error);
@@ -1242,10 +1248,17 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 };
 
 // Start the server if this file is run directly
-if (import.meta.url.startsWith('file:') && process.argv[1] === new URL(import.meta.url).pathname) {
+console.log(`[DEBUG] process.argv[1]: ${process.argv[1]}`);
+console.log(`[DEBUG] new URL(import.meta.url).pathname: ${new URL(import.meta.url).pathname}`);
+if (import.meta.url.startsWith('file:') && path.resolve(process.argv[1]) === __filename) {
+  console.log('[DEBUG] Creating app instance...');
   const appInstance = createApp();
+  console.log(`Attempting to start backend server on port: ${port}`);
   appInstance.listen(port, () => {
-    console.log(`Backend server listening at http://localhost:${port}`);
+    console.log(`Backend server successfully listening at http://localhost:${port}`);
+  }).on('error', (err) => {
+    console.error(`Failed to start backend server on port ${port}:`, err);
+    process.exit(1); // Exit with an error code
   });
 }
 
