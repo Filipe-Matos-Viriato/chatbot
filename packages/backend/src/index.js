@@ -1,20 +1,22 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { generateResponse, generateSuggestedQuestions, embeddingModel } = require('./rag-service');
-// const cron = require('node-cron'); // Removed as clustering is now a separate script
-// const { clusterQuestions } = require('../scripts/cluster-questions'); // Removed as clustering is now a separate script
-const defaultClientConfigService = require('./services/client-config-service');
-const { processDocument: defaultProcessDocument } = require('./services/ingestion-service');
-const listingService = require('./services/listing-service'); // Import Listing Service
-const visitorService = require('./services/visitor-service');
-const onboardingService = require('./services/onboarding-service');
-const defaultSupabase = require('./config/supabase'); // Import Supabase client
-const ChatHistoryService = require('./services/chat-history-service');
-const developmentService = require('./services/development-service'); // Import Development Service
-const userService = require('./services/user-service'); // Import User Service
+// 1. exact file location in database
+// 2. clear description of what the file does
+// 3. clear description of why this file exists
+// 4. relevant files: packages/backend/package.json, packages/backend/src/rag-service.js, packages/backend/src/services/client-config-service.js, packages/backend/src/config/supabase.js
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
+import { getClientConfig, createClientConfig, updateClientConfig, deleteClientConfig } from './services/client-config-service.js';
+import { processDocument as defaultProcessDocument } from './services/ingestion-service.js';
+import listingService from './services/listing-service.js';
+import visitorService from './services/visitor-service.js';
+import onboardingService from './services/onboarding-service.js';
+import defaultSupabase from './config/supabase.js';
+import ChatHistoryService from './services/chat-history-service.js';
+import { createDevelopment, getDevelopmentById, getDevelopmentsByClientId, updateDevelopment, deleteDevelopment } from './services/development-service.js';
+import userService from './services/user-service.js';
 
-const multer = require('multer');
+import multer from 'multer';
 
 // Configure multer for in-memory file storage
 const upload = multer({ storage: multer.memoryStorage() });
@@ -48,7 +50,7 @@ const clientConfigMiddleware = (clientConfigService) => async (req, res, next) =
 // Function to create and configure the Express app
 const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMiddleware = null) => {
   const {
-    clientConfigService = defaultClientConfigService,
+    clientConfigService = { getClientConfig, createClientConfig, updateClientConfig, deleteClientConfig },
     supabase = defaultSupabase,
     ingestionService = { processDocument: defaultProcessDocument },
   } = dependencies;
@@ -231,8 +233,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // Load client configuration for all API routes
-  // Removed global application of clientConfigMiddleware
+
 
   app.get('/', (req, res) => {
     res.send('Backend server is running!');
@@ -640,7 +641,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
       const developmentData = { name, location, amenities, client_id: clientConfig.clientId };
-      const newDevelopment = await developmentService.createDevelopment(developmentData);
+      const newDevelopment = await createDevelopment(developmentData);
       console.log('[DEBUG] POST /v1/developments response:', newDevelopment);
       res.status(201).json(newDevelopment);
     } catch (error) {
@@ -652,7 +653,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
-      const development = await developmentService.getDevelopmentById(id);
+      const development = await getDevelopmentById(id);
       if (!development || development.client_id !== req.clientConfig.clientId) {
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
@@ -666,7 +667,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
-      const developments = await developmentService.getDevelopmentsByClientId(clientConfig.clientId);
+      const developments = await getDevelopmentsByClientId(clientConfig.clientId);
       res.json(developments);
     } catch (error) {
       console.error('Error fetching developments by client ID:', error);
@@ -680,7 +681,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       if (clientId !== req.clientConfig.clientId) {
         return res.status(403).json({ error: 'Unauthorized access to client developments.' });
       }
-      const developments = await developmentService.getDevelopmentsByClientId(clientId);
+      const developments = await getDevelopmentsByClientId(clientId);
       console.log('[DEBUG] GET /v1/clients/:clientId/developments response:', developments);
       res.json(developments);
     } catch (error) {
@@ -699,7 +700,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      const updatedDevelopment = await developmentService.updateDevelopment(id, req.body);
+      const updatedDevelopment = await updateDevelopment(id, req.body);
       res.json(updatedDevelopment);
     } catch (error) {
       console.error('Error updating development:', error);
@@ -717,7 +718,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      await developmentService.deleteDevelopment(id);
+      await deleteDevelopment(id);
       res.json({ success: true, message: 'Development deleted successfully.' });
     } catch (error) {
       console.error('Error deleting development:', error);
@@ -1167,12 +1168,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 };
 
 // Start the server if this file is run directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   const appInstance = createApp();
+  console.log(`Attempting to start backend server on port: ${port}`);
   appInstance.listen(port, () => {
-    console.log(`Backend server listening at http://localhost:${port}`);
+    console.log(`Backend server successfully listening at http://localhost:${port}`);
+  }).on('error', (err) => {
+    console.error(`Failed to start backend server on port ${port}:`, err);
+    process.exit(1); // Exit with an error code
   });
 }
 
 
-module.exports = { createApp, clientConfigMiddleware, upload };
+export { createApp, clientConfigMiddleware, upload };

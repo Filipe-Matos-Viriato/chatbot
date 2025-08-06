@@ -1,6 +1,6 @@
 // packages/backend/src/services/visitor-service.js
-const clientConfigService = require('./client-config-service');
-const supabase = require('../config/supabase'); // Import Supabase client
+import { getClientConfig } from './client-config-service.js';
+import supabase from '../config/supabase.js'; // Import Supabase client
 
 class VisitorService {
   constructor() {
@@ -60,7 +60,7 @@ class VisitorService {
 
   async getClientScoringRules(clientId) {
     try {
-      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      const clientConfig = await getClientConfig(clientId);
       if (!clientConfig || !clientConfig.leadScoringRules) {
         console.warn(`No scoring rules found for client ${clientId}`);
         return null;
@@ -430,4 +430,4 @@ async acknowledgeLeads(visitorIds) {
     console.log(`Acknowledged leads: ${visitorIds.join(', ')}`);
   }
 }
-module.exports = new VisitorService();
+export default new VisitorService();

@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+import supabase from '../config/supabase.js';
 
 class UserService {
     async createUser(userData) {
@@ -137,4 +137,4 @@ class UserService {
     }
 }
 
-module.exports = new UserService();
+export default new UserService();

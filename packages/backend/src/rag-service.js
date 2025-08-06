@@ -1,7 +1,7 @@
-const OpenAI = require('openai');
-const { Pinecone } = require('@pinecone-database/pinecone');
-const userService = require('./services/user-service');
-const listingService = require('./services/listing-service');
+import OpenAI from 'openai';
+import { Pinecone } from '@pinecone-database/pinecone';
+import userService from './services/user-service.js';
+import listingService from './services/listing-service.js';
 
 // Initialize clients
 const openai = new OpenAI({
@@ -364,4 +364,4 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
   }
 }
 
-module.exports = { generateResponse, generateSuggestedQuestions, embeddingModel };
+export { generateResponse, generateSuggestedQuestions, embeddingModel };
