@@ -72,7 +72,7 @@ initializeDefaultClients();
  * @param {object} dependencies - Optional dependencies for testing (mammoth, pdf).
  * @returns {Promise<string>} The extracted text.
  */
-const extractText = async (buffer, originalname, dependencies = {}) => {
+export const extractText = async (buffer, originalname, dependencies = {}) => {
   const {
     pdf, // pdf is now passed as a direct dependency from the calling script
   } = dependencies;
@@ -403,7 +403,7 @@ const cleanMetadataForPinecone = (metadata) => {
  * @param {object} params.metadata - Additional metadata for the document (e.g., listing_id, development_id).
  * @returns {Promise<object>} An object indicating success or failure.
  */
-const processDocument = async ({
+export const processDocument = async ({
   clientConfig: initialClientConfig,
   file,
   documentCategory,
@@ -430,6 +430,9 @@ const { originalname, buffer } = file;
     console.error('Defensive check failed: clientConfig or chunking_rules is missing!', clientConfig);
     clientConfig = clientConfig || { chunking_rules: {}, documentExtraction: {} };
   }
+
+  // Force ingestion into the shared index
+  clientConfig.pineconeIndex = 'rachatbot-1536';
 
   // Ensure default clients are initialized if not provided via dependencies
   initializeDefaultClients();
@@ -616,12 +619,11 @@ const { originalname, buffer } = file;
     const index = dependencies.pineconeIndex || getPineconeIndexForClient(clientConfig);
     const indexName = clientConfig.pineconeIndex || process.env.PINECONE_INDEX_NAME;
     
+    // Upsert into the default namespace instead of clientId
     console.log(
-      `[${clientConfig.clientName || clientConfig.clientId}] Upserting ${
-      vectors.length
-      } vectors into Pinecone index '${indexName}' namespace '${process.env.PINECONE_NAMESPACE}'...`
+      `[${clientConfig.clientName || clientConfig.clientId}] Upserting ${vectors.length} vectors into Pinecone index '${indexName}' (default namespace)...`
     );
-    await index.namespace(process.env.PINECONE_NAMESPACE).upsert(vectors);
+    await index.upsert(vectors);
 
     console.log(`[${clientConfig.clientName || clientConfig.clientId}] Document processing completed successfully.`);
     return { success: true, message: 'Document processed successfully.' };
@@ -632,11 +634,4 @@ const { originalname, buffer } = file;
     );
     return { success: false, message: `Failed to process document: ${error.message}` };
   }
-};
-
-export {
-  processDocument,
-  extractText, // Export extractText for testing and potential external use
-  extractStructuredMetadata, // Export for testing and potential external use
-  applyClientTaggingRules, // Export for testing
 };
