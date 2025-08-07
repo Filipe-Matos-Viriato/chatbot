@@ -60,3 +60,5 @@ The lead score is a hybrid score (maximum 100 points) composed of three main com
 **Files to investigate:**
 - `packages/backend/test/unit/ingestion.test.js`
 - `packages/backend/src/services/ingestion-service.js`
+
+## f the widget is embedded on a page that doesn't explicitly set data-client-id to a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 (Imoprime), it will default to the Up Investments ID, causing it to query for Up Investments data even when the user expects Imoprime data
