@@ -6,7 +6,7 @@ create table public.questions (
   count integer null,
   asked_at timestamp with time zone null,
   visitor_id text null,
-  client_id text not null default 'client-abc'::text,
+  client_id text not null,
   chatbot_response text null,
   session_id text null,
   constraint questions_pkey primary key (id),

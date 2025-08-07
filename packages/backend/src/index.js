@@ -1234,6 +1234,24 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to get individual leads for a listing
+  app.get('/api/listing/:id/leads', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { id: listingId } = req.params;
+      const { clientId } = req.query; // Get clientId from query parameters
+
+      if (!listingId || !clientId) {
+        return res.status(400).json({ error: 'Listing ID and Client ID are required.' });
+      }
+
+      const leads = await visitorService.getLeadsByListingId(listingId, clientId);
+      res.json({ leads });
+    } catch (error) {
+      console.error(`Error fetching leads for listing ${req.params.id}:`, error);
+      res.status(500).json({ error: 'Failed to fetch leads for listing.' });
+    }
+  });
+
   // Global error handler to catch JSON parsing errors
   app.use((err, req, res, next) => {
     if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {

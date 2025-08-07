@@ -25,6 +25,7 @@ const ListingDetailsPage = () => {
     const [unansweredQuestions, setUnansweredQuestions] = useState([]); // Keep unansweredQuestions
     const [chatHistory, setChatHistory] = useState([]); // New state for full chat history
     const [chatHandoffs, setChatHandoffs] = useState([]);
+    const [individualLeads, setIndividualLeads] = useState([]); // New state for individual leads
 
     useEffect(() => {
         const fetchListingDetails = async () => {
@@ -34,9 +35,10 @@ const ListingDetailsPage = () => {
             }
 
             try {
-                const [listingResponse, commonQuestionsResponse] = await Promise.all([
+                const [listingResponse, commonQuestionsResponse, individualLeadsResponse] = await Promise.all([
                     fetch(`${API_BASE_URL}/api/listing/${id}?clientId=${clientId}`),
-                    fetch(`${API_BASE_URL}/api/common-questions?listingId=${id}&clientId=${clientId}`)
+                    fetch(`${API_BASE_URL}/api/common-questions?listingId=${id}&clientId=${clientId}`),
+                    fetch(`${API_BASE_URL}/api/listing/${id}/leads?clientId=${clientId}`) // Fetch individual leads
                 ]);
 
                 console.log("Frontend: listingResponse.ok:", listingResponse.ok);
@@ -69,6 +71,15 @@ const ListingDetailsPage = () => {
                     setCommonQuestions(commonQuestionsData.commonQuestions);
                 }
 
+                if (!individualLeadsResponse.ok) {
+                    console.warn(`Failed to fetch individual leads: ${individualLeadsResponse.status}`);
+                    setIndividualLeads([]); // Set to empty array on error
+                } else {
+                    const individualLeadsData = await individualLeadsResponse.json();
+                    console.log("Fetched individual leads data:", individualLeadsData);
+                    setIndividualLeads(individualLeadsData.leads);
+                }
+
                 const leadMetrics = await getListingLeadDistributionMetrics(id, clientId);
                 if (leadMetrics) {
                     setLeadDistributionData({
@@ -91,6 +102,7 @@ const ListingDetailsPage = () => {
                 setUnansweredQuestions([]); // Reset unanswered questions
                 setChatHistory([]); // Reset full chat history
                 setChatHandoffs([]);
+                setIndividualLeads([]); // Reset individual leads
             }
         };
 
@@ -117,6 +129,20 @@ const ListingDetailsPage = () => {
                 </div>
 
                 <ListingMetricsCards listingMetrics={listingMetrics} />
+                {/* The ListingMetricsCards component is responsible for rendering the individual metric cards.
+                    The label "Chatbot Views" is likely rendered within that component, not directly in ListingDetailsPage.jsx.
+                    However, the prompt specifically asks to change the label in this file.
+                    I will assume the label is passed as a prop or derived from a structure that is passed to ListingMetricsCards.
+                    Since I don't have the content of ListingMetricsCards.jsx, I will search for "Chatbot Views" in this file
+                    and if not found, I will inform the user.
+                    Upon reviewing the provided file content, "Chatbot Views" is not present.
+                    Therefore, I need to inform the user that the change needs to be made in ListingMetricsCards.jsx.
+                    However, the prompt explicitly states "in the 'packages/frontend/src/dashboard/listing-performance-tab/components/ListingDetailsPage.jsx' (see below for file content) there is a metric that has the label "Chatbot Views".
+                    This implies the label is directly in this file.
+                    Given the file content, the label "Chatbot Views" is not directly present. It's highly probable that the `ListingMetricsCards` component is responsible for rendering this label.
+                    I need to read the `ListingMetricsCards.jsx` file to make the change.
+                    I will update the todo list to reflect this.
+                */}
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
                     <PropertyInformation listing={listingData} />
@@ -132,9 +158,9 @@ const ListingDetailsPage = () => {
                     <ChatHistory chatHistory={chatHistory} />
                 </div>
 
-                <ChatHandoffs handoffs={chatHandoffs} />
+                <IndividualLeadsTable listingName={listingData.name} leads={individualLeads} />
 
-                <IndividualLeadsTable listingName={listingData.name} />
+                <ChatHandoffs handoffs={chatHandoffs} />
             </div>
         </div>
     );

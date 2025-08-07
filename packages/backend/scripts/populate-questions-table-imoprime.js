@@ -15,6 +15,8 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
+const IMOPRIME_CLIENT_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+
 const QUESTIONS_PER_VISITOR_PER_LISTING = 2;
 const UNANSWERED_PERCENTAGE = 0.2; // 20% of questions will be marked as unanswered
 
@@ -92,7 +94,8 @@ async function populateQuestionsTable() {
   // Fetch existing visitors
   const { data: visitors, error: visitorsError } = await supabase
     .from('visitors')
-    .select('visitor_id');
+    .select('visitor_id')
+    .eq('client_id', IMOPRIME_CLIENT_ID);
 
   if (visitorsError) {
     console.error('Error fetching visitors:', visitorsError);
@@ -107,7 +110,8 @@ async function populateQuestionsTable() {
   // Fetch existing listings
   const { data: listings, error: listingsError } = await supabase
     .from('listings')
-    .select('id');
+    .select('id, client_id')
+    .eq('client_id', IMOPRIME_CLIENT_ID);
 
   if (listingsError) {
     console.error('Error fetching listings:', listingsError);
@@ -134,7 +138,8 @@ async function populateQuestionsTable() {
           chatbot_response: isUnanswered ? null : sampleResponses[Math.floor(Math.random() * sampleResponses.length)],
           asked_at: new Date().toISOString(), // Use 'asked_at' column
           status: isUnanswered ? 'unanswered' : 'answered', // Use 'status' column
-          visitor_id: visitor.visitor_id // Use visitor_id
+          visitor_id: visitor.visitor_id, // Use visitor_id
+          client_id: listing.client_id // Include client_id from listing
         });
       }
     }
