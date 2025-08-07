@@ -21,7 +21,6 @@ import * as clientConfigServiceModule from './services/client-config-service.js'
 import { processDocument } from './services/ingestion-service-imoprime.js';
 import listingService from './services/listing-service.js';
 import visitorService from './services/visitor-service.js';
-import onboardingService from './services/onboarding-service.js';
 import supabaseModule from './config/supabase.js';
 import ChatHistoryService from './services/chat-history-service.js';
 import * as developmentService from './services/development-service.js';
@@ -139,96 +138,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // Visitor onboarding endpoints (moved before middleware - they don't need client config context)
-  app.get('/v1/visitors/:visitorId/onboarding', async (req, res) => {
-    try {
-      const { visitorId } = req.params;
-      const clientId = req.headers['x-client-id'] || req.query.clientId;
-
-      if (!visitorId || !clientId) {
-        return res.status(400).json({ error: 'Visitor ID and Client ID are required' });
-      }
-
-      const onboardingData = await onboardingService.getVisitorOnboardingStatus(visitorId, clientId);
-      res.json(onboardingData);
-    } catch (error) {
-      console.error('Error getting visitor onboarding status:', error);
-      res.status(500).json({ error: 'Failed to get visitor onboarding status.' });
-    }
-  });
-
-  // API endpoint to submit onboarding answers
-  app.post('/v1/visitors/:visitorId/onboarding', async (req, res) => {
-    try {
-      console.log('🔍 Raw request details:', {
-        visitorId: req.params.visitorId,
-        hasBody: !!req.body,
-        bodyType: typeof req.body,
-        bodyStringified: JSON.stringify(req.body),
-        contentType: req.headers['content-type'],
-        contentLength: req.headers['content-length']
-      });
-
-      const { visitorId } = req.params;
-      const { answers, completed } = req.body;
-
-      console.log('🔄 Onboarding submission received:', {
-        visitorId,
-        answers,
-        completed,
-        bodyKeys: req.body ? Object.keys(req.body) : 'NO_BODY'
-      });
-
-      if (!visitorId || !answers) {
-        console.error('❌ Missing required fields:', { visitorId: !!visitorId, answers: !!answers });
-        return res.status(400).json({ error: 'Visitor ID and answers are required' });
-      }
-
-      console.log('✅ Calling onboardingService.submitOnboardingAnswers...');
-      const updatedVisitor = await onboardingService.submitOnboardingAnswers(visitorId, answers, completed);
-      
-      console.log('✅ Onboarding submission successful:', { visitorId, updatedVisitor });
-      res.json({ 
-        success: true, 
-        visitor: updatedVisitor,
-        message: 'Onboarding answers submitted successfully'
-      });
-    } catch (error) {
-      console.error('❌ Error submitting onboarding answers:', {
-        error: error.message,
-        stack: error.stack,
-        visitorId: req.params.visitorId,
-        requestBody: req.body
-      });
-      res.status(500).json({ 
-        error: 'Failed to submit onboarding answers.',
-        details: error.message 
-      });
-    }
-  });
-
-  // API endpoint to update onboarding answers
-  app.put('/v1/visitors/:visitorId/onboarding', async (req, res) => {
-    try {
-      const { visitorId } = req.params;
-      const { answers } = req.body;
-
-      if (!visitorId || !answers) {
-        return res.status(400).json({ error: 'Visitor ID and answers are required' });
-      }
-
-      const updatedVisitor = await onboardingService.updateOnboardingAnswers(visitorId, answers);
-      res.json({ 
-        success: true, 
-        visitor: updatedVisitor,
-        message: 'Onboarding answers updated successfully'
-      });
-    } catch (error) {
-      console.error('Error updating onboarding answers:', error);
-      res.status(500).json({ error: 'Failed to update onboarding answers.' });
-    }
-  });
-
   // API endpoint to get a visitor by ID
   app.post('/v1/visitor', async (req, res) => {
     try {
@@ -256,7 +165,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-      const { query, visitorId, sessionId, context, onboardingAnswers } = req.body;
+            const { query, visitorId, sessionId, context } = req.body;
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
@@ -338,36 +247,14 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generated embedding vector with ${embeddingVector.length} dimensions`);
 
-      // Get and format onboarding answers for better context
-      let formattedOnboardingAnswers = null;
-      try {
-        // Check if we have onboarding answers from the request body first
-        if (onboardingAnswers) {
-          formattedOnboardingAnswers = onboardingAnswers;
-        } else if (visitorId) {
-          // Try to get visitor's onboarding status from database
-          const onboardingStatus = await onboardingService.getVisitorOnboardingStatus(visitorId, clientConfig.clientId);
-          if (onboardingStatus.completed && onboardingStatus.answers && onboardingStatus.questions) {
-            formattedOnboardingAnswers = onboardingService.formatOnboardingAnswersForRAG(
-              onboardingStatus.answers, 
-              onboardingStatus.questions
-            );
-          }
-        }
-      } catch (error) {
-        console.warn('Could not retrieve onboarding answers for visitor:', error.message);
-        // Don't fail the chat request if onboarding retrieval fails
-      }
-
-      // Generate response with enhanced context including chat history and onboarding answers
+      // Generate response with enhanced context including chat history
       const responseText = await generateResponse(
         query, 
         clientConfig, 
         embeddingVector,           // Pass the actual embedding vector
         context,                   // External context 
         userContext, 
-        chatHistory, 
-        formattedOnboardingAnswers
+        chatHistory
       );
 
       // Upsert assistant response to Pinecone
@@ -570,12 +457,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
       const newVisitor = await visitorService.createVisitor(clientId, listingId); // Pass listingId
       
-      // Include onboarding status in response - new visitors need onboarding
-      const needsOnboarding = !newVisitor.onboarding_completed;
-      
       res.status(201).json({ 
-        visitor_id: newVisitor.visitor_id,
-        needs_onboarding: needsOnboarding
+        visitor_id: newVisitor.visitor_id
       });
     } catch (error) {
       console.error('Error creating visitor session:', error);
@@ -632,45 +515,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   });
 
 
-
-  // API endpoint to get client onboarding template
-  app.get('/v1/clients/:clientId/onboarding-template', async (req, res) => {
-    try {
-      const { clientId } = req.params;
-
-      if (!clientId) {
-        return res.status(400).json({ error: 'Client ID is required' });
-      }
-
-      const template = await onboardingService.getClientOnboardingTemplate(clientId);
-      res.json(template);
-    } catch (error) {
-      console.error('Error getting client onboarding template:', error);
-      res.status(500).json({ error: 'Failed to get client onboarding template.' });
-    }
-  });
-
-  // API endpoint to update client onboarding template
-  app.put('/v1/clients/:clientId/onboarding-template', async (req, res) => {
-    try {
-      const { clientId } = req.params;
-      const { template } = req.body;
-
-      if (!clientId || !template) {
-        return res.status(400).json({ error: 'Client ID and template are required' });
-      }
-
-      const updatedClient = await onboardingService.updateClientOnboardingTemplate(clientId, template);
-      res.json({ 
-        success: true, 
-        client: updatedClient,
-        message: 'Onboarding template updated successfully'
-      });
-    } catch (error) {
-      console.error('Error updating client onboarding template:', error);
-      res.status(500).json({ error: 'Failed to update client onboarding template.' });
-    }
-  });
 
   // API endpoint to acknowledge leads
   app.post('/v1/leads/acknowledge', async (req, res) => {
@@ -951,9 +795,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
       if (updates.chatHistoryTaggingRules && typeof updates.chatHistoryTaggingRules === 'object') {
         updates.chatHistoryTaggingRules = JSON.stringify(updates.chatHistoryTaggingRules);
-      }
-      if (updates.default_onboarding_questions && typeof updates.default_onboarding_questions === 'object') {
-        updates.default_onboarding_questions = JSON.stringify(updates.default_onboarding_questions);
       }
       if (updates.widgetSettings && typeof updates.widgetSettings === 'object') {
         updates.widgetSettings = JSON.stringify(updates.widgetSettings);

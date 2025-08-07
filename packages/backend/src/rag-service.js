@@ -31,18 +31,6 @@ function extractListingIdFromQuery(query) {
   return match ? match[0] : null;
 }
 
-function mergeFilters(queryFilters, onboardingFilters) {
-  const merged = { ...onboardingFilters, ...queryFilters };
-  // A simple example of resolving conflicts, queryFilters take precedence
-  // You might want to implement more sophisticated logic here based on your needs
-  for (const key in queryFilters) {
-    if (onboardingFilters.hasOwnProperty(key)) {
-      console.log(`Overriding onboarding filter '${key}' with value from query.`);
-    }
-  }
-  return merged;
-}
-
 function extractQueryFilters(query, currentListingPrice = null) {
   const filters = {};
   const lowerCaseQuery = query.toLowerCase();
@@ -138,58 +126,6 @@ function extractQueryFilters(query, currentListingPrice = null) {
   return filters;
 }
 
-/**
- * Converts onboarding answers into a Pinecone metadata filter object.
- * @param {object} onboardingAnswers - The user's answers from the onboarding process.
- * @returns {object} A Pinecone filter object.
- */
-function convertOnboardingToFilters(onboardingAnswers) {
-  if (!onboardingAnswers) {
-    return {};
-  }
-
-  const filters = {};
-  const { tipologia, orcamento, localizacao, caracteristicas } = onboardingAnswers;
-
-  // Type (T1, T2, etc.) - maps to 'type' metadata field
-  if (tipologia) {
-    filters.type = tipologia;
-  }
-
-  // Budget - maps to 'price_eur' metadata field
-  if (orcamento) {
-    const range = orcamento.match(/(\d+)k-(\d+)k/);
-    if (range) {
-      const min = parseInt(range[1], 10) * 1000;
-      const max = parseInt(range[2], 10) * 1000;
-      filters.price_eur = { "$gte": min, "$lte": max };
-    } else if (orcamento.includes('<')) {
-      const max = parseInt(orcamento.replace(/[<k]/g, ''), 10) * 1000;
-      filters.price_eur = { "$lte": max };
-    } else if (orcamento.includes('>')) {
-      const min = parseInt(orcamento.replace(/[>k]/g, ''), 10) * 1000;
-      filters.price_eur = { "$gte": min };
-    }
-  }
-
-  // Location - maps to 'location' metadata field
-  if (localizacao) {
-    filters.location = localizacao.replace(/_/g, ' ');
-  }
-
-  // Characteristics (e.g., 'garagem') - maps to boolean 'has_garagem' metadata field
-  if (caracteristicas && Array.isArray(caracteristicas)) {
-    caracteristicas.forEach(feature => {
-      if (feature) {
-        filters[`has_${feature}`] = true;
-      }
-    });
-  }
-  
-  console.log(`🔍 Converted onboarding answers to filters: ${JSON.stringify(filters, null, 2)}`);
-  return filters;
-}
-
 async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}) {
   // Validate search vector before proceeding
   if (!searchVector) {
@@ -265,7 +201,8 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       includeMetadata: true,
       filter: { ...baseFilter, listing_id: contextListingId },
     };
-    console.log('Listing Query Params:', JSON.stringify(listingQueryParams, null, 2));
+    const { vector, ...loggableListingParams } = listingQueryParams;
+    console.log('🌲 PINECONE LISTING QUERY:', JSON.stringify(loggableListingParams, null, 2));
     queries.push(
       clientPineconeIndex
         .query(listingQueryParams)
@@ -283,7 +220,8 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       includeMetadata: true,
       filter: { ...baseFilter, development_id: contextDevelopmentId },
     };
-    console.log('Development Query Params:', JSON.stringify(developmentQueryParams, null, 2));
+    const { vector, ...loggableDevParams } = developmentQueryParams;
+    console.log('🌲 PINECONE DEVELOPMENT QUERY:', JSON.stringify(loggableDevParams, null, 2));
     queries.push(
       clientPineconeIndex
         .query(developmentQueryParams)
@@ -301,7 +239,8 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       includeMetadata: true,
       filter: initialFilter,
   };
-  console.log('Broad Query Params:', JSON.stringify(broadQueryParams, null, 2));
+  const { vector, ...loggableBroadParams } = broadQueryParams;
+  console.log('🌲 PINECONE BROAD QUERY:', JSON.stringify(loggableBroadParams, null, 2));
   queries.push(
     clientPineconeIndex
       .query(broadQueryParams)
@@ -419,7 +358,7 @@ function isAggregativePriceQuery(query) {
   );
 }
 
-async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, onboardingAnswers = null) {
+async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null) {
   let aggregativeContext = '';
 
   if (isAggregativePriceQuery(query)) {
@@ -439,20 +378,15 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
 
   const queryFilters = extractQueryFilters(query);
-  const onboardingFilters = convertOnboardingToFilters(onboardingAnswers);
-  const mergedFilters = mergeFilters(queryFilters, onboardingFilters);
   
   // Add debugging for filters
   console.log(`[${clientConfig.clientName}] 🔍 DEBUGGING - Filters Applied:`);
   console.log(`  Query filters: ${JSON.stringify(queryFilters, null, 2)}`);
-  console.log(`  Onboarding filters: ${JSON.stringify(onboardingFilters, null, 2)}`);
-  console.log(`  Merged filters: ${JSON.stringify(mergedFilters, null, 2)}`);
   console.log(`  Original query: "${query}"`);
-  console.log(`  Onboarding answers: ${JSON.stringify(onboardingAnswers, null, 2)}`);
 
   let queryResponse;
   try {
-    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, mergedFilters);
+    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters);
   } catch (error) {
     console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
     // Return empty matches if search fails due to invalid embedding
@@ -530,7 +464,6 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
   
   const templateVariables = {
-    onboardingAnswers: onboardingAnswers || "Não disponível",
     chatHistory: truncatedChatHistory,
     context: context + (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
     question: query

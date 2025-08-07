@@ -9,7 +9,6 @@ import UrlPatternEditor from './UrlPatternEditor';
 import PromptsEditor from './PromptsEditor';
 import ChatHistoryTaggingRulesEditor from './ChatHistoryTaggingRulesEditor';
 import LeadScoringRulesEditor from './LeadScoringRulesEditor';
-import OnboardingQuestionsEditor from './OnboardingQuestionsEditor';
 import EmbedScriptGenerator from './EmbedScriptGenerator';
 
 const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditingClient, fetchClients, setError }) => {
@@ -24,19 +23,16 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
     e.preventDefault();
     try {
       const dataToSend = { ...editFormData };
-      const jsonFields = ['document_extraction', 'chunking_rules', 'tagging_rules', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules', 'default_onboarding_questions'];
+            const jsonFields = ['document_extraction', 'chunking_rules', 'tagging_rules', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules'];
 
       for (const field of jsonFields) {
         if (dataToSend[field]) {
-          // The 'default_onboarding_questions' field is already an object, not a string.
           // The other fields are stringified JSON from their respective editors.
-          if (field !== 'default_onboarding_questions') {
-            try {
-              dataToSend[field] = JSON.parse(dataToSend[field]);
-            } catch (jsonError) {
-              setError(new Error(`Invalid JSON for ${field.replace(/([A-Z])/g, ' $1').trim()}. Please correct it.`));
-              return;
-            }
+          try {
+            dataToSend[field] = JSON.parse(dataToSend[field]);
+          } catch (jsonError) {
+            setError(new Error(`Invalid JSON for ${field.replace(/([A-Z])/g, ' $1').trim()}. Please correct it.`));
+            return;
           }
         } else {
           dataToSend[field] = null;
@@ -127,10 +123,6 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
         />
         <LeadScoringRulesEditor
           value={editFormData.lead_scoring_rules}
-          onChange={handleEditFormChange}
-        />
-        <OnboardingQuestionsEditor
-          value={editFormData.default_onboarding_questions}
           onChange={handleEditFormChange}
         />
         <EmbedScriptGenerator
