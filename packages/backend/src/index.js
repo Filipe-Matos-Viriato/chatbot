@@ -18,7 +18,7 @@ import multer from 'multer';
 
 import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
 import * as clientConfigServiceModule from './services/client-config-service.js';
-import { processDocument } from './services/ingestion-service.js';
+import { processDocument } from './services/ingestion-service-imoprime.js';
 import listingService from './services/listing-service.js';
 import visitorService from './services/visitor-service.js';
 import onboardingService from './services/onboarding-service.js';
@@ -608,8 +608,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
       res.json({ success: true, new_lead_score: updatedVisitor.lead_score });
     } catch (error) {
-      console.error('Error logging visitor event:', error);
-      res.status(500).json({ error: 'Failed to log visitor event.' });
+      console.error('Error logging visitor event:', error.message, error.stack);
+      res.status(500).json({ error: 'Failed to log visitor event.', details: error.message });
     }
   });
    
