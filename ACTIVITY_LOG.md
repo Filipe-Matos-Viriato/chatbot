@@ -1,3 +1,4 @@
+- Removed the onboarding feature entirely from the project. This included deleting the onboarding service, frontend components, and backend endpoints. The RAG service was also updated to remove the onboarding context.
 - Updated `chatHistoryTaggingRules` in `e6f484a3-c3cb-4e01-b8ce-a276f4b7355c.json` to use Portuguese keywords and expanded the word lists.
 - Updated `documentExtraction` patterns to match JSON listing format with fields like `fracao`, `preco`, `tipologia`, `area_privativa_m2`, etc.
 - Updated `ingestionPipeline` to use `json-structure-chunker` with a template that properly formats apartment information from JSON structure.

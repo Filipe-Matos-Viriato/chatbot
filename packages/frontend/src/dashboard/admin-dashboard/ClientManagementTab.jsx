@@ -22,7 +22,6 @@ const ClientManagementTab = () => {
     prompts: '',
     chat_history_tagging_rules: '',
     lead_scoring_rules: '',
-    default_onboarding_questions: '',
   });
 
   const fetchClients = async (searchQuery = '') => {
@@ -63,7 +62,6 @@ const ClientManagementTab = () => {
         prompts: client.prompts ? JSON.stringify(client.prompts, null, 2) : '',
         chat_history_tagging_rules: client.chat_history_tagging_rules ? JSON.stringify(client.chat_history_tagging_rules, null, 2) : '',
         lead_scoring_rules: client.lead_scoring_rules ? JSON.stringify(client.lead_scoring_rules, null, 2) : '',
-        default_onboarding_questions: client.default_onboarding_questions ? JSON.stringify(client.default_onboarding_questions, null, 2) : '',
       });
     }
   };

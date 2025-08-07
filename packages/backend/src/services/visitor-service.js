@@ -29,8 +29,6 @@ class VisitorService {
       visitor_id: visitorId,
       client_id: clientId,
       lead_score: 0,
-      onboarding_completed: false,  // Add this field explicitly
-      onboarding_questions: null,   // Add this field explicitly  
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

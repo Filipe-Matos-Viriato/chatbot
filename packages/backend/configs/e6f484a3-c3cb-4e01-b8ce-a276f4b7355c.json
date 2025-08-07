@@ -2,7 +2,7 @@
   "clientId": "e6f484a3-c3cb-4e01-b8ce-a276f4b7355c",
   "clientName": "Up Investments",
   "chatbotName": "Real Estate Chatbot",
-  "pineconeIndex": "upinvestments-1536",
+  "pineconeIndex": "rachatbot-1536",
   "theme": {
     "primaryColor": "#007bff",
     "secondaryColor": "#6c757d",
@@ -11,91 +11,7 @@
   "urlPattern": "https://upinvestments.pt/(?:pt|en)/(?:imoveis|real-estate)/aveiro/(\\d+)",
   "defaultDevelopmentId": "ada4b13b-a135-434e-9e72-9f0f3e201558",
   "prompts": {
-    "systemInstruction": "És um assistente imobiliário especializado para os empreendimentos da UpInvestments.\n\nCONTEXTO DA CONVERSA:\nPreferências do Utilizador (onboarding):\n{onboardingAnswers}\n\nHistórico da Conversa:\n{chatHistory}\n\nINSTRUÇÕES PRINCIPAIS:\n\n1. **COMPREENSÃO DO CONTEXTO**:\n   - Usa o histórico da conversa para entender referências a imóveis ou informações já mencionadas\n   - Quando o utilizador se refere a \"este apartamento\" ou usa referências contextuais, compreende do contexto\n   - Não repitas informações já fornecidas, acrescenta novos detalhes relevantes\n\n2. **RESPOSTA PROGRESSIVA**:\n   - Primeira menção: informações básicas (preço, área, tipologia)\n   - Pedidos adicionais: detalhes técnicos, acabamentos, investimento, localização\n   - Etapa avançada: financiamento, visitas, próximos passos\n\n3. **RECOMENDAÇÃO DE IMÓVEIS**:\n   - Após o onboarding, recomenda APENAS imóveis da UpInvestments que correspondam às preferências do utilizador\n   - NUNCA recomende propriedades ou imóveis que não pertençam à UpInvestments\n   - Apresenta opções relevantes baseadas em localização, preço, tipologia e outras preferências\n   - Se não houver correspondências exatas, informe ao utilizador e sugira alternativas da UpInvestments\n\n4. **INFORMAÇÕES DA EMPRESA**:\n   - Responde a perguntas sobre história, valores e background da UpInvestments\n   - Fornece detalhes sobre projetos atuais e futuros da empresa\n   - Partilha informações sobre a filosofia e diferenciais da empresa\n\n5. **PREFERÊNCIAS DO UTILIZADOR**:\n   - Quando o utilizador perguntar sobre suas preferências, liste TODAS as preferências que foram indicadas durante o onboarding\n   - Inclua SEMPRE as preferências específicas: Quarto principal espaçoso, Cozinha com eletrodomésticos modernos, Boa iluminação natural, e Escolha de materiais de alta qualidade e design contemporâneo\n\n**FORMATTING:**\n- Use **negrito** para informações-chave (preços, áreas, nomes)\n- Use bullet points (•) para listas de características\n- Inclui sempre uma call-to-action apropriada ao contexto\n\n**CONTEXTO DOS DOCUMENTOS:**\n{context}\n\n**PERGUNTA DO UTILIZADOR:** {question}\n\nResponde de forma natural e contextualmente apropriada."
-  },
-  "default_onboarding_questions": {
-    "settings": {
-      "title": "Ajude-nos a encontrar o seu imóvel ideal",
-      "subtitle": "Responda a algumas perguntas para recebermos recomendações personalizadas",
-      "skip_option": "Continuar sem responder",
-      "completion_message": "Obrigado pelas suas respostas! Agora posso ajudá-lo de forma mais personalizada. Em que posso ajudar?"
-    },
-    "questions": [
-      {
-        "id": "tipologia",
-        "type": "multiple_choice",
-        "question": "Que tipo de imóvel procura?",
-        "options": [
-          { "label": "T0 - Estúdio", "value": "T0" },
-          { "label": "T1", "value": "T1" },
-          { "label": "T2", "value": "T2" },
-          { "label": "T3", "value": "T3" }
-        ],
-        "required": true
-      },
-      {
-        "id": "orcamento",
-        "type": "range_select",
-        "question": "Qual o seu orçamento?",
-        "options": [
-          { "label": "Até 150.000€", "value": "<150k" },
-          { "label": "150.000€ - 300.000€", "value": "150k-300k" },
-          { "label": "300.000€ - 500.000€", "value": "300k-500k" },
-          { "label": "500.000€ - 750.000€", "value": "500k-750k" },
-          { "label": "Mais de 750.000€", "value": ">750k" }
-        ],
-        "required": true
-      },
-      {
-        "id": "objetivo",
-        "type": "multiple_choice",
-        "question": "Qual o objetivo da compra?",
-        "options": [
-          { "label": "Habitação Própria", "value": "habitacao" },
-          { "label": "Investimento", "value": "investimento" },
-          { "label": "Ambos", "value": "ambos" }
-        ],
-        "required": true
-      },
-      {
-        "id": "prazo",
-        "type": "multiple_choice",
-        "question": "Em que prazo pretende comprar?",
-        "options": [
-          { "label": "Imediatamente", "value": "imediato" },
-          { "label": "3-6 meses", "value": "3-6meses" },
-          { "label": "6-12 meses", "value": "6-12meses" },
-          { "label": "Mais de 12 meses", "value": "+12meses" }
-        ],
-        "required": true
-      },
-      {
-        "id": "localizacao",
-        "type": "multiple_choice",
-        "question": "Onde prefere que seja localizado o imóvel?",
-        "options": [
-          { "label": "Santa Joana", "value": "santa_joana" },
-          { "label": "Verdemilho", "value": "verdemilho" }
-        ],
-        "required": true
-      },
-      {
-        "id": "caracteristicas",
-        "type": "multiple_select",
-        "question": "Que características considera importantes?",
-        "options": [
-          { "label": "Varanda/Terraço", "value": "varanda" },
-          { "label": "Garagem", "value": "garagem" },
-          { "label": "Elevador", "value": "elevador" },
-          { "label": "Piscina", "value": "piscina" },
-          { "label": "Jardim", "value": "jardim" },
-          { "label": "Vista Mar", "value": "vista_mar" },
-          { "label": "Centro da Cidade", "value": "centro_cidade" },
-          { "label": "Perto de Transportes", "value": "transportes" }
-        ],
-        "required": false
-      }
-    ]
+    "systemInstruction": "És um assistente imobiliário especializado para os empreendimentos da UpInvestments.\n\nCONTEXTO DA CONVERSA:\n\nHistórico da Conversa:\n{chatHistory}\n\nINSTRUÇÕES PRINCIPAIS:\n\n1. **COMPREENSÃO DO CONTEXTO**:\n   - Usa o histórico da conversa para entender referências a imóveis ou informações já mencionadas\n   - Quando o utilizador se refere a \"este apartamento\" ou usa referências contextuais, compreende do contexto\n   - Não repitas informações já fornecidas, acrescenta novos detalhes relevantes\n\n2. **RESPOSTA PROGRESSIVA**:\n   - Primeira menção: informações básicas (preço, área, tipologia)\n   - Pedidos adicionais: detalhes técnicos, acabamentos, investimento, localização\n   - Etapa avançada: financiamento, visitas, próximos passos\n\n3. **RECOMENDAÇÃO DE IMÓVEIS**:\n   - Após o onboarding, recomenda APENAS imóveis da UpInvestments que correspondam às preferências do utilizador\n   - NUNCA recomende propriedades ou imóveis que não pertençam à UpInvestments\n   - Apresenta opções relevantes baseadas em localização, preço, tipologia e outras preferências\n   - Se não houver correspondências exatas, informe ao utilizador e sugira alternativas da UpInvestments\n\n4. **INFORMAÇÕES DA EMPRESA**:\n   - Responde a perguntas sobre história, valores e background da UpInvestments\n   - Fornece detalhes sobre projetos atuais e futuros da empresa\n   - Partilha informações sobre a filosofia e diferenciais da empresa\n\n5. **PREFERÊNCIAS DO UTILIZADOR**:\n   - Quando o utilizador perguntar sobre suas preferências, liste TODAS as preferências que foram indicadas durante o onboarding\n   - Inclua SEMPRE as preferências específicas: Quarto principal espaçoso, Cozinha com eletrodomésticos modernos, Boa iluminação natural, e Escolha de materiais de alta qualidade e design contemporâneo\n\n**FORMATTING:**\n- Use **negrito** para informações-chave (preços, áreas, nomes)\n- Use bullet points (•) para listas de características\n- Inclui sempre uma call-to-action apropriada ao contexto\n\n**CONTEXTO DOS DOCUMENTOS:**\n{context}\n\n**PERGUNTA DO UTILIZADOR:** {question}\n\nResponde de forma natural e contextualmente apropriada."
   },
   "widgetSettings": {
     "primaryColor": "#007bff",
@@ -143,45 +59,40 @@
       "requested_brochure": 10
     }
   },
-  "documentExtraction": {
-    "listingName": {
-      "pattern": "ap-\\d+\\s*[\\s\\W]*([^\\n]+)",
-      "type": "regex"
-    },
-    "listingBaths": {
-      "pattern": "Casas de banho:\\s*(\\d+)",
-      "type": "regex"
-    }
-  },
-  "chatHistoryTaggingRules": [
+    "chatHistoryTaggingRules": [
     {
-      "pattern": "price|cost|value|how much",
+      "pattern": "preço|custo|valor|quanto custa",
       "flags": "i",
       "tagName": "price_query"
     },
     {
-      "pattern": "location|address|where is it",
+      "pattern": "localização|morada|onde fica",
       "flags": "i",
       "tagName": "location_query"
     },
     {
-      "pattern": "viewing|visit|schedule",
+      "pattern": "visita|visitar|agendar|marcar",
       "flags": "i",
       "tagName": "viewing_request"
     }
   ],
   "ingestionPipeline": [
     {
-      "name": "template-chunker",
+      "name": "json-structure-chunker",
       "settings": {
-        "template": "## Room: {{room_name}}",
-        "chunkSize": 500
-      }
-    },
-    {
-      "name": "nlp-tagger",
-      "settings": {
-        "tags": ["amenities", "appliances", "nearby_locations"]
+        "chunkSize": 512,
+        "template": "Fração {{fracao}} ({{tipologia}}) no piso {{piso}}, bloco {{bloco}}. Preço: {{preco}}€. Área Bruta: {{area_bruta_m2}}m², Área Privativa: {{area_privativa_m2}}m², Terraço: {{terracos_m2}}m². Garagem: {{lugares_garagem}}. Descrição: {{descricao.luz_natural}}. Extras: {{descricao.detalhes_extra}}.",
+        "metadataFields": [
+          "piso",
+          "bloco",
+          "tipologia",
+          "fracao",
+          "lugares_garagem",
+          "preco",
+          "area_bruta_m2",
+          "area_privativa_m2",
+          "terracos_m2"
+        ]
       }
     }
   ]

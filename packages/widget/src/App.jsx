@@ -12,14 +12,8 @@ class App extends Component {
       config: null,
       error: null,
       isLoadingConfig: false,
-      // Onboarding state
-      onboardingQuestions: null,
       visitorId: null,
       sessionId: null, // Add sessionId state
-      needsOnboarding: false,
-      currentOnboardingIndex: 0,
-      onboardingAnswers: {},
-      isInOnboardingMode: false
     };
   }
 
@@ -123,35 +117,9 @@ class App extends Component {
         console.log(`💾 Stored new visitorId in localStorage: ${sessionData.visitor_id}`);
       }
 
-      // Get onboarding questions from client configuration if needed
-      let onboardingQuestions = null;
-      if (sessionData.needs_onboarding) {
-        console.log('➡️ Visitor needs onboarding. Fetching questions...');
-        onboardingQuestions = config.defaultOnboardingQuestions;
-        
-        if (!onboardingQuestions) {
-          try {
-            const onboardingResponse = await fetch(`${apiUrl}/v1/visitors/${sessionData.visitor_id}/onboarding?clientId=${clientId}`);
-            if (onboardingResponse.ok) {
-              const onboardingData = await onboardingResponse.json();
-              onboardingQuestions = onboardingData.questions;
-              console.log('📦 Onboarding questions loaded from API.');
-            }
-          } catch (onboardingError) {
-            console.warn('❌ Could not load onboarding questions:', onboardingError);
-          }
-        } else {
-            console.log('📦 Onboarding questions loaded from widget config.');
-        }
-      } else {
-          console.log('👍 Visitor has already completed onboarding.');
-      }
-
       this.setState({ 
         config,
         visitorId: sessionData.visitor_id,
-        needsOnboarding: sessionData.needs_onboarding,
-        onboardingQuestions,
         isLoadingConfig: false,
         messages: []
       });
@@ -159,23 +127,16 @@ class App extends Component {
       console.log(`👤 Visitor ID: ${sessionData.visitor_id}`);
       console.log('--- Initialization Complete ---');
 
-      // Start onboarding in chat if needed, otherwise show welcome message
-      if (sessionData.needs_onboarding && onboardingQuestions) {
-        setTimeout(() => {
-          this.startOnboardingInChat();
-        }, 1000);
-      } else {
-        const welcomeMessage = {
-          id: Date.now(),
-          text: config.widgetSettings?.welcomeMessage || 'Olá! Sou o seu assistente virtual. Como posso ajudar?',
-          sender: 'bot',
-          timestamp: new Date(),
-          ariaLabel: 'Welcome message from chatbot'
-        };
-        this.setState(prev => ({
-          messages: [...prev.messages, welcomeMessage]
-        }));
-      }
+      const welcomeMessage = {
+        id: Date.now(),
+        text: config.widgetSettings?.welcomeMessage || 'Olá! Sou o seu assistente virtual. Como posso ajudar?',
+        sender: 'bot',
+        timestamp: new Date(),
+        ariaLabel: 'Welcome message from chatbot'
+      };
+      this.setState(prev => ({
+        messages: [...prev.messages, welcomeMessage]
+      }));
 
     } catch (error) {
       console.error('💥 Widget initialization error:', error);
@@ -263,7 +224,6 @@ class App extends Component {
           visitorId: this.state.visitorId,
           sessionId: this.state.sessionId,
           context: messages.slice(-5), // Last 5 messages for context
-          onboardingAnswers: this.state.onboardingAnswers
         })
       });
 
@@ -307,380 +267,6 @@ class App extends Component {
       }));
 
       this.announceToScreenReader('Error occurred while sending message');
-    }
-  };
-
-  // Onboarding methods
-  startOnboardingInChat = () => {
-    const { onboardingQuestions } = this.state;
-    if (!onboardingQuestions?.questions || onboardingQuestions.questions.length === 0) {
-      return;
-    }
-
-    this.setState({
-      isInOnboardingMode: true,
-      currentOnboardingIndex: 0
-    });
-
-    // Add intro message
-    const introMessage = {
-      id: Date.now(),
-      text: onboardingQuestions.settings?.title || 'Ajude-nos a encontrar o seu imóvel ideal! Responda a algumas perguntas para receber recomendações personalizadas.',
-      sender: 'bot',
-      timestamp: new Date(),
-      type: 'onboarding-intro'
-    };
-
-    this.addBotMessage(introMessage);
-
-    // Add first question
-    setTimeout(() => {
-      this.showCurrentOnboardingQuestion();
-    }, 1000);
-  };
-
-  showCurrentOnboardingQuestion = () => {
-    const { onboardingQuestions, currentOnboardingIndex } = this.state;
-    const question = onboardingQuestions.questions[currentOnboardingIndex];
-
-    if (!question) {
-      this.completeOnboarding();
-      return;
-    }
-
-    const questionMessage = {
-      id: Date.now(),
-      text: question.question + (question.required ? ' *' : ''),
-      sender: 'bot',
-      timestamp: new Date(),
-      type: 'onboarding-question',
-      questionData: question,
-      questionIndex: currentOnboardingIndex
-    };
-
-    this.addBotMessage(questionMessage);
-  };
-
-  handleOnboardingAnswer = (questionId, answer, questionIndex) => {
-    const { onboardingQuestions, onboardingAnswers } = this.state;
-    
-    // Ensure we're answering the current question
-    if (questionIndex !== this.state.currentOnboardingIndex) {
-      console.log('⚠️ Ignoring answer for old question:', { questionIndex, currentIndex: this.state.currentOnboardingIndex });
-      return;
-    }
-    
-    // Store the answer
-    const newAnswers = {
-      ...onboardingAnswers,
-      [questionId]: answer
-    };
-
-    console.log('📝 Recording answer:', { questionId, answer, questionIndex });
-
-    this.setState({
-      onboardingAnswers: newAnswers
-    });
-
-    // Show user's response as a message
-    const answerText = this.formatAnswerForDisplay(answer, onboardingQuestions.questions[questionIndex]);
-    const userMessage = {
-      id: Date.now(),
-      text: answerText,
-      sender: 'user',
-      timestamp: new Date()
-    };
-
-    this.addUserMessage(userMessage);
-
-    // Move to next question or complete
-    const nextIndex = questionIndex + 1;
-    if (nextIndex < onboardingQuestions.questions.length) {
-      console.log('➡️ Moving to next question:', { from: questionIndex, to: nextIndex });
-      setTimeout(() => {
-        this.setState({ currentOnboardingIndex: nextIndex }, () => {
-          this.showCurrentOnboardingQuestion();
-        });
-      }, 500);
-    } else {
-      console.log('✅ Onboarding complete, submitting answers');
-      setTimeout(() => {
-        this.completeOnboarding();
-      }, 500);
-    }
-  };
-
-  formatAnswerForDisplay = (answer, question) => {
-    if (question.type === 'multiple_select' && Array.isArray(answer)) {
-      const selectedOptions = question.options.filter(opt => answer.includes(opt.value));
-      return selectedOptions.map(opt => opt.label).join(', ');
-    } else if (question.type === 'multiple_choice' || question.type === 'range_select') {
-      const selectedOption = question.options.find(opt => opt.value === answer);
-      return selectedOption ? selectedOption.label : answer;
-    }
-    return answer;
-  };
-
-  completeOnboarding = async () => {
-    const { onboardingAnswers, visitorId, onboardingQuestions } = this.state;
-    const apiUrl = this.props.config?.apiUrl || 'https://chatbot1-eta.vercel.app';
-
-    console.log('🔄 Submitting onboarding answers:', {
-      visitorId,
-      answers: onboardingAnswers,
-      apiUrl: `${apiUrl}/v1/visitors/${visitorId}/onboarding`
-    });
-
-    try {
-      // Submit onboarding answers
-      const response = await fetch(`${apiUrl}/v1/visitors/${visitorId}/onboarding`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-          answers: onboardingAnswers,
-          completed: true 
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`HTTP ${response.status}: ${errorData.error || response.statusText}`);
-      }
-
-      const result = await response.json();
-      console.log('✅ Onboarding submission successful:', result);
-
-      // Add completion message from settings
-      const completionText = onboardingQuestions?.settings?.completion_message || 
-                           'Obrigado pelas suas respostas! Agora posso ajudá-lo de forma mais personalizada. Em que posso ajudar?';
-      
-      const completionMessage = {
-        id: Date.now(),
-        text: completionText,
-        sender: 'bot',
-        timestamp: new Date()
-      };
-
-      this.addBotMessage(completionMessage);
-
-      // Automatically fetch relevant listings based on the user's preferences
-      setTimeout(() => {
-        // Create a message that will trigger a search for relevant properties
-        const tipologiaValue = onboardingAnswers.tipologia || '';
-        const localValue = onboardingAnswers.localizacao || '';
-        const caracteristicasValue = onboardingAnswers.caracteristicas || [];
-        
-        // Construct a query based on onboarding answers
-        let searchQuery = "Mostre-me apartamentos";
-        
-        if (tipologiaValue) {
-          searchQuery += ` ${tipologiaValue}`;
-        }
-        
-        if (localValue) {
-          searchQuery += ` em ${localValue}`;
-        }
-        
-        if (Array.isArray(caracteristicasValue) && caracteristicasValue.length > 0) {
-          searchQuery += ` com ${caracteristicasValue.join(', ')}`;
-        } else if (typeof caracteristicasValue === 'string' && caracteristicasValue) {
-          searchQuery += ` com ${caracteristicasValue}`;
-        }
-        
-        console.log('🔍 Auto-triggering search with query:', searchQuery);
-        
-        // Add the message to the chat silently (without showing it to the user)
-        this.setState({
-          inputValue: searchQuery
-        }, () => {
-          this.sendMessage(true); // Pass true to indicate this is an auto-triggered search
-        });
-      }, 1000);
-
-    } catch (error) {
-      console.error('❌ Error submitting onboarding:', error);
-      const errorMessage = {
-        id: Date.now(),
-        text: 'Erro ao guardar as suas respostas, mas posso ajudá-lo na mesma. Em que posso ajudar?',
-        sender: 'bot',
-        timestamp: new Date()
-      };
-      this.addBotMessage(errorMessage);
-    }
-
-    this.setState({
-      isInOnboardingMode: false,
-      needsOnboarding: false
-    });
-  };
-
-  addBotMessage = (message) => {
-    this.setState(prev => ({
-      messages: [...prev.messages, message]
-    }));
-  };
-
-  addUserMessage = (message) => {
-    this.setState(prev => ({
-      messages: [...prev.messages, message]
-    }));
-  };
-
-  renderOnboardingQuestion = (message) => {
-    const { isInOnboardingMode, currentOnboardingIndex } = this.state;
-    
-    if (!isInOnboardingMode || message.questionIndex !== currentOnboardingIndex) {
-      return null;
-    }
-
-    const question = message.questionData;
-    if (!question) return null;
-
-    return h('div', {
-      style: 'margin-top: 12px;'
-    }, this.renderQuestionOptions(question, message.questionIndex));
-  };
-
-  renderQuestionOptions = (question, questionIndex) => {
-    const { onboardingAnswers } = this.state;
-    const answer = onboardingAnswers[question.id];
-
-    switch (question.type) {
-      case 'multiple_choice':
-      case 'range_select':
-        return h('div', {
-          style: 'display: flex; flex-direction: column; gap: 8px; width: 100%;'
-        }, question.options.map(option => 
-          h('button', {
-            key: option.value,
-            onClick: () => this.handleOnboardingAnswer(question.id, option.value, questionIndex),
-            style: `
-              padding: 10px 12px;
-              border: 1px solid #3f3f3f !important;
-              background: rgba(20, 20, 20, .9) !important;
-              color: white !important;
-              border-radius: 0 !important;
-              cursor: pointer;
-              text-align: left;
-              font-size: 14px;
-              transition: all 0.2s ease;
-            `,
-            onMouseOver: (e) => {
-              if (answer !== option.value) {
-                e.target.style.borderColor = '#3f3f3f';
-                e.target.style.backgroundColor = 'rgba(20, 20, 20, .9)';
-              }
-            },
-            onMouseOut: (e) => {
-              if (answer !== option.value) {
-                e.target.style.borderColor = '#3f3f3f';
-                e.target.style.backgroundColor = 'rgba(20, 20, 20, .9)';
-              }
-            }
-          }, option.label)
-        ));
-
-      case 'multiple_select':
-        const selectedValues = Array.isArray(answer) ? answer : [];
-        return h('div', {
-          style: 'display: flex; flex-direction: column; gap: 8px; width: 100%;'
-        }, [
-          ...question.options.map(option => {
-            const isSelected = selectedValues.includes(option.value);
-            return h('button', {
-              key: option.value,
-              onClick: () => {
-                let newAnswer;
-                if (isSelected) {
-                  newAnswer = selectedValues.filter(v => v !== option.value);
-                } else {
-                  newAnswer = [...selectedValues, option.value];
-                }
-                this.setState(prev => ({
-                  onboardingAnswers: {
-                    ...prev.onboardingAnswers,
-                    [question.id]: newAnswer
-                  }
-                }));
-              },
-              style: `
-                padding: 10px 12px;
-                border: 1px solid #3f3f3f !important;
-                background: rgba(20, 20, 20, .9) !important;
-                color: white !important;
-                border-radius: 0 !important;
-                cursor: pointer;
-                text-align: left;
-                font-size: 14px;
-                transition: all 0.2s ease;
-              `
-            }, option.label);
-          }),
-          selectedValues.length > 0 && h('button', {
-            onClick: () => this.handleOnboardingAnswer(question.id, selectedValues, questionIndex),
-            style: `
-              padding: 12px;
-              background: rgba(20, 20, 20, .9) !important;
-              color: white !important;
-              border: 1px solid #3f3f3f !important;
-              border-radius: 0 !important;
-              cursor: pointer;
-              font-weight: 600;
-              margin-top: 8px;
-            `
-          }, 'Continuar')
-        ]);
-
-      case 'text_input':
-        return h('div', {
-          style: 'display: flex; gap: 8px; margin-top: 8px;'
-        }, [
-          h('input', {
-            type: 'text',
-            placeholder: question.placeholder || '',
-            value: answer || '',
-            onInput: (e) => {
-              this.setState(prev => ({
-                onboardingAnswers: {
-                  ...prev.onboardingAnswers,
-                  [question.id]: e.target.value
-                }
-              }));
-            },
-            onKeyPress: (e) => {
-              if (e.key === 'Enter' && (answer || '').trim()) {
-                this.handleOnboardingAnswer(question.id, answer, questionIndex);
-              }
-            },
-            style: `
-              flex: 1;
-              padding: 10px 12px;
-              border: 1px solid #3f3f3f !important;
-              background: rgba(20, 20, 20, .9) !important;
-              color: white !important;
-              border-radius: 0 !important;
-              font-size: 14px;
-            `
-          }),
-          h('button', {
-            onClick: () => this.handleOnboardingAnswer(question.id, answer, questionIndex),
-            disabled: !(answer || '').trim(),
-            style: `
-              padding: 10px 16px;
-              background: rgba(20, 20, 20, .9) !important;
-              color: white !important;
-              border: 1px solid #3f3f3f !important;
-              border-radius: 0 !important;
-              cursor: ${(answer || '').trim() ? 'pointer' : 'not-allowed'};
-              font-weight: 600;
-            `
-          }, '→')
-        ]);
-
-      default:
-        return h('div', null, 'Tipo de pergunta não suportado');
     }
   };
 
@@ -955,7 +541,7 @@ class App extends Component {
                   color: ${msg.sender === 'user' ? 'white' : textColor};
                   padding: ${isMobile ? '10px 14px' : '12px 16px'};
                   border-radius: ${msg.sender === 'user' ? styles.messageUser.borderRadius : styles.messageBot.borderRadius};
-                  max-width: ${msg.type === 'onboarding-question' ? '95%' : '85%'};
+                                    max-width: 85%;
                   word-wrap: break-word;
                   font-size: ${isMobile ? '14px' : '15px'};
                   line-height: 1.4;
@@ -968,7 +554,6 @@ class App extends Component {
                 msg.sender === 'bot' 
                   ? h('div', { dangerouslySetInnerHTML: { __html: marked.parse(msg.text) } })
                   : msg.text,
-                msg.type === 'onboarding-question' && this.renderOnboardingQuestion(msg)
               ])
           ),
           isTyping && h('div', {
@@ -1000,7 +585,7 @@ class App extends Component {
         ]),
 
         // Input
-        !this.state.isInOnboardingMode && h('div', {
+        h('div', {
           style: Object.entries(styles.inputContainer).map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`).join('; ')
         }, [
           h('textarea', {
