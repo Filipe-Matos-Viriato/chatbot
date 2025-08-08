@@ -417,7 +417,43 @@ class VisitorService {
     }
     return data;
   }
-async acknowledgeLeads(visitorIds) {
+
+  async getLeadsByListingId(listingId, clientId) {
+    // Fetch unique visitor_ids from the events table that are associated with the given listingId and clientId
+    const { data: eventData, error: eventError } = await supabase
+      .from('events')
+      .select('visitor_id', { distinct: true }) // Use distinct to get unique visitor_ids
+      .eq('listing_id', listingId)
+      .eq('client_id', clientId);
+
+    if (eventError) {
+      console.error('Error fetching events for listing leads:', eventError);
+      throw new Error('Failed to fetch events for listing leads');
+    }
+
+    const visitorIds = eventData.map(event => event.visitor_id);
+    // Ensure uniqueness in case distinct: true doesn't cover all edge cases or if there are other ways to get duplicates
+    const uniqueVisitorIds = [...new Set(visitorIds)];
+
+    if (visitorIds.length === 0) {
+      return []; // No visitors found for this listing
+    }
+
+    // Fetch the actual visitor data for these unique visitor_ids
+    const { data: visitors, error: visitorError } = await supabase
+      .from('visitors')
+      .select('visitor_id, lead_score, created_at, updated_at') // Select relevant fields
+      .in('visitor_id', visitorIds);
+
+    if (visitorError) {
+      console.error('Error fetching visitors by IDs:', visitorError);
+      throw new Error('Failed to fetch visitors by IDs');
+    }
+
+    return visitors;
+  }
+
+  async acknowledgeLeads(visitorIds) {
     const { error } = await supabase
       .from('visitors')
       .update({ is_acknowledged: true, updated_at: new Date().toISOString() })

@@ -139,23 +139,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // API endpoint to get a visitor by ID
-  app.post('/v1/visitor', async (req, res) => {
-    try {
-      const { visitorId } = req.body;
-      if (!visitorId) {
-        return res.status(400).json({ error: 'Visitor ID is required' });
-      }
-      const visitor = await visitorService.getVisitor(visitorId);
-      if (!visitor) {
-        return res.status(404).json({ error: 'Visitor not found' });
-      }
-      res.json(visitor);
-    } catch (error) {
-      console.error('Error getting visitor:', error);
-      res.status(500).json({ error: 'Failed to get visitor.' });
-    }
-  });
+   
 
 
 
@@ -575,7 +559,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
       const developmentData = { name, location, amenities, client_id: clientConfig.clientId };
-      const newDevelopment = await createDevelopment(developmentData);
+      const newDevelopment = await developmentService.createDevelopment(developmentData);
       console.log('[DEBUG] POST /v1/developments response:', newDevelopment);
       res.status(201).json(newDevelopment);
     } catch (error) {
@@ -587,7 +571,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
-      const development = await getDevelopmentById(id);
+      const development = await developmentService.getDevelopmentById(id);
       if (!development || development.client_id !== req.clientConfig.clientId) {
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
@@ -601,7 +585,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
-      const developments = await getDevelopmentsByClientId(clientConfig.clientId);
+      const developments = await developmentService.getDevelopmentsByClientId(clientConfig.clientId);
       res.json(developments);
     } catch (error) {
       console.error('Error fetching developments by client ID:', error);
@@ -615,7 +599,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       if (clientId !== req.clientConfig.clientId) {
         return res.status(403).json({ error: 'Unauthorized access to client developments.' });
       }
-      const developments = await getDevelopmentsByClientId(clientId);
+      const developments = await developmentService.getDevelopmentsByClientId(clientId);
       console.log('[DEBUG] GET /v1/clients/:clientId/developments response:', developments);
       res.json(developments);
     } catch (error) {
@@ -634,7 +618,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      const updatedDevelopment = await updateDevelopment(id, req.body);
+      const updatedDevelopment = await developmentService.updateDevelopment(id, req.body);
       res.json(updatedDevelopment);
     } catch (error) {
       console.error('Error updating development:', error);
@@ -652,7 +636,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      await deleteDevelopment(id);
+      await developmentService.deleteDevelopment(id);
       res.json({ success: true, message: 'Development deleted successfully.' });
     } catch (error) {
       console.error('Error deleting development:', error);
@@ -1106,20 +1090,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       res.status(500).json({ error: 'Failed to fetch listing details.' });
     }
   });
-
-  // API endpoint to get chat history for a visitor
-app.get('/api/v1/history/:visitorId', clientConfigMiddleware(clientConfigService), async (req, res) => {
-  try {
-    const { visitorId } = req.params;
-    const { clientConfig } = req;
-    const chatHistoryService = new ChatHistoryService();
-    const chatHistory = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 50, clientConfig);
-    res.json(chatHistory);
-  } catch (error) {
-    console.error(`Error fetching chat history for visitor ${req.params.visitorId}:`, error);
-    res.status(500).json({ error: 'Failed to fetch chat history.' });
-  }
-});
 
 // Global error handler to catch JSON parsing errors
   app.use((err, req, res, next) => {

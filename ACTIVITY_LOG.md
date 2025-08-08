@@ -85,3 +85,8 @@
   - Extended `client-config-service` to expose `onboardingScoringRules` from DB.
   - Updated `visitor-service` to compute onboarding lead score from client rules and enforce a minimum on completion.
   - Updated migration script to upsert `onboarding_scoring_rules` to the `clients` table.
+
+- Resolved merge conflict in `packages/backend/src/index.js`:
+  - Removed duplicated `/v1/visitor` route.
+  - Fixed development routes to call `developmentService` methods explicitly (`createDevelopment`, `getDevelopmentById`, `getDevelopmentsByClientId`, `updateDevelopment`, `deleteDevelopment`).
+  - Verified no new linter issues; server boot remains unchanged.

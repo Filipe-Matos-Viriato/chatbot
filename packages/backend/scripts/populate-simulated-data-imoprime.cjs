@@ -47,14 +47,14 @@ async function createVisitorSession() {
   return data.visitor_id;
 }
 
-async function logEvent(visitorId, eventType) {
+async function logEvent(visitorId, eventType, listingId = null) { // Added listingId parameter
   const response = await fetch(`${BASE_URL}/v1/events`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-client-id': CLIENT_ID,
     },
-    body: JSON.stringify({ visitorId, eventType }),
+    body: JSON.stringify({ visitorId, eventType, listingId }), // Pass listingId in the body
   });
   const data = await response.json();
   if (!data.success) {
@@ -76,25 +76,24 @@ function getRandomElement(arr) {
 async function simulateUser(userIndex) {
   console.log(`Simulating user ${userIndex + 1}...`);
   const visitorId = await createVisitorSession();
+  const testListingId = 'ap-01'; // Hardcoded listing ID for testing
 
   // Simulate diverse chat interactions (random number of messages)
   const numChatInteractions = getRandomInt(3, 20);
   for (let i = 0; i < numChatInteractions; i++) {
-    // In a real scenario, this would be actual chat messages, but for lead scoring,
-    // we're primarily interested in the events they trigger.
-    // For simplicity, we'll just log a random engagement event.
-    await logEvent(visitorId, getRandomElement(EVENT_TYPES.ENGAGEMENT));
+    // Pass the testListingId to logEvent
+    await logEvent(visitorId, getRandomElement(EVENT_TYPES.ENGAGEMENT), testListingId);
   }
 
   // Simulate diverse lead scores by logging a random number of intent/conversion events
   const numIntentEvents = getRandomInt(0, 5);
   for (let i = 0; i < numIntentEvents; i++) {
-    await logEvent(visitorId, getRandomElement(EVENT_TYPES.INTENT_QUALITY));
+    await logEvent(visitorId, getRandomElement(EVENT_TYPES.INTENT_QUALITY), testListingId);
   }
 
   const numConversionEvents = getRandomInt(0, 2);
   for (let i = 0; i < numConversionEvents; i++) {
-    await logEvent(visitorId, getRandomElement(EVENT_TYPES.CONVERSION));
+    await logEvent(visitorId, getRandomElement(EVENT_TYPES.CONVERSION), testListingId);
   }
 
   console.log(`Finished simulating user ${userIndex + 1} (${visitorId}).`);

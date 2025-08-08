@@ -8,7 +8,8 @@ async function populateListingMetrics() {
   // 1. Fetch existing listing_ids and client_ids from the listings table
   const { data: listings, error: listingsError } = await supabase
     .from('listings')
-    .select('id, client_id');
+    .select('id, client_id')
+    .eq('client_id', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11');
 
   if (listingsError) {
     console.error('Error fetching listings:', listingsError);
@@ -45,7 +46,7 @@ async function populateListingMetrics() {
     const inquiries = Math.floor(Math.random() * 50) + 5; // 5-55 inquiries
     const hotLeads = Math.floor(Math.random() * 10) + 1; // 1-11 hot leads
     const total_conversions = Math.floor(Math.random() * hotLeads) + 1; // 1 to hotLeads conversions
-    const conversionRate = (total_conversions / engaged_users); // Store as a number, not a formatted string
+    const conversionRate = (total_conversions / engaged_users) * 100; // Store as a number, not a formatted string
 
     const leadScoreDistributionHot = Math.floor(Math.random() * 30) + 5;
     const leadScoreDistributionWarm = Math.floor(Math.random() * 50) + 10;

@@ -16,13 +16,16 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 const chatHistoryService = new ChatHistoryService();
 
+const IMOPRIME_CLIENT_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+
 async function populateQuestionEmbeddings() {
   console.log('Populating question_embeddings table...');
 
   // Fetch all questions from the questions table
   const { data: questions, error: fetchQuestionsError } = await supabase
     .from('questions')
-    .select('id, question_text, listing_id');
+    .select('id, question_text, listing_id, client_id')
+    .eq('client_id', IMOPRIME_CLIENT_ID);
 
   if (fetchQuestionsError) {
     console.error('Error fetching questions:', fetchQuestionsError);
@@ -42,6 +45,7 @@ async function populateQuestionEmbeddings() {
         question_id: q.id,
         listing_id: q.listing_id,
         embedding: embedding,
+        client_id: q.client_id, // Include client_id in the embedding
       });
     } catch (embedError) {
       console.error(`Error generating embedding for question "${q.question_text}" (ID: ${q.id}):`, embedError);
