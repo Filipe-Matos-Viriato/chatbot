@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { encode } from 'gpt-3-encoder';
 import * as userService from './services/user-service.js';
-import * as listingService from './services/listing-service.js';
+import listingService from './services/listing-service.js';
 
 // Initialize clients
 const openai = new OpenAI({
@@ -27,18 +27,62 @@ const CONTEXT_TOKEN_BUDGET = MAX_TOTAL_TOKENS - MAX_RESPONSE_TOKENS; // Reserve 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function extractListingIdFromQuery(query) {
-  const match = query.toLowerCase().match(/ap-\d+/);
-  return match ? match[0] : null;
+  if (!query) return null;
+  const lower = String(query).toLowerCase();
+
+  // 1) Legacy pattern support like "ap-123"
+  const legacyMatch = lower.match(/ap-\d+/);
+  if (legacyMatch) return legacyMatch[0];
+
+  // 2) Natural-language patterns for Up Investments style IDs
+  //    Goal: derive `block_<n>_apt_<LETTER>` (LETTER must be A-H)
+  //    Examples we want to support:
+  //    - "T2 E Bloco 1"
+  //    - "t2 e bloco 1"
+  //    - "fração E bloco 1" / "fracao E bloco 1"
+  //    - "bloco 1 fração E" (order-insensitive)
+
+  const blockMatch = lower.match(/bloco\s*(\d+)/i);
+  const blockNum = blockMatch ? blockMatch[1] : null;
+
+  // Try explicit fraction first
+  let fractionMatch = lower.match(/fraç(?:ão|ao)\s*([a-h])/i);
+  // If not explicitly marked as fraction, try a letter next to a typology
+  if (!fractionMatch) fractionMatch = lower.match(/\bt\s*\d\s*([a-h])\b/i);
+  // Or any standalone letter A-H that appears in the same query as a block number
+  if (!fractionMatch && blockNum) fractionMatch = lower.match(/\b([a-h])\b(?=.*\bbloco\s*\d+)/i);
+
+  const fractionLetter = fractionMatch ? fractionMatch[1] : null;
+
+  if (blockNum && fractionLetter) {
+    return `block_${blockNum}_apt_${fractionLetter.toUpperCase()}`;
+  }
+
+  return null;
 }
 
 function extractQueryFilters(query, currentListingPrice = null) {
   const filters = {};
   const lowerCaseQuery = query.toLowerCase();
 
+  // Handle specific apartment queries including variations like:
+  // "apartamento A no bloco 1", "T2 E Bloco 1", "fração E bloco 1"
+  const naturalListingId = extractListingIdFromQuery(query);
+  if (naturalListingId) {
+    filters.listing_id = naturalListingId;
+  } else {
+    // Backward-compatible pattern
+    const apartmentMatch = lowerCaseQuery.match(/apartamento\s+([a-z])\s+no\s+bloco\s+(\d+)/);
+    if (apartmentMatch) {
+      filters.listing_id = `block_${apartmentMatch[2]}_apt_${apartmentMatch[1].toUpperCase()}`;
+    }
+  }
+
   // Handle direct query for typology, e.g., "T1" or "t2"
   const typologyMatch = lowerCaseQuery.match(/\b(t\d)\b/i);
   if (typologyMatch) {
-    filters.type = typologyMatch[1].toUpperCase();
+    // Align with ingestion metadata which uses 'typology'
+    filters.typology = typologyMatch[1].toUpperCase();
   }
 
   // Number of Bedrooms (exact, greater than, less than)
@@ -150,8 +194,9 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   
   console.log(`[${clientConfig.clientName}] Using search vector with ${searchVector.length} dimensions`);
 
-  // Get the client-specific Pinecone index
+  // Get the client-specific Pinecone index and namespace it per client
   const clientPineconeIndex = getPineconeIndex(clientConfig);
+  const namespacedIndex = clientPineconeIndex.namespace(clientConfig.clientId);
   
   // For client-specific indexes, we don't need to filter by client_id since the entire index
   // is dedicated to this client, but we'll keep it for backward compatibility
@@ -204,8 +249,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     const { vector, ...loggableListingParams } = listingQueryParams;
     console.log('🌲 PINECONE LISTING QUERY:', JSON.stringify(loggableListingParams, null, 2));
     queries.push(
-      clientPineconeIndex
-        .query(listingQueryParams)
+      namespacedIndex.query(listingQueryParams)
     );
   } else {
     queries.push(Promise.resolve({ matches: [] })); // Add empty promise to keep array order
@@ -223,16 +267,34 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     const { vector, ...loggableDevParams } = developmentQueryParams;
     console.log('🌲 PINECONE DEVELOPMENT QUERY:', JSON.stringify(loggableDevParams, null, 2));
     queries.push(
-      clientPineconeIndex
-        .query(developmentQueryParams)
+      namespacedIndex.query(developmentQueryParams)
     );
   } else {
     queries.push(Promise.resolve({ matches: [] })); // Add empty promise
   }
 
-  // 3. Broad Query
-  console.log("Queueing broad query with filters:", JSON.stringify(queryFilters, null, 2));
-  const initialFilter = { ...baseFilter, ...queryFilters };
+  // 3. Targeted Listing Query derived from the user's text (e.g., "T2 E Bloco 1")
+  const queryListingIdForQueryStage = extractListingIdFromQuery(originalQuery);
+  if (queryListingIdForQueryStage) {
+    console.log(`Queueing targeted query for query-derived listing_id: ${queryListingIdForQueryStage}`);
+    const queryDerivedListingParams = {
+      vector: searchVector,
+      topK: 10,
+      includeMetadata: true,
+      filter: { ...baseFilter, listing_id: queryListingIdForQueryStage },
+    };
+    const { vector, ...loggableQueryDerivedParams } = queryDerivedListingParams;
+    console.log('🌲 PINECONE QUERY-DERIVED LISTING QUERY:', JSON.stringify(loggableQueryDerivedParams, null, 2));
+    queries.push(
+      namespacedIndex.query(queryDerivedListingParams)
+    );
+  } else {
+    queries.push(Promise.resolve({ matches: [] }));
+  }
+
+  // 4. Broad Query (pure semantic within client namespace)
+  console.log("Queueing broad query with NO query-derived filters (semantic-only). Query filters detected (for re-ranking only):", JSON.stringify(queryFilters, null, 2));
+  const initialFilter = { ...baseFilter };
   const broadQueryParams = {
       vector: searchVector,
       topK: 50,
@@ -242,20 +304,22 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   const { vector, ...loggableBroadParams } = broadQueryParams;
   console.log('🌲 PINECONE BROAD QUERY:', JSON.stringify(loggableBroadParams, null, 2));
   queries.push(
-    clientPineconeIndex
-      .query(broadQueryParams)
+    namespacedIndex.query(broadQueryParams)
   );
 
   // Execute all queries in parallel
   console.log(`[${clientConfig.clientName}] 🔍 EXTENSIVE DEBUG - Executing Pinecone queries...`);
+  console.log(`[${clientConfig.clientName}] Namespace: ${clientConfig.clientId}`);
+  console.log(`[${clientConfig.clientName}] Base filter: ${JSON.stringify(baseFilter)}`);
   
-  let listingResponse, developmentResponse, broadResponse;
+  let listingResponse, developmentResponse, queryDerivedListingResponse, broadResponse;
   try {
-    [listingResponse, developmentResponse, broadResponse] = await Promise.all(queries);
+    [listingResponse, developmentResponse, queryDerivedListingResponse, broadResponse] = await Promise.all(queries);
     
     console.log(`[${clientConfig.clientName}] 🔍 QUERY RESULTS:`);
     console.log(`  - Listing query matches: ${listingResponse?.matches?.length || 0}`);
     console.log(`  - Development query matches: ${developmentResponse?.matches?.length || 0}`);
+    console.log(`  - Query-derived listing matches: ${queryDerivedListingResponse?.matches?.length || 0}`);
     console.log(`  - Broad query matches: ${broadResponse?.matches?.length || 0}`);
     
     if (broadResponse?.matches?.length > 0) {
@@ -266,8 +330,9 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     throw error;
   }
 
-  let matches = listingResponse.matches || [];
+  let matches = listingResponse?.matches || [];
   const developmentMatches = developmentResponse.matches || [];
+  const queryDerivedMatches = queryDerivedListingResponse.matches || [];
   const broadMatches = broadResponse.matches || [];
 
   console.log(`Found ${matches.length} matches in targeted listing search.`);
@@ -292,7 +357,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     console.log(`Current listing (${contextListingId}) price from targeted search: ${currentListingPrice}`);
   }
 
-  const combinedMatches = [...matches, ...developmentMatches];
+  const combinedMatches = [...matches, ...developmentMatches, ...queryDerivedMatches];
   const existingIds = new Set(combinedMatches.map(m => m.id));
 
   broadMatches.forEach(bm => {
@@ -303,11 +368,33 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
   matches = combinedMatches;
 
+  // Fallback: if no matches, try broad search without user query filters
+  if (matches.length === 0) {
+    try {
+      console.log(`[${clientConfig.clientName}] ⚠️ No matches with filters. Trying fallback broad search without query filters...`);
+      const fallback = await namespacedIndex.query({
+        vector: searchVector,
+        topK: 50,
+        includeMetadata: true,
+        filter: baseFilter,
+      });
+      matches = fallback?.matches || [];
+      console.log(`[${clientConfig.clientName}] Fallback broad search found ${matches.length} matches`);
+    } catch (e) {
+      console.error(`[${clientConfig.clientName}] Fallback broad search failed:`, e);
+    }
+  }
+
   if (matches.length > 0) {
     const queryListingId = extractListingIdFromQuery(originalQuery);
     const reRankQueryFilters = extractQueryFilters(originalQuery, currentListingPrice);
+    const queryLower = (originalQuery || '').toLowerCase();
+    const isLookingForT1 = queryLower.includes('t1') || queryLower.includes('1 quarto');
+    const isLookingForT2 = queryLower.includes('t2') || queryLower.includes('2 quartos');
+    const isLookingForStudio = queryLower.includes('estúdio') || queryLower.includes('studio');
 
-    matches = matches.map(match => {
+    const debugBoostLogs = [];
+    matches = matches.map((match, idx) => {
       let score = match.score;
       if (contextListingId && match.metadata.listing_id === contextListingId) {
         score += 1.0;
@@ -330,17 +417,66 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
             } else if (match.metadata[key] === reRankQueryFilters[key]) {
               filterMatchCount++;
             }
+          } else if (key === 'typology') {
+            if (match.metadata.typology === reRankQueryFilters.typology || match.metadata.type === reRankQueryFilters.typology) {
+              filterMatchCount++;
+            }
           } else if (match.metadata[key] === reRankQueryFilters[key]) {
             filterMatchCount++;
           }
         }
         score += (filterMatchCount * 0.2);
+        if (filterMatchCount > 0 && idx < 8) {
+          debugBoostLogs.push({ id: match.metadata?.listing_id || match.metadata?.development_id || match.id, filterMatches: filterMatchCount });
+        }
+      }
+
+      // Semantic-aware textual hints boost (no hard filters)
+      const meta = match.metadata || {};
+      const text = (meta.text || meta.chunk || meta.content || meta.body || meta.page_text || '').toString().toLowerCase();
+      if (text) {
+        if (isLookingForT1 && (text.includes(' t1 ') || text.includes(' tipologia t1') || text.includes(' 1 quarto') || text.includes(' t1,') || text.includes(' t1.'))) {
+          score += 0.3;
+          if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'T1' });
+        }
+        if (isLookingForT2 && (text.includes(' t2 ') || text.includes(' tipologia t2') || text.includes(' 2 quartos') || text.includes(' t2,') || text.includes(' t2.'))) {
+          score += 0.3;
+          if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'T2' });
+        }
+        if (isLookingForStudio && (text.includes(' estúdio') || text.includes(' studio'))) {
+          score += 0.2;
+          if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'studio' });
+        }
       }
       return { ...match, score };
     });
 
     matches.sort((a, b) => b.score - a.score);
     matches = matches.slice(0, 20);
+    try {
+      console.log('🔎 Re-ranking debug (top up to 8 shown):', JSON.stringify(debugBoostLogs, null, 2));
+      const preview = matches.slice(0, 5).map(m => ({
+        id: m.metadata?.listing_id || m.metadata?.development_id || m.id,
+        score: Number(m.score?.toFixed?.(6) || m.score),
+        typology: m.metadata?.typology || m.metadata?.type || null,
+        docCategory: m.metadata?.document_category,
+        hasText: Boolean(m.metadata?.text || m.metadata?.chunk || m.metadata?.content || m.metadata?.body || m.metadata?.page_text),
+      }));
+      console.log('📊 Top results after re-ranking:', JSON.stringify(preview, null, 2));
+
+      const details = matches.slice(0, 5).map(m => {
+        const meta = m.metadata || {};
+        const text = (meta.text || meta.chunk || meta.content || meta.body || meta.page_text || '').toString();
+        return {
+          id: meta.listing_id || meta.development_id || m.id,
+          url_pt: meta.url_pt || null,
+          url_en: meta.url_en || null,
+          hasT1Hint: /\bT1\b|Tipologia:\s*T1|1 quarto/i.test(text),
+          snippet: text.slice(0, 140),
+        };
+      });
+      console.log('🧾 Candidate listing details:', JSON.stringify(details, null, 2));
+    } catch (e) {}
   }
 
   return { matches };
@@ -358,8 +494,65 @@ function isAggregativePriceQuery(query) {
   );
 }
 
-async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null) {
+/**
+ * Extracts a listing ID from a URL.
+ * @param {string} url - The URL to parse.
+ * @returns {string|null} The extracted listing ID or null if not found.
+ */
+function extractListingIdFromUrl(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const path = u.pathname || '';
+    // Find last numeric segment in path, tolerant to trailing slash
+    const segments = path.split('/').filter(Boolean);
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      const m = seg.match(/^(\d{3,})$/);
+      if (m) return m[1];
+    }
+    // Fallback: query param id
+    const qId = u.searchParams.get('id');
+    if (qId && /^(\d{3,})$/.test(qId)) return qId;
+    // Fallback: hash
+    const hashMatch = (u.hash || '').match(/(\d{3,})/);
+    if (hashMatch) return hashMatch[1];
+  } catch (_) {
+    // Non-standard URL, try simple regex
+    const match = (url + '').match(/(?:\/)\b(\d{3,})\b(?:[\/#?]|$)/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null) {
   let aggregativeContext = '';
+  let pageContext = '';
+
+  // 1. Check for context from the current page URL
+  const listingIdFromUrl = extractListingIdFromUrl(pageUrl);
+  if (listingIdFromUrl) {
+    try {
+      const listing = await listingService.getListingById(listingIdFromUrl);
+      if (listing) {
+        // Construct a detailed summary of the listing
+        pageContext = `O utilizador está atualmente a ver a página do seguinte imóvel:
+- **Nome:** ${listing.name}
+- **ID:** ${listing.id}
+- **Preço:** €${listing.price.toLocaleString()}
+- **Tipo:** ${listing.type}
+- **Quartos:** ${listing.beds}
+- **Casas de Banho:** ${listing.baths}
+- **Comodidades:** ${listing.amenities ? listing.amenities.join(', ') : 'N/A'}
+Use esta informação como o contexto principal para responder a perguntas como "qual é o preço?" ou "quantos quartos tem?".
+---
+`;
+        console.log(`[${clientConfig.clientName}]  enriched context with data for listing ID: ${listingIdFromUrl}`);
+      }
+    } catch (error) {
+      console.error(`[${clientConfig.clientName}] failed to fetch listing data for ID ${listingIdFromUrl} from URL:`, error);
+    }
+  }
 
   if (isAggregativePriceQuery(query)) {
     try {
@@ -384,13 +577,15 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   console.log(`  Query filters: ${JSON.stringify(queryFilters, null, 2)}`);
   console.log(`  Original query: "${query}"`);
 
-  let queryResponse;
-  try {
-    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters);
-  } catch (error) {
-    console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
-    // Return empty matches if search fails due to invalid embedding
-    queryResponse = { matches: [] };
+  let queryResponse = { matches: [] };
+  if (!listingIdFromUrl) {
+    try {
+      queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters);
+    } catch (error) {
+      console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
+      // Return empty matches if search fails due to invalid embedding
+      queryResponse = { matches: [] };
+    }
   }
   
   // Add debugging for matches found
@@ -404,7 +599,6 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     });
   } else {
     console.log(`  ⚠️ No matches found in Pinecone for query: "${query}"`);
-    console.log(`  Applied filters: ${JSON.stringify(mergedFilters, null, 2)}`);
   }
   
   // Check if we have no matches and handle accordingly
@@ -412,13 +606,37 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
-  let context = queryResponse.matches.map(m => m.metadata.text).join('\n\n---\n\n');
+  const pickTextFromMetadata = (meta) => (
+    meta?.text || meta?.chunk || meta?.content || meta?.body || meta?.page_text || ''
+  );
+  const pickedTexts = queryResponse.matches
+    .map(m => pickTextFromMetadata(m.metadata))
+    .filter(Boolean);
+  let context = pageContext + pickedTexts.join('\n\n---\n\n');
+  try {
+    const topMatchSummaries = queryResponse.matches.slice(0, 5).map(m => ({
+      id: m.metadata?.listing_id || m.metadata?.development_id || m.id,
+      typology: m.metadata?.typology || m.metadata?.type || null,
+      category: m.metadata?.document_category,
+      hasText: Boolean(pickTextFromMetadata(m.metadata)),
+    }));
+    console.log(`[${clientConfig.clientName}] 🧩 Context assembly:`, JSON.stringify({
+      pickedTextCount: pickedTexts.length,
+      hasPageContext: Boolean(pageContext),
+      topMatchSummaries,
+      sampleText: pickedTexts[0] ? pickedTexts[0].slice(0, 200) : null,
+    }, null, 2));
+  } catch (_) {}
   let remainingTokens = CONTEXT_TOKEN_BUDGET;
   
-  // Handle empty context case to prevent hallucination
+  // Handle empty search results. If we have page context, KEEP IT and do not override.
   if (queryResponse.matches.length === 0) {
-    context = "IMPORTANTE: Não foram encontradas propriedades na base de dados que correspondam aos critérios especificados. NÃO INVENTE ou CRIE informações sobre apartamentos que não existem nos documentos. Informe o utilizador que não há propriedades disponíveis que correspondam aos critérios. Apenas mencione propriedades específicas da Up Investments (client_id: e6f484a3-c3cb-4e01-b8ce-a276f4b7355c) e não de outros clientes.";
-    console.log(`[${clientConfig.clientName}] 📝 Using empty context warning to prevent hallucination`);
+    if (!pageContext) {
+      context = "IMPORTANTE: Não foram encontradas propriedades na base de dados que correspondam aos critérios especificados. NÃO INVENTE ou CRIE informações sobre apartamentos que não existem nos documentos. Informe o utilizador que não há propriedades disponíveis que correspondam aos critérios. Apenas mencione propriedades específicas da Up Investments (client_id: e6f484a3-c3cb-4e01-b8ce-a276f4b7355c) e não de outros clientes.";
+      console.log(`[${clientConfig.clientName}] 📝 Using empty context warning to prevent hallucination (no page context)`);
+    } else {
+      console.log(`[${clientConfig.clientName}] ✅ Using page context only (no Pinecone matches).`);
+    }
   }
   
   // Add client filter reminder to prevent incorrect listings
@@ -466,7 +684,8 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   const templateVariables = {
     chatHistory: truncatedChatHistory,
     context: context + (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
-    question: query
+    question: query,
+    pageUrl: pageUrl || 'Não disponível'
   };
   let systemPrompt = systemPromptTemplate;
   Object.keys(templateVariables).forEach(key => {

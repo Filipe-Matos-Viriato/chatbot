@@ -11,8 +11,11 @@
     "test-pinecone": "node -r dotenv/config scripts/test-pinecone-query.js",
     "migrate-configs": "node -r dotenv/config scripts/migrate-client-configs-to-db.js",
     "cluster-questions": "node -r dotenv/config scripts/cluster-questions.js",
-    "test": "npx mocha --require ./test/setup.js test/**/*.test.js",
-    "postinstall": "patch-package"
+    "import-listings": "node -r dotenv/config scripts/import-listings-from-json.js",
+    "check-schema": "node -r dotenv/config scripts/check-table-schema.js",
+    "ingest-pdfs": "node -r dotenv/config scripts/ingest-pdfs-from-dir.js",
+    "test": "npx mocha --require ./test/setup.js test/**/*.test.js"
+    
   },
   "dependencies": {
     "@google/generative-ai": "^0.12.0",

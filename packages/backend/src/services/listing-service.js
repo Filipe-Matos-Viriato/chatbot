@@ -92,4 +92,36 @@ ListingService.getMaxPrice = async (clientId) => {
   return data ? data.price : null;
 };
 
+// Returns the full row for the lowest price listing
+ListingService.getMinPriceListing = async (clientId) => {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('price', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') {
+    console.error(`Error fetching minimum price listing for client ${clientId}:`, error);
+    throw new Error(`Error fetching minimum price listing: ${error.message}`);
+  }
+  return data || null;
+};
+
+// Returns the full row for the highest price listing
+ListingService.getMaxPriceListing = async (clientId) => {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('price', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') {
+    console.error(`Error fetching maximum price listing for client ${clientId}:`, error);
+    throw new Error(`Error fetching maximum price listing: ${error.message}`);
+  }
+  return data || null;
+};
+
 export default ListingService;

@@ -31,6 +31,9 @@ window.initViriatoChatbot = function(config = {}) {
     document.body.appendChild(container);
   }
 
+  // Add the current page URL to the config
+  config.pageUrl = window.location.href;
+
   // Render the widget
   render(h(App, { config }), container);
 };

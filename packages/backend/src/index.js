@@ -18,7 +18,8 @@ import multer from 'multer';
 
 import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
 import * as clientConfigServiceModule from './services/client-config-service.js';
-import { processDocument } from './services/ingestion-service-imoprime.js';
+// Simple PDF/Text ingestion service
+import { processDocument } from './services/ingestion-service-pdf.js';
 import listingService from './services/listing-service.js';
 import visitorService from './services/visitor-service.js';
 import supabaseModule from './config/supabase.js';
@@ -165,7 +166,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-            const { query, visitorId, sessionId, context } = req.body;
+            const { query, visitorId, sessionId, context, pageUrl } = req.body;
+      console.log(`[CHAT] clientId=${req.clientConfig.clientId} query="${query}" pageUrl=${pageUrl || 'n/a'}`);
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
@@ -251,11 +253,13 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const responseText = await generateResponse(
         query, 
         clientConfig, 
-        embeddingVector,           // Pass the actual embedding vector
-        context,                   // External context 
+        embeddingVector,
+        pageUrl ? null : context, // Prioritize pageUrl for context
         userContext, 
-        chatHistory
+        chatHistory,
+        pageUrl
       );
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Response generated length=${responseText?.length || 0}`);
 
       // Upsert assistant response to Pinecone
       try {
@@ -511,6 +515,34 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error('Error getting visitor:', error);
       res.status(500).json({ error: 'Failed to get visitor.' });
+    }
+  });
+
+  // API endpoint to save onboarding answers for a visitor
+  app.post('/v1/visitors/:visitorId/onboarding', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { clientConfig } = req;
+      const { typology, budget_bucket, buying_timeframe, name, email, consent_marketing } = req.body || {};
+
+      if (!visitorId) {
+        return res.status(400).json({ error: 'Visitor ID is required' });
+      }
+
+      const onboardingPayload = {
+        typology: typology || null,
+        budget_bucket: budget_bucket || null,
+        buying_timeframe: buying_timeframe || null,
+        name: name || null,
+        email: email || null,
+        consent_marketing: Boolean(consent_marketing),
+      };
+
+      const updated = await visitorService.saveOnboarding(visitorId, clientConfig.clientId, onboardingPayload);
+      res.json({ success: true, visitor: updated });
+    } catch (error) {
+      console.error('Error saving onboarding for visitor:', error);
+      res.status(500).json({ error: 'Failed to save onboarding.' });
     }
   });
 
@@ -1075,7 +1107,21 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // Global error handler to catch JSON parsing errors
+  // API endpoint to get chat history for a visitor
+app.get('/api/v1/history/:visitorId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+  try {
+    const { visitorId } = req.params;
+    const { clientConfig } = req;
+    const chatHistoryService = new ChatHistoryService();
+    const chatHistory = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 50, clientConfig);
+    res.json(chatHistory);
+  } catch (error) {
+    console.error(`Error fetching chat history for visitor ${req.params.visitorId}:`, error);
+    res.status(500).json({ error: 'Failed to fetch chat history.' });
+  }
+});
+
+// Global error handler to catch JSON parsing errors
   app.use((err, req, res, next) => {
     if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
       console.error('Invalid JSON received:', err);

@@ -14,8 +14,156 @@ class App extends Component {
       isLoadingConfig: false,
       visitorId: null,
       sessionId: null, // Add sessionId state
+      // Onboarding state
+      onboarding: {
+        started: false,
+        completed: false,
+        step: 0,
+        answers: {
+          typology: null,
+          budget_bucket: null,
+          buying_timeframe: null,
+          name: '',
+          email: '',
+          consent_marketing: false,
+        },
+      },
+      initialUserMessageBuffer: null,
+      hasSentFirstMessage: false,
     };
   }
+
+  // --- Local storage helpers for persistent chat history ---
+  getStorageKey = (clientId) => `chat_history_${clientId || 'default'}`;
+
+  loadLocalHistory = (clientId) => {
+    try {
+      const raw = localStorage.getItem(this.getStorageKey(clientId));
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+      return [];
+    } catch (_) { return []; }
+  };
+
+  // --- Onboarding helpers ---
+  setOnboardingAnswer = (field, value) => {
+    this.setState(prev => ({
+      onboarding: {
+        ...prev.onboarding,
+        answers: { ...prev.onboarding.answers, [field]: value },
+      }
+    }));
+  };
+
+  detectBuyingIntent = (text) => {
+    const t = (text || '').toLowerCase();
+    const keywords = ['comprar', 'investir', 'invest', 'buy', 'purchase', 'apartar', 'apartamento', 't0', 't1', 't2', 't3', 'duplex', 'imóvel', 'listing', 'propriedade'];
+    return keywords.some(k => t.includes(k));
+  };
+
+  submitOnboarding = async () => {
+    const { apiUrl } = this.props.config || {};
+    const { visitorId, onboarding, initialUserMessageBuffer } = this.state;
+    const clientId = this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c';
+    if (!visitorId) return;
+
+    try {
+      const resp = await fetch(`${apiUrl}/v1/visitors/${visitorId}/onboarding`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Id': clientId,
+        },
+        body: JSON.stringify(onboarding.answers),
+      });
+      if (!resp.ok) throw new Error('Failed to save onboarding');
+      const data = await resp.json();
+      console.log('Onboarding saved:', data);
+      this.setState(prev => ({ onboarding: { ...prev.onboarding, completed: true } }));
+
+      // Decide next step based on initial message intent
+      const buyingIntent = this.detectBuyingIntent(initialUserMessageBuffer);
+      if (buyingIntent) {
+        // Fetch listings and recommend
+        await this.showRecommendationsFromOnboarding();
+      } else {
+        // Continue with the original user request
+        this.setState({ inputValue: initialUserMessageBuffer }, () => this.sendMessage(true));
+      }
+    } catch (e) {
+      console.error('Failed to submit onboarding', e);
+      const errMsg = { id: Date.now() + 2, text: 'Não foi possível guardar as respostas. Pode tentar novamente?', sender: 'bot', timestamp: new Date() };
+      this.setState(prev => ({ messages: [...prev.messages, errMsg] }));
+    }
+  };
+
+  showRecommendationsFromOnboarding = async () => {
+    const { apiUrl } = this.props.config || {};
+    const clientId = this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c';
+    const { onboarding } = this.state;
+    try {
+      const res = await fetch(`${apiUrl}/v1/clients/${clientId}/listings`, {
+        headers: { 'X-Client-Id': clientId }
+      });
+      const listings = res.ok ? await res.json() : [];
+      const { typology, budget_bucket } = onboarding.answers;
+      const range = (bucket) => {
+        if (!bucket) return [0, Infinity];
+        const m = bucket.match(/(\d+)[kK].*(\d+)[kK]/);
+        if (m) return [parseInt(m[1], 10) * 1000, parseInt(m[2], 10) * 1000];
+        if (/500k\+/.test(bucket)) return [500000, Infinity];
+        return [0, Infinity];
+      };
+      const [minPrice, maxPrice] = range(budget_bucket || '0-9999k');
+      const filtered = (listings || [])
+        .filter(l => {
+          const typeOk = typology ? (String(l.type || '').toUpperCase().includes(String(typology).toUpperCase())) : true;
+          const price = Number(l.price) || Number(l.price_eur) || 0;
+          const priceOk = price >= minPrice && price <= maxPrice;
+          return typeOk && priceOk;
+        })
+        .slice(0, 5);
+
+      if (filtered.length === 0) {
+        const msg = { id: Date.now() + 3, text: 'Não encontrei imóveis que correspondam exatamente às preferências. Posso ajudá-lo a afinar os critérios?', sender: 'bot', timestamp: new Date() };
+        this.setState(prev => ({ messages: [...prev.messages, msg] }));
+        return;
+      }
+
+      const listMd = filtered.map((l, idx) => `- ${idx + 1}. ${l.name || 'Imóvel'} — €${(l.price || l.price_eur || 0).toLocaleString()}${l.id ? ` (ID: ${l.id})` : ''}`).join('\n');
+      const recMsg = {
+        id: Date.now() + 4,
+        text: `Com base nas suas preferências, aqui estão algumas opções:\n\n${listMd}\n\nQuer falar sobre algum destes?` ,
+        sender: 'bot',
+        timestamp: new Date(),
+      };
+      this.setState(prev => ({ messages: [...prev.messages, recMsg] }), () => this.saveLocalHistory(this.props.config?.clientId, this.state.messages));
+    } catch (e) {
+      console.error('Failed to fetch listings for recommendations', e);
+    }
+  };
+  saveLocalHistory = (clientId, messages) => {
+    try {
+      localStorage.setItem(this.getStorageKey(clientId), JSON.stringify(messages || []));
+    } catch (_) {}
+  };
+
+  mergeMessages = (existing, incoming) => {
+    const byId = new Map();
+    [...existing, ...incoming].forEach(m => {
+      if (!m || !m.id) return;
+      // Keep the earliest instance by id to preserve order
+      if (!byId.has(m.id)) byId.set(m.id, m);
+    });
+    // Sort by timestamp ascending if present, otherwise by id
+    return Array.from(byId.values()).sort((a, b) => {
+      const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return (a.id + '').localeCompare(b.id + '');
+    });
+  };
 
   componentDidMount() {
     this.loadConfig();
@@ -66,6 +214,13 @@ class App extends Component {
 
     try {
       const { clientId = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c', apiUrl } = this.props.config || {};
+
+      // 0) Immediately hydrate from local storage so users see prior messages instantly
+      const locallyStored = this.loadLocalHistory(clientId);
+      if (locallyStored.length > 0) {
+        this.setState({ messages: locallyStored });
+        console.log(`🗂️ Restored ${locallyStored.length} messages from local storage.`);
+      }
       
       // Load widget config
       const configResponse = await fetch(`${apiUrl}/api/v1/widget/config/${clientId}?cacheBust=${new Date().getTime()}`);
@@ -80,8 +235,9 @@ class App extends Component {
       
       console.log(`🔍 Checking for existing visitorId... Found: ${visitorId || 'None'}`);
 
-      // If a visitorId exists, try to fetch their data
+      // If a visitorId exists, try to fetch their data and chat history
       if (visitorId) {
+        // Fetch visitor data
         const visitorResponse = await fetch(`${apiUrl}/v1/visitor`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -90,6 +246,33 @@ class App extends Component {
         if (visitorResponse.ok) {
           sessionData = await visitorResponse.json();
           console.log('✅ Found returning visitor:', sessionData);
+          // If onboarding already completed, mark it
+          if (sessionData.onboarding_completed) {
+            this.setState(prev => ({
+              onboarding: { ...prev.onboarding, completed: true }
+            }));
+          }
+
+          // Fetch chat history
+          const historyResponse = await fetch(`${apiUrl}/api/v1/history/${visitorId}`, {
+            headers: { 'X-Client-Id': clientId }
+          });
+          if (historyResponse.ok) {
+            const history = await historyResponse.json();
+            if (history.length > 0) {
+              const formattedMessages = history.map(msg => ({
+                id: msg.turn_id,
+                text: msg.text,
+                sender: msg.role === 'user' ? 'user' : 'bot',
+                timestamp: new Date(msg.timestamp)
+              })).reverse(); // Reverse to show oldest first
+              const merged = this.mergeMessages(this.state.messages, formattedMessages);
+              this.setState({ messages: merged });
+              // Persist merged history locally
+              this.saveLocalHistory(clientId, merged);
+              console.log(`✅ Loaded ${formattedMessages.length} messages from backend history. Merged total=${merged.length}.`);
+            }
+          }
         } else {
             console.log('🤔 Visitor ID found but no record on backend. Clearing invalid ID.');
             localStorage.removeItem('visitorId');
@@ -121,22 +304,29 @@ class App extends Component {
         config,
         visitorId: sessionData.visitor_id,
         isLoadingConfig: false,
-        messages: []
+        messages: this.state.messages.length > 0 ? this.state.messages : []
       });
+      // Ensure whatever we have is saved locally
+      this.saveLocalHistory(clientId, this.state.messages);
       
       console.log(`👤 Visitor ID: ${sessionData.visitor_id}`);
       console.log('--- Initialization Complete ---');
 
-      const welcomeMessage = {
-        id: Date.now(),
-        text: config.widgetSettings?.welcomeMessage || 'Olá! Sou o seu assistente virtual. Como posso ajudar?',
-        sender: 'bot',
-        timestamp: new Date(),
-        ariaLabel: 'Welcome message from chatbot'
-      };
-      this.setState(prev => ({
-        messages: [...prev.messages, welcomeMessage]
-      }));
+      // Show welcome message only if there are no messages loaded from history
+      if (this.state.messages.length === 0) {
+        const welcomeMessage = {
+          id: Date.now(),
+          text: config.widgetSettings?.welcomeMessage || 'Olá! Sou o seu assistente virtual. Como posso ajudar?',
+          sender: 'bot',
+          timestamp: new Date(),
+          ariaLabel: 'Welcome message from chatbot'
+        };
+        this.setState(prev => ({
+          messages: [...prev.messages, welcomeMessage]
+        }), () => {
+          this.saveLocalHistory(clientId, this.state.messages);
+        });
+      }
 
     } catch (error) {
       console.error('💥 Widget initialization error:', error);
@@ -201,16 +391,37 @@ class App extends Component {
 
       this.setState({
         messages: [...messages, userMessage],
+      }, () => {
+        // Persist after adding user message
+        this.saveLocalHistory(this.props.config?.clientId, this.state.messages);
       });
 
       // Announce message sent to screen readers
       this.announceToScreenReader('Message sent');
     }
 
-    this.setState({
-      inputValue: '',
-      isTyping: true
-    });
+    this.setState({ inputValue: '', isTyping: true });
+
+    // On first user message, if onboarding not completed, start onboarding and buffer the message instead of calling chat
+    const { onboarding, hasSentFirstMessage } = this.state;
+    if (!hasSentFirstMessage && !onboarding.completed && !onboarding.started) {
+      this.setState({
+        onboarding: { ...onboarding, started: true, step: 1 },
+        initialUserMessageBuffer: inputValue,
+        isTyping: false,
+        hasSentFirstMessage: true,
+      });
+      // Show onboarding intro from bot
+      const introMsg = {
+        id: Date.now() + 1,
+        text: 'Antes de continuar, posso fazer 3 perguntas rápidas para recomendar os melhores apartamentos? (leva < 30s)',
+        sender: 'bot',
+        timestamp: new Date(),
+      };
+      this.setState(prev => ({ messages: [...prev.messages, introMsg] }), () => this.saveLocalHistory(this.props.config?.clientId, this.state.messages));
+      return;
+    }
+    this.setState({ hasSentFirstMessage: true });
 
     try {
       const response = await fetch(`${apiUrl}/api/chat`, {
@@ -219,12 +430,13 @@ class App extends Component {
           'Content-Type': 'application/json',
           'X-Client-Id': this.props.config?.clientId || 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c'
         },
-        body: JSON.stringify({
-          query: inputValue,
-          visitorId: this.state.visitorId,
-          sessionId: this.state.sessionId,
-          context: messages.slice(-5), // Last 5 messages for context
-        })
+          body: JSON.stringify({
+            query: inputValue,
+            visitorId: this.state.visitorId,
+            sessionId: this.state.sessionId,
+            pageUrl: window.location.href,
+            context: messages.slice(-5),
+          })
       });
 
       if (!response.ok) {
@@ -244,7 +456,10 @@ class App extends Component {
       this.setState(prev => ({
         messages: [...prev.messages, botMessage],
         isTyping: false
-      }));
+      }), () => {
+        // Persist after adding bot message
+        this.saveLocalHistory(this.props.config?.clientId, this.state.messages);
+      });
 
       // Announce new message to screen readers
       this.announceToScreenReader('New message received');
@@ -409,7 +624,7 @@ class App extends Component {
   };
 
   render() {
-    const { isOpen, messages, inputValue, isTyping, config, error } = this.state;
+    const { isOpen, messages, inputValue, isTyping, config, error, onboarding } = this.state;
     
     if (error) {
       return h('div', { 
@@ -580,6 +795,58 @@ class App extends Component {
               h('div', { style: 'width: 4px; height: 4px; background: #64748b; border-radius: 50%; animation: pulse 1.5s ease-in-out infinite;' }),
               h('div', { style: 'width: 4px; height: 4px; background: #64748b; border-radius: 50%; animation: pulse 1.5s ease-in-out 0.1s infinite;' }),
               h('div', { style: 'width: 4px; height: 4px; background: #64748b; border-radius: 50%; animation: pulse 1.5s ease-in-out 0.2s infinite;' })
+            ])
+          ])
+        ]),
+
+        // Onboarding flow UI
+        onboarding.started && !onboarding.completed && h('div', {
+          style: Object.entries(styles.inputContainer).map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`).join('; ')
+        }, [
+          onboarding.step === 1 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
+            h('div', { style: 'font-weight:600;' }, 'Que tipologia procura?'),
+            h('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' }, ['T0','T1','T2','T3','T3 Duplex','T4','Indiferente'].map(opt => 
+              h('button', { onClick: () => this.setOnboardingAnswer('typology', opt), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, opt)
+            )),
+            h('div', null, onboarding.answers.typology ? `Selecionado: ${onboarding.answers.typology}` : ''),
+            h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 2 } })), disabled: !onboarding.answers.typology, style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white; align-self:flex-end;' }, 'Seguinte')
+          ]),
+
+          onboarding.step === 2 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
+            h('div', { style: 'font-weight:600;' }, 'Qual o seu orçamento?'),
+            h('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' }, ['€100–200k','€200–300k','€300–400k','€400–500k','€500k+','Prefiro não dizer'].map(opt => 
+              h('button', { onClick: () => this.setOnboardingAnswer('budget_bucket', opt.replace('€','').replace('Prefiro não dizer','Prefer not to say')), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, opt)
+            )),
+            h('div', null, onboarding.answers.budget_bucket ? `Selecionado: ${onboarding.answers.budget_bucket}` : ''),
+            h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
+              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 1 } })), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;' }, 'Voltar'),
+              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 3 } })), disabled: !onboarding.answers.budget_bucket, style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, 'Seguinte')
+            ])
+          ]),
+
+          onboarding.step === 3 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
+            h('div', { style: 'font-weight:600;' }, 'Para quando pretende comprar?'),
+            h('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' }, ['ASAP (<1 mês)','1–3 meses','3–6 meses','6+ meses','Apenas a explorar'].map(opt => 
+              h('button', { onClick: () => this.setOnboardingAnswer('buying_timeframe', opt), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, opt)
+            )),
+            h('div', null, onboarding.answers.buying_timeframe ? `Selecionado: ${onboarding.answers.buying_timeframe}` : ''),
+            h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
+              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 2 } })), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;' }, 'Voltar'),
+              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 4 } })), disabled: !onboarding.answers.buying_timeframe, style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, 'Seguinte')
+            ])
+          ]),
+
+          onboarding.step === 4 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
+            h('div', { style: 'font-weight:600;' }, 'Quase lá! Como o podemos contactar?'),
+            h('input', { type: 'text', placeholder: 'Nome', value: onboarding.answers.name, onInput: (e) => this.setOnboardingAnswer('name', e.target.value), style: 'padding:10px; border:1px solid #3f3f3f; background:rgba(20,20,20,.9); color:white;' }),
+            h('input', { type: 'email', placeholder: 'Email', value: onboarding.answers.email, onInput: (e) => this.setOnboardingAnswer('email', e.target.value), style: 'padding:10px; border:1px solid #3f3f3f; background:rgba(20,20,20,.9); color:white;' }),
+            h('label', { style: 'display:flex; align-items:center; gap:8px; color:white;' }, [
+              h('input', { type: 'checkbox', checked: onboarding.answers.consent_marketing, onChange: (e) => this.setOnboardingAnswer('consent_marketing', e.target.checked) }),
+              'Aceito receber comunicações relevantes sobre este empreendimento.'
+            ]),
+            h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
+              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 3 } })), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;' }, 'Voltar'),
+              h('button', { onClick: this.submitOnboarding, disabled: !(onboarding.answers.name && onboarding.answers.email), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, 'Concluir')
             ])
           ])
         ]),

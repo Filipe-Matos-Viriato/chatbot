@@ -1,6 +1,8 @@
 // packages/backend/src/services/visitor-service.js
 import * as clientConfigService from './client-config-service.js';
 import supabase from '../config/supabase.js'; // Import Supabase client
+import OpenAI from 'openai';
+import { Pinecone } from '@pinecone-database/pinecone';
 
 class VisitorService {
   constructor() {
@@ -426,6 +428,179 @@ async acknowledgeLeads(visitorIds) {
       throw new Error('Failed to acknowledge leads');
     }
     console.log(`Acknowledged leads: ${visitorIds.join(', ')}`);
+  }
+
+  /**
+   * Compute qualification score from onboarding answers using client-configurable rules.
+   */
+  computeLeadScoreFromOnboarding(onboarding, rules) {
+    const defaultRules = {
+      weights: {
+        timeframe: { asap: 10, "1_3_months": 7, "3_6_months": 4, "6_plus_months": 2, browsing: 0 },
+        budgetProvided: 3,
+        // Optional fine-grained bucket weights (fallbacks to budgetProvided when absent)
+        budgetBuckets: {
+          "100_200k": 1,
+          "200_300k": 2,
+          "300_400k": 3,
+          "400_500k": 4,
+          "500k_plus": 5,
+          "prefer_not_to_say": 0,
+        },
+        typologySpecified: 3,
+        consentMarketing: 2,
+      },
+      minScoreOnCompletion: 5,
+      maxScore: 20,
+    };
+
+    const cfg = rules || defaultRules;
+    const w = cfg.weights || defaultRules.weights;
+
+    let score = 0;
+    const timeframeRaw = (onboarding?.buying_timeframe || '').toLowerCase();
+    const budgetRaw = (onboarding?.budget_bucket || '').toLowerCase();
+    const typology = onboarding?.typology || '';
+    const consent = Boolean(onboarding?.consent_marketing);
+
+    // Normalize timeframe
+    const timeframeKey = (timeframeRaw.includes('asap') || timeframeRaw.includes('<1')) ? 'asap'
+      : (timeframeRaw.includes('1–3') || timeframeRaw.includes('1-3') || /\b1\s*[\-–]\s*3\b/.test(timeframeRaw)) ? '1_3_months'
+      : (timeframeRaw.includes('3–6') || timeframeRaw.includes('3-6') || /\b3\s*[\-–]\s*6\b/.test(timeframeRaw)) ? '3_6_months'
+      : (timeframeRaw.includes('6+') || timeframeRaw.includes('6 +') || timeframeRaw.includes('6 plus') || timeframeRaw.includes('6 meses') || timeframeRaw.includes('6+ meses')) ? '6_plus_months'
+      : (timeframeRaw.includes('brows') || timeframeRaw.includes('explorar')) ? 'browsing'
+      : null;
+
+    if (timeframeKey && w.timeframe?.[timeframeKey] != null) {
+      score += Number(w.timeframe[timeframeKey]) || 0;
+    }
+    // Budget scoring: prefer fine-grained buckets if configured
+    if (budgetRaw) {
+      // Normalize to canonical keys
+      const raw = budgetRaw
+        .replace(/€/g, '')
+        .replace(/\s+/g, '')
+        .replace(/–/g, '-') // normalize en dash
+        .trim();
+      let budgetKey = null;
+      if (/^100-200k$/i.test(raw)) budgetKey = '100_200k';
+      else if (/^200-300k$/i.test(raw)) budgetKey = '200_300k';
+      else if (/^300-400k$/i.test(raw)) budgetKey = '300_400k';
+      else if (/^400-500k$/i.test(raw)) budgetKey = '400_500k';
+      else if (/^500k\+?$/i.test(raw) || /^>500k$/i.test(raw) || /^500\+k$/i.test(raw)) budgetKey = '500k_plus';
+      else if (raw.includes('prefernottosay') || raw.includes('prefernot') || raw.includes('prefironãodizer') || raw.includes('preferirnão')) budgetKey = 'prefer_not_to_say';
+
+      const bucketWeights = w.budgetBuckets;
+      if (budgetKey && bucketWeights && Object.prototype.hasOwnProperty.call(bucketWeights, budgetKey)) {
+        score += Number(bucketWeights[budgetKey]) || 0;
+      } else if (!raw.includes('prefernot') && !raw.includes('prefironãodizer') && !raw.includes('preferirnão')) {
+        // Fallback: any provided budget gets the generic weight
+        score += Number(w.budgetProvided) || 0;
+      }
+    }
+    if (typology && !/other|not sure|indiferente|outro/i.test(typology)) {
+      score += Number(w.typologySpecified) || 0;
+    }
+    if (consent) {
+      score += Number(w.consentMarketing) || 0;
+    }
+
+    const capped = Math.min(score, cfg.maxScore || defaultRules.maxScore);
+    if ((cfg.minScoreOnCompletion || 0) > 0) {
+      return Math.max(capped, cfg.minScoreOnCompletion);
+    }
+    return capped;
+  }
+
+  async upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, onboarding) {
+    try {
+      // Non-PII content summary
+      const summary = [
+        onboarding?.typology ? `Typology: ${onboarding.typology}` : null,
+        onboarding?.budget_bucket ? `Budget: ${onboarding.budget_bucket}` : null,
+        onboarding?.buying_timeframe ? `Timeframe: ${onboarding.buying_timeframe}` : null,
+      ].filter(Boolean).join(', ');
+
+      if (!summary) return;
+
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
+
+      const embed = await openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: `Visitor preference profile for personalization. ${summary}`,
+      });
+      const vector = embed?.data?.[0]?.embedding;
+      if (!vector) return;
+
+      const indexName = process.env.PINECONE_INDEX || 'rachatbot-1536';
+      const index = pinecone.index(indexName).namespace(clientId);
+      await index.upsert([
+        {
+          id: `visitor_profile_${visitorId}`,
+          values: vector,
+          metadata: {
+            client_id: clientId,
+            visitor_id: visitorId,
+            typology: onboarding?.typology || null,
+            budget_bucket: onboarding?.budget_bucket || null,
+            buying_timeframe: onboarding?.buying_timeframe || null,
+            category: 'visitor_profile',
+          },
+        },
+      ]);
+    } catch (error) {
+      console.error('Failed to upsert visitor preference profile to Pinecone:', error);
+    }
+  }
+
+  /**
+   * Save onboarding answers into visitors table and compute/update lead_score.
+   */
+  async saveOnboarding(visitorId, clientId, onboardingPayload) {
+    // Fetch existing visitor
+    const { data: existing, error: fetchError } = await supabase
+      .from('visitors')
+      .select('*')
+      .eq('visitor_id', visitorId)
+      .single();
+
+    if (fetchError || !existing) {
+      throw new Error('Visitor not found');
+    }
+
+    // Load client config to get onboarding scoring rules
+    let onboardingRules = null;
+    try {
+      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      onboardingRules = clientConfig?.onboardingScoringRules || null;
+    } catch (e) {
+      console.warn('Failed to load client config for onboarding scoring, using defaults');
+    }
+
+    const newScore = this.computeLeadScoreFromOnboarding(onboardingPayload, onboardingRules);
+    const mergedOnboarding = { ...(existing.onboarding_questions || {}), ...onboardingPayload };
+
+    const { data: updated, error: updateError } = await supabase
+      .from('visitors')
+      .update({
+        onboarding_questions: mergedOnboarding,
+        onboarding_completed: true,
+        // Use the higher of the two to avoid double-counting with events
+        lead_score: Math.max(existing.lead_score || 0, newScore),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('visitor_id', visitorId)
+      .select();
+
+    if (updateError) {
+      throw new Error('Failed to save onboarding');
+    }
+
+    // Fire-and-forget: upsert non-PII preference profile to Pinecone
+    this.upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, mergedOnboarding).catch(() => {});
+
+    return updated?.[0];
   }
 }
 export default new VisitorService();
