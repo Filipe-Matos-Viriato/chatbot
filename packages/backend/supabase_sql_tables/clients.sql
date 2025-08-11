@@ -1,0 +1,21 @@
+create table public.clients (
+  client_id uuid not null default gen_random_uuid (),
+  client_name text not null,
+  chatbot_name text null,
+  theme jsonb null,
+  url_pattern text null,
+  prompts jsonb null,
+  lead_scoring_rules jsonb null,
+  document_extraction jsonb null,
+  chat_history_tagging_rules jsonb null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  api_key text not null default gen_random_uuid (),
+  whitelisted_domains text[] null,
+  widget_settings jsonb null,
+  chunking_rules jsonb null,
+  tagging_rules jsonb null,
+  default_onboarding_questions jsonb null,
+  constraint clients_pkey primary key (client_id),
+  constraint clients_api_key_key unique (api_key)
+) TABLESPACE pg_default;

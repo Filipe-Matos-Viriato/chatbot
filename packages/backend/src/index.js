@@ -188,7 +188,28 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         chatHistory = "Nenhum histórico anterior disponível";
       }
 
-      // Upsert user message to Pinecone
+      // Store user message in chat_messages table
+      try {
+        const { error: chatMessageError } = await supabase
+          .from('chat_messages')
+          .insert({
+            visitor_id: visitorId,
+            session_id: sessionId,
+            client_id: clientConfig.clientId,
+            message_text: query,
+            sender_role: 'user',
+            timestamp: timestamp,
+            listing_id: context?.listingId || null,
+            development_id: context?.developmentId || null,
+          });
+        if (chatMessageError) {
+          console.error('Error inserting user message into chat_messages:', chatMessageError);
+        }
+      } catch (logError) {
+        console.error('Error logging user message to chat_messages:', logError);
+      }
+
+      // Upsert user message to Pinecone (for RAG context)
       try {
         await chatHistoryService.upsertMessage({
           text: query,
@@ -200,7 +221,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           turn_id: `${turnId}-user`,
         }, clientConfig);
       } catch (error) {
-        console.error('Failed to upsert user message, continuing without it.', error);
+        console.error('Failed to upsert user message to Pinecone, continuing without it.', error);
       }
       
       if (!query) {
@@ -257,7 +278,28 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         chatHistory
       );
 
-      // Upsert assistant response to Pinecone
+      // Store assistant response in chat_messages table
+      try {
+        const { error: chatMessageError } = await supabase
+          .from('chat_messages')
+          .insert({
+            visitor_id: visitorId,
+            session_id: sessionId,
+            client_id: clientConfig.clientId,
+            message_text: responseText,
+            sender_role: 'assistant',
+            timestamp: new Date().toISOString(),
+            listing_id: context?.listingId || null,
+            development_id: context?.developmentId || null,
+          });
+        if (chatMessageError) {
+          console.error('Error inserting assistant message into chat_messages:', chatMessageError);
+        }
+      } catch (logError) {
+        console.error('Error logging assistant message to chat_messages:', logError);
+      }
+
+      // Upsert assistant response to Pinecone (for RAG context)
       try {
         await chatHistoryService.upsertMessage({
           text: responseText,
@@ -269,24 +311,24 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           turn_id: `${turnId}-assistant`,
         }, clientConfig);
       } catch (error) {
-        console.error('Failed to upsert assistant message, continuing without it.', error);
+        console.error('Failed to upsert assistant message to Pinecone, continuing without it.', error);
       }
 
       // Log the user's question and its embedding to the questions and question_embeddings tables
-      /* try {
+      try {
         const { data: insertedQuestion, error: insertQuestionError } = await supabase
           .from('questions')
           .insert([
             {
               question_text: query,
               chatbot_response: responseText,
-              listing_id: context?.listingId || null, 
-              status: 'answered', 
+              listing_id: context?.listingId || null,
+              status: 'answered',
               visitor_id: visitorId,
               session_id: sessionId,
             },
           ])
-          .select('id'); 
+          .select('id');
 
         if (insertQuestionError) {
           console.error('Error inserting question into Supabase:', insertQuestionError);
@@ -294,7 +336,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           const questionId = insertedQuestion[0].id;
 
           const embeddingResult = await openai.embeddings.create({
-            model: embeddingModel, 
+            model: embeddingModel,
             input: query,
           });
 
@@ -314,7 +356,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         }
       } catch (logError) {
         console.error('Error logging question or embedding:', logError);
-      } */
+      }
 
       res.json({ response: responseText });
     } catch (error) {
@@ -1006,7 +1048,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         supabase.from('questions').select('question_text').eq('listing_id', id).eq('status', 'unanswered'),
         supabase.from('handoffs').select('reason').eq('listing_id', id),
         (() => {
-          let query = supabase.from('questions').select('question_text, chatbot_response, asked_at').eq('listing_id', id);
+          let query = supabase.from('questions').select('question_text, chatbot_response, asked_at, visitor_id').eq('listing_id', id);
           if (session_id) {
             query = query.eq('session_id', session_id);
           }
@@ -1041,8 +1083,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         console.error(`[Backend] Error fetching full chat history:`, fullChatHistoryError);
         throw fullChatHistoryError;
       }
-      console.log(`[Backend] Full chat history:`, fullChatHistory);
-
       if (handoffsError) {
         console.error(`[Backend] Error fetching handoffs:`, handoffsError);
         throw handoffsError;
@@ -1067,7 +1107,12 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         commonQuestions: [], // Common questions are now fetched via a separate API
         unansweredQuestions: unansweredQuestions.map(q => q.question_text) || [],
         chatHandoffs: formattedHandoffs || [],
-        fullChatHistory: fullChatHistory || [], // New line for full chat history
+        fullChatHistory: fullChatHistory.map(entry => ({
+          question: entry.question_text,
+          answer: entry.chatbot_response,
+          timestamp: entry.asked_at,
+          visitor_id: entry.visitor_id,
+        })) || [],
       });
     } catch (error) {
       console.error(`Error fetching listing details for ID ${req.params.id}:`, error);
@@ -1090,6 +1135,42 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error(`Error fetching leads for listing ${req.params.id}:`, error);
       res.status(500).json({ error: 'Failed to fetch leads for listing.' });
+    }
+  });
+
+  // API endpoint to get chat history for a specific visitor
+  app.get('/v1/chat-history/:visitorId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { clientConfig } = req;
+
+      if (!visitorId) {
+        return res.status(400).json({ error: 'Visitor ID is required.' });
+      }
+
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('message_text, sender_role, timestamp')
+        .eq('visitor_id', visitorId)
+        .eq('client_id', clientConfig.clientId)
+        .order('timestamp', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching chat history from Supabase:', error);
+        return res.status(500).json({ error: 'Failed to fetch chat history.' });
+      }
+
+      const formattedHistory = data.map(entry => ({
+        sender: entry.sender_role === 'user' ? 'user' : 'chatbot', // Map 'assistant' to 'chatbot' for frontend
+        text: entry.message_text,
+        timestamp: entry.timestamp,
+      }));
+
+      console.log('[DEBUG] Formatted chat history sent to frontend:', formattedHistory);
+      res.json(formattedHistory);
+    } catch (error) {
+      console.error(`Error fetching chat history for visitor ${req.params.visitorId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch chat history.' });
     }
   });
 

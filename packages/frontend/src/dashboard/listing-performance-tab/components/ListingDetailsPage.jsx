@@ -54,7 +54,7 @@ const ListingDetailsPage = () => {
                 }
                 
                 const listingData = await listingResponse.json();
-                console.log("Frontend: Parsed listingData:", listingData);
+                console.log("Frontend: Parsed listingData (including fullChatHistory after backend mapping):", listingData);
                 
                 setListingData(listingData.listing);
                 setListingMetrics(listingData.metrics);

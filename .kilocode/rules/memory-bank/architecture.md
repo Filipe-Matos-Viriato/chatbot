@@ -22,7 +22,7 @@ The backend is a Node.js application using Express.js. Its primary responsibilit
 -   **Context-Filtered Retrieval:** It performs a **Hybrid Search** that is strictly filtered by `client_id` and, when available, `listing_id`, `development_id`, or **user-specific assigned listings** (for agents). It also now directly queries the Supabase `listings` table for aggregative data (e.g., min/max prices) when relevant queries are detected.
 -   **Dynamic Prompt Construction:** Creates a detailed prompt using instructions and templates defined in the client's configuration, now also incorporating aggregated structured data from Supabase when applicable.
 - **`src/services/user-service.js` (User Management Service):** Manages user accounts (admins and promoters) in the **Supabase `users` table** and their assigned listings in the **Supabase `agent_listings` table**. Provides CRUD operations and methods for fetching user-specific data.
-- **Chat History for RAG:** Chat history turns are now stored in Pinecone for RAG context via `src/services/chat-history-service.js`. Each message embedding includes `visitor_id`, `client_id`, and `session_id` as metadata. Full text of chat history is referenced in Supabase.
+- **Chat History for RAG:** Chat history turns are now stored in Pinecone for RAG context via `src/services/chat-history-service.js`. Each message embedding includes `visitor_id`, `client_id`, and `session_id` as metadata. Full text of chat history is referenced in Supabase, specifically in the `chat_messages` table.
 - **Asynchronous Document Ingestion Pipeline:** A separate, configurable service responsible for:
   - **Source Processing:** Applying client-specific rules for chunking and tagging documents. This includes structured metadata ingestion, template-based chunking, and NLP-based analysis.
   - **Embedding & Upserting:** Generating vector embeddings and writing the data to the data to the vector database with rich metadata (`client_id`, `listing_id`, `development_id`, etc.).
@@ -76,6 +76,7 @@ Tables updated based on real visitor interactions include:
 - **Visitors Database (Supabase):** Stores `visitor_id`, `client_id`, `lead_score`, timestamps, and `is_acknowledged` (for new hot leads tracking). Updated via `POST /v1/sessions` (new visitor records), `POST /v1/events` (logging events and updating lead scores), and `POST /v1/leads/acknowledge` (marking hot leads as acknowledged).
 - **Events:** Records specific visitor actions and chatbot responses, including associated `listing_id` and `development_id`.
 - **Questions:** Tracks user queries for analysis and lead scoring.
+- **Chat Messages:** Stores individual chat messages for dashboard display, providing a granular, turn-by-turn chat history.
 - **Handoffs (if applicable):** Records instances where a conversation is escalated or handed off to a human agent.
 - **Listing Metrics:** Tracks engagement and performance metrics per listing, updated as visitors interact with specific listings. Now includes `engaged_users` (unique visitors who interacted with the chatbot), `total_conversions` (sum of conversion actions), `conversion_rate` (`total_conversions / engaged_users`), `unacknowledged_hot_leads`, `lead_score_distribution_hot`, `lead_score_distribution_warm`, and `lead_score_distribution_cold`.
 

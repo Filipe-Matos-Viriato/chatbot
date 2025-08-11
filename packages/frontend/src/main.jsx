@@ -7,6 +7,7 @@ import Dashboard from './dashboard/Dashboard';
 import AdminDashboard from './dashboard/AdminDashboard';
 import ClientManagementTab from './dashboard/admin-dashboard/ClientManagementTab';
 import DocumentUploadPage from './dashboard/admin-dashboard/pages/DocumentUploadPage';
+import ChatHistoryPage from './dashboard/listing-performance-tab/components/listing-details/ChatHistoryPage'; // Import ChatHistoryPage
 import { ClientProvider } from './context/ClientContext'; // Import ClientProvider
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -21,6 +22,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="clients" element={<ClientManagementTab />} />
             <Route path="document-upload/:clientId" element={<DocumentUploadPage />} />
           </Route>
+          <Route path="/chat-history/:visitorId" element={<ChatHistoryPage />} /> {/* New route for chat history */}
         </Routes>
       </BrowserRouter>
     </ClientProvider>

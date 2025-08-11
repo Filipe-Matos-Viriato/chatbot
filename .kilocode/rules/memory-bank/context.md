@@ -60,6 +60,10 @@ The primary focus is on ensuring accurate and complete data ingestion into Supab
     - Backend logic in `visitor-service.js` updated to track `engaged_users` (unique visitors per listing) and `total_conversions` (sum of conversion actions).
     - `conversion_rate` calculation updated to `total_conversions / engaged_users`.
     - Frontend component `packages/frontend/src/dashboard/listing-performance-tab/components/OverallListingPerformance.jsx` updated to display these new metrics in a sortable, paginated table.
+- **Chat Messages Table Implementation:** The `chat_messages` table has been fully implemented and integrated. This involved:
+    - Standardizing the `client_id` column to `uuid` across `listings`, `events`, `listing_metrics`, and `question_embeddings` tables, and removing conflicting default values.
+    - Modifying the `populate-chat-messages.js` script to generate `listing_id` values in lowercase with leading zeros (e.g., "ap-01" to "ap-09", and "ap-10") to match the format in the `listings` table.
+    - Successful population of the `chat_messages` table using the updated script.
 
 - **Client and User Management Implementation:**
     - **Database Schema:** Created `clients` table (for client configurations), `users` table (for admins/promoters), and `agent_listings` table (to link promoters to specific listings).
