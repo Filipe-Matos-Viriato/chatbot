@@ -90,3 +90,18 @@
   - Removed duplicated `/v1/visitor` route.
   - Fixed development routes to call `developmentService` methods explicitly (`createDevelopment`, `getDevelopmentById`, `getDevelopmentsByClientId`, `updateDevelopment`, `deleteDevelopment`).
   - Verified no new linter issues; server boot remains unchanged.
+
+- Implemented persistent chat message logging to Supabase `public.chat_messages`:
+  - Added `packages/backend/supabase_sql_tables/chat_messages.sql` defining the table schema (id, visitor_id, session_id, client_id, message_text, sender_role, timestamp, listing_id, development_id).
+  - Updated `/api/chat` in `packages/backend/src/index.js` to insert a row into `chat_messages` for each user message and assistant response, including optional `listing_id` and `development_id` when present.
+  - Kept Pinecone upserts for semantic history; Supabase now stores structured transcripts for analytics.
+
+- Reverted RAG refactor attempts post-PRD: removed temporary shared utils and two-query mode changes; restored `rag-service.js` and `index.js` to prior behavior. PRD remains for future planning.
+ - Implemented RAG simplification per PRD:
+   - Added shared utils: `utils/rag-parsing.js`, `utils/async-timeout.js`, `utils/rerank.js`, `utils/context.js`, `utils/prompt.js`, `utils/structured-logger.js`.
+   - Refactored `src/rag-service.js` to use two-query retrieval (targeted + broad) with timeouts, centralized parsing, modular re-ranking, normalized context text picking, and safe prompt templating. Added structured logs.
+   - Reduced broad topK to 30; kept client namespace isolation and promoter filtering.
+   - Added unit tests for parsing utilities under `packages/backend/test`.
+   - Added env-configurable flags/timeouts: `RAG_TWO_QUERY_ENABLED`, `RAG_BROAD_TOPK`, `RAG_PINECONE_TIMEOUT_MS`, `RAG_OPENAI_TIMEOUT_MS`.
+   - Logged lightweight citations (ids/urls) for top matches; added timing logs for Pinecone and OpenAI calls.
+   - Improved token accounting by truncating context within budget.

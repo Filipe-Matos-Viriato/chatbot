@@ -3,6 +3,13 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import { encode } from 'gpt-3-encoder';
 import * as userService from './services/user-service.js';
 import listingService from './services/listing-service.js';
+import { withTimeout } from './utils/async-timeout.js';
+import { reRankMatches } from './utils/rerank.js';
+import { buildContext, pickText } from './utils/context.js';
+import { renderTemplate } from './utils/prompt.js';
+import { createLogger } from './utils/structured-logger.js';
+import { extractListingIdFromUrl, extractListingIdFromQuery, extractQueryFilters, isAggregativePriceQuery } from './utils/rag-parsing.js';
+import { removeRedundantClosingCTA } from './utils/postprocess.js';
 
 // Initialize clients
 const openai = new OpenAI({
@@ -23,152 +30,12 @@ const generativeModel = "gpt-3.5-turbo";
 const MAX_TOTAL_TOKENS = 4096; // Max tokens for gpt-3.5-turbo
 const MAX_RESPONSE_TOKENS = 1000;
 const CONTEXT_TOKEN_BUDGET = MAX_TOTAL_TOKENS - MAX_RESPONSE_TOKENS; // Reserve tokens for the response
+const PINECONE_TIMEOUT_MS = Number(process.env.RAG_PINECONE_TIMEOUT_MS || 2000);
+const OPENAI_TIMEOUT_MS = Number(process.env.RAG_OPENAI_TIMEOUT_MS || 15000);
+const TWO_QUERY_ENABLED = String(process.env.RAG_TWO_QUERY_ENABLED || 'true') === 'true';
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-function extractListingIdFromQuery(query) {
-  if (!query) return null;
-  const lower = String(query).toLowerCase();
-
-  // 1) Legacy pattern support like "ap-123"
-  const legacyMatch = lower.match(/ap-\d+/);
-  if (legacyMatch) return legacyMatch[0];
-
-  // 2) Natural-language patterns for Up Investments style IDs
-  //    Goal: derive `block_<n>_apt_<LETTER>` (LETTER must be A-H)
-  //    Examples we want to support:
-  //    - "T2 E Bloco 1"
-  //    - "t2 e bloco 1"
-  //    - "fração E bloco 1" / "fracao E bloco 1"
-  //    - "bloco 1 fração E" (order-insensitive)
-
-  const blockMatch = lower.match(/bloco\s*(\d+)/i);
-  const blockNum = blockMatch ? blockMatch[1] : null;
-
-  // Try explicit fraction first
-  let fractionMatch = lower.match(/fraç(?:ão|ao)\s*([a-h])/i);
-  // If not explicitly marked as fraction, try a letter next to a typology
-  if (!fractionMatch) fractionMatch = lower.match(/\bt\s*\d\s*([a-h])\b/i);
-  // Or any standalone letter A-H that appears in the same query as a block number
-  if (!fractionMatch && blockNum) fractionMatch = lower.match(/\b([a-h])\b(?=.*\bbloco\s*\d+)/i);
-
-  const fractionLetter = fractionMatch ? fractionMatch[1] : null;
-
-  if (blockNum && fractionLetter) {
-    return `block_${blockNum}_apt_${fractionLetter.toUpperCase()}`;
-  }
-
-  return null;
-}
-
-function extractQueryFilters(query, currentListingPrice = null) {
-  const filters = {};
-  const lowerCaseQuery = query.toLowerCase();
-
-  // Handle specific apartment queries including variations like:
-  // "apartamento A no bloco 1", "T2 E Bloco 1", "fração E bloco 1"
-  const naturalListingId = extractListingIdFromQuery(query);
-  if (naturalListingId) {
-    filters.listing_id = naturalListingId;
-  } else {
-    // Backward-compatible pattern
-    const apartmentMatch = lowerCaseQuery.match(/apartamento\s+([a-z])\s+no\s+bloco\s+(\d+)/);
-    if (apartmentMatch) {
-      filters.listing_id = `block_${apartmentMatch[2]}_apt_${apartmentMatch[1].toUpperCase()}`;
-    }
-  }
-
-  // Handle direct query for typology, e.g., "T1" or "t2"
-  const typologyMatch = lowerCaseQuery.match(/\b(t\d)\b/i);
-  if (typologyMatch) {
-    // Align with ingestion metadata which uses 'typology'
-    filters.typology = typologyMatch[1].toUpperCase();
-  }
-
-  // Number of Bedrooms (exact, greater than, less than)
-  let match = lowerCaseQuery.match(/(\d+)\s*quartos/);
-  if (match) {
-    const num = parseInt(match[1], 10);
-    if (!isNaN(num)) {
-      filters.num_bedrooms = num;
-    }
-  }
-
-  match = lowerCaseQuery.match(/mais de\s*(\d+)\s*quartos/);
-  if (match) {
-    const num = parseInt(match[1], 10);
-    if (!isNaN(num)) {
-      filters.num_bedrooms = { "$gt": num };
-    }
-  }
-
-  match = lowerCaseQuery.match(/menos de\s*(\d+)\s*quartos/);
-  if (match) {
-    const num = parseInt(match[1], 10);
-    if (!isNaN(num)) {
-      filters.num_bedrooms = { "$lt": num };
-    }
-  }
-
-  // Number of Bathrooms
-  match = lowerCaseQuery.match(/(\d+)\s*casas de banho/);
-  if (match) {
-    const num = parseInt(match[1], 10);
-    if (!isNaN(num)) {
-      filters.num_bathrooms = num;
-    }
-  }
-
-  // Total Area (less than X m2)
-  match = lowerCaseQuery.match(/menos de\s*([\d.,]+)\s*m²/);
-  if (match) {
-    const area = parseFloat(match[1].replace(',', '.'));
-    if (!isNaN(area)) {
-      filters.total_area_sqm = { "$lt": area };
-    }
-  }
-
-  // Price (less than X€)
-  match = lowerCaseQuery.match(/menos de\s*([\d.,]+)€/);
-  if (match) {
-    const price = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
-    if (!isNaN(price)) {
-      filters.price_eur = { "$lt": price };
-    }
-  }
-
-  if (currentListingPrice && (lowerCaseQuery.includes('preço') || lowerCaseQuery.includes('custo') || lowerCaseQuery.includes('valor'))) {
-    // This case is handled by the LLM with context
-  }
-
-  if (currentListingPrice) {
-    if (lowerCaseQuery.includes('mais baixo') || lowerCaseQuery.includes('mais barato')) {
-      filters.price_eur = { "$lt": currentListingPrice };
-    } else if (lowerCaseQuery.includes('mais alto') || lowerCaseQuery.includes('mais caro')) {
-      filters.price_eur = { "$gt": currentListingPrice };
-    }
-  }
-
-  // Boolean features
-  if (lowerCaseQuery.includes('piscina')) filters.has_pool = true;
-  if (lowerCaseQuery.includes('jardim')) filters.has_garden = true;
-  if (lowerCaseQuery.includes('garagem')) filters.has_garage = true;
-  if (lowerCaseQuery.includes('elevador')) filters.has_elevator = true;
-  if (lowerCaseQuery.includes('varanda')) filters.has_balcony = true;
-  if (lowerCaseQuery.includes('terraço')) filters.has_terrace = true;
-  if (lowerCaseQuery.includes('ginásio')) filters.has_gym = true;
-  if (lowerCaseQuery.includes('carregamento elétrico')) filters.has_electric_car_charging = true;
-  if (lowerCaseQuery.includes('animais permitidos')) filters.pets_allowed = true;
-
-  // Debug what filters were extracted
-  if (Object.keys(filters).length > 0) {
-    console.log(`🔍 extractQueryFilters extracted: ${JSON.stringify(filters, null, 2)} from query: "${query}"`);
-  } else {
-    console.log(`🔍 extractQueryFilters found no filters in query: "${query}"`);
-  }
-  
-  return filters;
-}
+const log = createLogger('rag-service');
 
 async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}) {
   // Validate search vector before proceeding
@@ -234,130 +101,70 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     }
   }
 
-  // The actual context IDs were moved up to the debug section
+  // Two-query path: 1) Targeted (listing OR development OR query-derived listing), 2) Broad
+  const targetedFilter = (() => {
+    if (contextListingId) return { ...baseFilter, listing_id: contextListingId };
+    const derived = extractListingIdFromQuery(originalQuery);
+    if (derived) return { ...baseFilter, listing_id: derived };
+    if (contextDevelopmentId) return { ...baseFilter, development_id: contextDevelopmentId };
+    return null;
+  })();
+
   const queries = [];
-
-  // 1. Targeted Listing Query
-  if (contextListingId) {
-    console.log(`Queueing targeted query for listing_id: ${contextListingId}`);
-    const listingQueryParams = {
-      vector: searchVector,
-      topK: 10,
-      includeMetadata: true,
-      filter: { ...baseFilter, listing_id: contextListingId },
-    };
-    const { vector, ...loggableListingParams } = listingQueryParams;
-    console.log('🌲 PINECONE LISTING QUERY:', JSON.stringify(loggableListingParams, null, 2));
-    queries.push(
-      namespacedIndex.query(listingQueryParams)
-    );
-  } else {
-    queries.push(Promise.resolve({ matches: [] })); // Add empty promise to keep array order
-  }
-
-  // 2. Targeted Development Query
-  if (contextDevelopmentId) {
-    console.log(`Queueing targeted query for development_id: ${contextDevelopmentId}`);
-    const developmentQueryParams = {
-      vector: searchVector,
-      topK: 10,
-      includeMetadata: true,
-      filter: { ...baseFilter, development_id: contextDevelopmentId },
-    };
-    const { vector, ...loggableDevParams } = developmentQueryParams;
-    console.log('🌲 PINECONE DEVELOPMENT QUERY:', JSON.stringify(loggableDevParams, null, 2));
-    queries.push(
-      namespacedIndex.query(developmentQueryParams)
-    );
-  } else {
-    queries.push(Promise.resolve({ matches: [] })); // Add empty promise
-  }
-
-  // 3. Targeted Listing Query derived from the user's text (e.g., "T2 E Bloco 1")
-  const queryListingIdForQueryStage = extractListingIdFromQuery(originalQuery);
-  if (queryListingIdForQueryStage) {
-    console.log(`Queueing targeted query for query-derived listing_id: ${queryListingIdForQueryStage}`);
-    const queryDerivedListingParams = {
-      vector: searchVector,
-      topK: 10,
-      includeMetadata: true,
-      filter: { ...baseFilter, listing_id: queryListingIdForQueryStage },
-    };
-    const { vector, ...loggableQueryDerivedParams } = queryDerivedListingParams;
-    console.log('🌲 PINECONE QUERY-DERIVED LISTING QUERY:', JSON.stringify(loggableQueryDerivedParams, null, 2));
-    queries.push(
-      namespacedIndex.query(queryDerivedListingParams)
-    );
+  if (TWO_QUERY_ENABLED && targetedFilter) {
+    const targetedParams = { vector: searchVector, topK: 10, includeMetadata: true, filter: targetedFilter };
+    const { vector, ...loggable } = targetedParams;
+    log.info('pinecone.targeted.query', { params: loggable });
+    queries.push(withTimeout(namespacedIndex.query(targetedParams), PINECONE_TIMEOUT_MS, 'pinecone-targeted'));
   } else {
     queries.push(Promise.resolve({ matches: [] }));
   }
 
-  // 4. Broad Query (pure semantic within client namespace)
-  console.log("Queueing broad query with NO query-derived filters (semantic-only). Query filters detected (for re-ranking only):", JSON.stringify(queryFilters, null, 2));
-  const initialFilter = { ...baseFilter };
-  const broadQueryParams = {
-      vector: searchVector,
-      topK: 50,
-      includeMetadata: true,
-      filter: initialFilter,
-  };
-  const { vector, ...loggableBroadParams } = broadQueryParams;
-  console.log('🌲 PINECONE BROAD QUERY:', JSON.stringify(loggableBroadParams, null, 2));
-  queries.push(
-    namespacedIndex.query(broadQueryParams)
-  );
+  const broadTopK = Number(process.env.RAG_BROAD_TOPK || 30);
+  const broadParams = { vector: searchVector, topK: broadTopK, includeMetadata: true, filter: { ...baseFilter } };
+  const { vector: _v, ...loggableBroad } = broadParams;
+  log.info('pinecone.broad.query', { params: loggableBroad });
+  queries.push(withTimeout(namespacedIndex.query(broadParams), PINECONE_TIMEOUT_MS, 'pinecone-broad'));
 
-  // Execute all queries in parallel
-  console.log(`[${clientConfig.clientName}] 🔍 EXTENSIVE DEBUG - Executing Pinecone queries...`);
-  console.log(`[${clientConfig.clientName}] Namespace: ${clientConfig.clientId}`);
-  console.log(`[${clientConfig.clientName}] Base filter: ${JSON.stringify(baseFilter)}`);
-  
-  let listingResponse, developmentResponse, queryDerivedListingResponse, broadResponse;
+  let targetedResponse, broadResponse;
   try {
-    [listingResponse, developmentResponse, queryDerivedListingResponse, broadResponse] = await Promise.all(queries);
-    
-    console.log(`[${clientConfig.clientName}] 🔍 QUERY RESULTS:`);
-    console.log(`  - Listing query matches: ${listingResponse?.matches?.length || 0}`);
-    console.log(`  - Development query matches: ${developmentResponse?.matches?.length || 0}`);
-    console.log(`  - Query-derived listing matches: ${queryDerivedListingResponse?.matches?.length || 0}`);
-    console.log(`  - Broad query matches: ${broadResponse?.matches?.length || 0}`);
-    
-    if (broadResponse?.matches?.length > 0) {
-      console.log(`  - First broad match metadata: ${JSON.stringify(broadResponse.matches[0].metadata)}`);
-    }
+    const t = log.time('pinecone.all');
+    [targetedResponse, broadResponse] = await Promise.all(queries);
+    t.end({
+      targetedCount: targetedResponse?.matches?.length || 0,
+      broadCount: broadResponse?.matches?.length || 0,
+      broadTopK: broadParams.topK,
+      twoQueryEnabled: TWO_QUERY_ENABLED,
+    });
   } catch (error) {
-    console.error(`[${clientConfig.clientName}] ❌ ERROR EXECUTING PINECONE QUERIES:`, error);
+    log.error('pinecone.query.failed', { error: error.message });
     throw error;
   }
 
-  let matches = listingResponse?.matches || [];
-  const developmentMatches = developmentResponse.matches || [];
-  const queryDerivedMatches = queryDerivedListingResponse.matches || [];
-  const broadMatches = broadResponse.matches || [];
+  let matches = (targetedResponse?.matches || []);
+  const broadMatches = (broadResponse?.matches || []);
 
   console.log(`Found ${matches.length} matches in targeted listing search.`);
-  console.log(`Found ${developmentMatches.length} matches in targeted development search.`);
   console.log(`Found ${broadMatches.length} matches in broad search.`);
   
   // Add detailed debugging for broad search
   console.log(`🔍 DEBUGGING - Broad Search Details:`);
   console.log(`  Base filter: ${JSON.stringify(baseFilter, null, 2)}`);
-  console.log(`  Initial filter (base + query): ${JSON.stringify(initialFilter, null, 2)}`);
   console.log(`  Vector dimensions: ${searchVector.length}`);
-  console.log(`  TopK requested: 50`);
+  console.log(`  TopK requested: ${broadParams.topK}`);
   if (broadMatches.length > 0) {
     console.log(`  Best match score: ${broadMatches[0].score}`);
     console.log(`  Worst match score: ${broadMatches[broadMatches.length - 1].score}`);
   }
 
-  const priceMatch = matches.find(match => match.metadata.price_eur !== undefined);
+  const priceMatch = matches.find(match => match.metadata && match.metadata.price_eur !== undefined) || broadMatches.find(m => m.metadata && m.metadata.price_eur !== undefined);
   let currentListingPrice = null;
   if (priceMatch) {
     currentListingPrice = priceMatch.metadata.price_eur;
     console.log(`Current listing (${contextListingId}) price from targeted search: ${currentListingPrice}`);
   }
 
-  const combinedMatches = [...matches, ...developmentMatches, ...queryDerivedMatches];
+  const combinedMatches = [...matches];
   const existingIds = new Set(combinedMatches.map(m => m.id));
 
   broadMatches.forEach(bm => {
@@ -386,144 +193,21 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   }
 
   if (matches.length > 0) {
-    const queryListingId = extractListingIdFromQuery(originalQuery);
     const reRankQueryFilters = extractQueryFilters(originalQuery, currentListingPrice);
-    const queryLower = (originalQuery || '').toLowerCase();
-    const isLookingForT1 = queryLower.includes('t1') || queryLower.includes('1 quarto');
-    const isLookingForT2 = queryLower.includes('t2') || queryLower.includes('2 quartos');
-    const isLookingForStudio = queryLower.includes('estúdio') || queryLower.includes('studio');
-
-    const debugBoostLogs = [];
-    matches = matches.map((match, idx) => {
-      let score = match.score;
-      if (contextListingId && match.metadata.listing_id === contextListingId) {
-        score += 1.0;
-      }
-      if (queryListingId && match.metadata.listing_id === queryListingId) {
-        score += 1.5;
-      }
-      if (contextDevelopmentId && match.metadata.development_id === contextDevelopmentId) {
-        score += 0.8;
-      }
-
-      if (Object.keys(reRankQueryFilters).length > 0) {
-        let filterMatchCount = 0;
-        for (const key in reRankQueryFilters) {
-          if (key === 'total_area_sqm' || key === 'price_eur' || key === 'num_bedrooms') {
-            if (reRankQueryFilters[key].$lt && match.metadata[key] < reRankQueryFilters[key].$lt) {
-              filterMatchCount++;
-            } else if (reRankQueryFilters[key].$gt && match.metadata[key] > reRankQueryFilters[key].$gt) {
-              filterMatchCount++;
-            } else if (match.metadata[key] === reRankQueryFilters[key]) {
-              filterMatchCount++;
-            }
-          } else if (key === 'typology') {
-            if (match.metadata.typology === reRankQueryFilters.typology || match.metadata.type === reRankQueryFilters.typology) {
-              filterMatchCount++;
-            }
-          } else if (match.metadata[key] === reRankQueryFilters[key]) {
-            filterMatchCount++;
-          }
-        }
-        score += (filterMatchCount * 0.2);
-        if (filterMatchCount > 0 && idx < 8) {
-          debugBoostLogs.push({ id: match.metadata?.listing_id || match.metadata?.development_id || match.id, filterMatches: filterMatchCount });
-        }
-      }
-
-      // Semantic-aware textual hints boost (no hard filters)
-      const meta = match.metadata || {};
-      const text = (meta.text || meta.chunk || meta.content || meta.body || meta.page_text || '').toString().toLowerCase();
-      if (text) {
-        if (isLookingForT1 && (text.includes(' t1 ') || text.includes(' tipologia t1') || text.includes(' 1 quarto') || text.includes(' t1,') || text.includes(' t1.'))) {
-          score += 0.3;
-          if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'T1' });
-        }
-        if (isLookingForT2 && (text.includes(' t2 ') || text.includes(' tipologia t2') || text.includes(' 2 quartos') || text.includes(' t2,') || text.includes(' t2.'))) {
-          score += 0.3;
-          if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'T2' });
-        }
-        if (isLookingForStudio && (text.includes(' estúdio') || text.includes(' studio'))) {
-          score += 0.2;
-          if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'studio' });
-        }
-      }
-      return { ...match, score };
+    matches = reRankMatches({
+      matches,
+      contextListingId,
+      contextDevelopmentId,
+      originalQuery,
+      queryFilters: reRankQueryFilters,
+      topN: 20,
     });
-
-    matches.sort((a, b) => b.score - a.score);
-    matches = matches.slice(0, 20);
-    try {
-      console.log('🔎 Re-ranking debug (top up to 8 shown):', JSON.stringify(debugBoostLogs, null, 2));
-      const preview = matches.slice(0, 5).map(m => ({
-        id: m.metadata?.listing_id || m.metadata?.development_id || m.id,
-        score: Number(m.score?.toFixed?.(6) || m.score),
-        typology: m.metadata?.typology || m.metadata?.type || null,
-        docCategory: m.metadata?.document_category,
-        hasText: Boolean(m.metadata?.text || m.metadata?.chunk || m.metadata?.content || m.metadata?.body || m.metadata?.page_text),
-      }));
-      console.log('📊 Top results after re-ranking:', JSON.stringify(preview, null, 2));
-
-      const details = matches.slice(0, 5).map(m => {
-        const meta = m.metadata || {};
-        const text = (meta.text || meta.chunk || meta.content || meta.body || meta.page_text || '').toString();
-        return {
-          id: meta.listing_id || meta.development_id || m.id,
-          url_pt: meta.url_pt || null,
-          url_en: meta.url_en || null,
-          hasT1Hint: /\bT1\b|Tipologia:\s*T1|1 quarto/i.test(text),
-          snippet: text.slice(0, 140),
-        };
-      });
-      console.log('🧾 Candidate listing details:', JSON.stringify(details, null, 2));
-    } catch (e) {}
   }
 
   return { matches };
 }
 
-function isAggregativePriceQuery(query) {
-  const lowerCaseQuery = query.toLowerCase();
-  return (
-    lowerCaseQuery.includes('mais barato') ||
-    lowerCaseQuery.includes('preço mais baixo') ||
-    lowerCaseQuery.includes('preço mínimo') ||
-    lowerCaseQuery.includes('mais caro') ||
-    lowerCaseQuery.includes('preço mais alto') ||
-    lowerCaseQuery.includes('preço máximo')
-  );
-}
-
-/**
- * Extracts a listing ID from a URL.
- * @param {string} url - The URL to parse.
- * @returns {string|null} The extracted listing ID or null if not found.
- */
-function extractListingIdFromUrl(url) {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    const path = u.pathname || '';
-    // Find last numeric segment in path, tolerant to trailing slash
-    const segments = path.split('/').filter(Boolean);
-    for (let i = segments.length - 1; i >= 0; i--) {
-      const seg = segments[i];
-      const m = seg.match(/^(\d{3,})$/);
-      if (m) return m[1];
-    }
-    // Fallback: query param id
-    const qId = u.searchParams.get('id');
-    if (qId && /^(\d{3,})$/.test(qId)) return qId;
-    // Fallback: hash
-    const hashMatch = (u.hash || '').match(/(\d{3,})/);
-    if (hashMatch) return hashMatch[1];
-  } catch (_) {
-    // Non-standard URL, try simple regex
-    const match = (url + '').match(/(?:\/)\b(\d{3,})\b(?:[\/#?]|$)/);
-    if (match) return match[1];
-  }
-  return null;
-}
+// parsing helpers now imported from ./utils/rag-parsing.js
 
 async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null) {
   let aggregativeContext = '';
@@ -606,25 +290,31 @@ Use esta informação como o contexto principal para responder a perguntas como 
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
-  const pickTextFromMetadata = (meta) => (
-    meta?.text || meta?.chunk || meta?.content || meta?.body || meta?.page_text || ''
-  );
-  const pickedTexts = queryResponse.matches
-    .map(m => pickTextFromMetadata(m.metadata))
-    .filter(Boolean);
-  let context = pageContext + pickedTexts.join('\n\n---\n\n');
+  let context = buildContext({ pageContext, matches: queryResponse.matches });
   try {
+    const citations = queryResponse.matches.slice(0, 5).map(m => {
+      const meta = m.metadata || {};
+      return {
+        id: meta.listing_id || meta.development_id || m.id,
+        url_pt: meta.url_pt || null,
+        url_en: meta.url_en || null,
+      };
+    });
+    log.info('context.citations', { count: citations.length, citations });
+  } catch (_) {}
+  try {
+    const texts = queryResponse.matches.map(m => pickText(m.metadata)).filter(Boolean);
     const topMatchSummaries = queryResponse.matches.slice(0, 5).map(m => ({
       id: m.metadata?.listing_id || m.metadata?.development_id || m.id,
       typology: m.metadata?.typology || m.metadata?.type || null,
       category: m.metadata?.document_category,
-      hasText: Boolean(pickTextFromMetadata(m.metadata)),
+      hasText: Boolean(pickText(m.metadata)),
     }));
     console.log(`[${clientConfig.clientName}] 🧩 Context assembly:`, JSON.stringify({
-      pickedTextCount: pickedTexts.length,
+      pickedTextCount: texts.length,
       hasPageContext: Boolean(pageContext),
       topMatchSummaries,
-      sampleText: pickedTexts[0] ? pickedTexts[0].slice(0, 200) : null,
+      sampleText: texts[0] ? texts[0].slice(0, 200) : null,
     }, null, 2));
   } catch (_) {}
   let remainingTokens = CONTEXT_TOKEN_BUDGET;
@@ -643,7 +333,14 @@ Use esta informação como o contexto principal para responder a perguntas como 
   context += "\n\nIMPORTANTE: Apenas mencione e recomende propriedades que pertencem ao cliente atual (" + clientConfig.clientName + "). NÃO RECOMENDE propriedades ou listagens que não pertencem a este cliente. Se não houver propriedades disponíveis que correspondam aos critérios, informe o utilizador de forma clara.";
   
   const contextTokens = encode(context).length;
-  remainingTokens -= contextTokens;
+  if (contextTokens > remainingTokens) {
+    const overBy = contextTokens - remainingTokens;
+    // naive truncate by characters proportionally
+    const ratio = (context.length - Math.ceil(overBy * 3)) / context.length; // approx 3 chars per token
+    const cut = Math.max(0, Math.floor(context.length * Math.max(0.5, Math.min(1, ratio))));
+    context = context.slice(0, cut);
+  }
+  remainingTokens = Math.max(0, CONTEXT_TOKEN_BUDGET - encode(context).length);
   
   // Truncate chat history
   let truncatedChatHistory = '';
@@ -687,12 +384,7 @@ Use esta informação como o contexto principal para responder a perguntas como 
     question: query,
     pageUrl: pageUrl || 'Não disponível'
   };
-  let systemPrompt = systemPromptTemplate;
-  Object.keys(templateVariables).forEach(key => {
-    const placeholder = `{${key}}`;
-    // We only replace placeholders in the system prompt template, not the final prompt itself
-    systemPrompt = systemPrompt.replace(new RegExp(placeholder, 'g'), templateVariables[key]);
-  });
+  const systemPrompt = renderTemplate(systemPromptTemplate, templateVariables);
   
   console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt. Final token estimate: ${MAX_TOTAL_TOKENS - remainingTokens}`);
 
@@ -705,12 +397,20 @@ Use esta informação como o contexto principal para responder a perguntas como 
   let retries = 3;
   while (retries > 0) {
     try {
-      const completion = await openai.chat.completions.create({
-        model: generativeModel,
-        messages: messages,
-        max_tokens: MAX_RESPONSE_TOKENS,
-      });
-      return completion.choices[0].message.content;
+      const timer = log.time('openai.chat');
+      const completion = await withTimeout(
+        openai.chat.completions.create({
+          model: generativeModel,
+          messages: messages,
+          max_tokens: MAX_RESPONSE_TOKENS,
+        }),
+        OPENAI_TIMEOUT_MS,
+        'openai-chat'
+      );
+      timer.end({ model: generativeModel, maxTokens: MAX_RESPONSE_TOKENS });
+      const raw = completion.choices[0].message.content;
+      const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';
+      return removeRedundantClosingCTA(raw, previousAssistantText);
     } catch (error) {
       if (error.status === 503 && retries > 1) {
         console.log(`Model is overloaded. Retrying in 2 seconds... (${retries - 1} retries left)`);

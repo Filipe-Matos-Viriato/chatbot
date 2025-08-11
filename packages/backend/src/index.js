@@ -26,6 +26,7 @@ import supabaseModule from './config/supabase.js';
 import ChatHistoryService from './services/chat-history-service.js';
 import * as developmentService from './services/development-service.js';
 import userService from './services/user-service.js';
+import { extractListingIdFromUrl as parseListingFromUrl, extractListingIdFromQuery as parseListingFromQuery } from './utils/rag-parsing.js';
 console.log('[DEBUG] All imports in index.js completed.');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -157,6 +158,54 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const turnId = Date.now().toString(); // Simple unique ID for this turn
       const chatHistoryService = new ChatHistoryService();
 
+      // Helper: derive effective listing_id and development_id to persist with messages
+      const deriveContextIds = async () => {
+        let effectiveListingId = context?.listingId || null;
+        let effectiveDevelopmentId = context?.developmentId || clientConfig.defaultDevelopmentId || null;
+
+        // Try to extract listing id from pageUrl using shared util
+        if (!effectiveListingId && pageUrl) {
+          try {
+            const candidate = parseListingFromUrl(String(pageUrl));
+            if (candidate) {
+              const { data: listingRow, error: listingErr } = await supabase
+                .from('listings')
+                .select('id, development_id')
+                .eq('id', candidate)
+                .eq('client_id', clientConfig.clientId)
+                .single();
+              if (!listingErr && listingRow) {
+                effectiveListingId = listingRow.id;
+                effectiveDevelopmentId = listingRow.development_id || effectiveDevelopmentId;
+              }
+            }
+          } catch (_) {
+            // ignore URL parsing errors
+          }
+        }
+
+        // Try to extract listing id from the user's query using shared util
+        if (!effectiveListingId && query) {
+          const candidate = parseListingFromQuery(query);
+          if (candidate) {
+            const { data: listingRowQ, error: listingErrQ } = await supabase
+              .from('listings')
+              .select('id, development_id')
+              .eq('id', candidate)
+              .eq('client_id', clientConfig.clientId)
+              .single();
+            if (!listingErrQ && listingRowQ) {
+              effectiveListingId = listingRowQ.id;
+              effectiveDevelopmentId = listingRowQ.development_id || effectiveDevelopmentId;
+            }
+          }
+        }
+
+        return { effectiveListingId, effectiveDevelopmentId };
+      };
+
+      const { effectiveListingId, effectiveDevelopmentId } = await deriveContextIds();
+
       // Retrieve recent chat history for this visitor (across all sessions)
       let chatHistory = null;
       try {
@@ -187,6 +236,46 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         }, clientConfig);
       } catch (error) {
         console.error('Failed to upsert user message, continuing without it.', error);
+      }
+
+      // Persist user message to Supabase chat_messages
+      try {
+        const listingId = effectiveListingId || null;
+        const developmentId = effectiveDevelopmentId || null;
+        let visitorIdForInsert = null;
+        if (visitorId) {
+          try {
+            const { data: vRow, error: vErr } = await supabase
+              .from('visitors')
+              .select('visitor_id')
+              .eq('visitor_id', visitorId)
+              .single();
+            if (vRow && !vErr) {
+              visitorIdForInsert = visitorId;
+            }
+          } catch (_) {
+            // ignore and keep visitorIdForInsert as null
+          }
+        }
+        const { error: insertUserMsgError } = await supabase
+          .from('chat_messages')
+          .insert([
+            {
+              visitor_id: visitorIdForInsert,
+              session_id: sessionId || null,
+              client_id: clientConfig.clientId,
+              message_text: query,
+              sender_role: 'user',
+              timestamp: timestamp,
+              listing_id: listingId,
+              development_id: developmentId || null,
+            },
+          ]);
+        if (insertUserMsgError) {
+          console.error('Failed to insert user message into chat_messages:', insertUserMsgError);
+        }
+      } catch (error) {
+        console.error('Unexpected error inserting user chat message:', error);
       }
       
       if (!query) {
@@ -258,6 +347,49 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         }, clientConfig);
       } catch (error) {
         console.error('Failed to upsert assistant message, continuing without it.', error);
+      }
+
+      // Persist assistant message to Supabase chat_messages
+      try {
+        const listingId = effectiveListingId || null;
+        const developmentId = effectiveDevelopmentId || null;
+        const assistantTimestamp = new Date().toISOString();
+        let visitorIdForInsert = null;
+        if (visitorId) {
+          try {
+            const { data: vRow, error: vErr } = await supabase
+              .from('visitors')
+              .select('visitor_id')
+              .eq('visitor_id', visitorId)
+              .single();
+            if (vRow && !vErr) {
+              visitorIdForInsert = visitorId;
+            }
+          } catch (_) {
+            // ignore and keep visitorIdForInsert as null
+          }
+        }
+        const { error: insertAssistantMsgError } = await supabase
+          .from('chat_messages')
+          .insert([
+            {
+              visitor_id: visitorIdForInsert,
+              session_id: sessionId || null,
+              client_id: clientConfig.clientId,
+              message_text: responseText,
+              sender_role: 'assistant',
+              timestamp: assistantTimestamp,
+              listing_id: listingId,
+              development_id: developmentId || null,
+            },
+          ]);
+        if (insertAssistantMsgError) {
+          console.error('Failed to insert assistant message into chat_messages:', insertAssistantMsgError);
+        } else {
+          console.log('[chat_messages] Assistant message inserted for visitor', visitorId || '(null)', 'listing', listingId || '(null)');
+        }
+      } catch (error) {
+        console.error('Unexpected error inserting assistant chat message:', error);
       }
 
       // Log the user's question and its embedding to the questions and question_embeddings tables
