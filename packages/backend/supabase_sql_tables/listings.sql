@@ -8,13 +8,13 @@ create table public.listings (
   baths integer null,
   amenities text[] null,
   created_at timestamp with time zone null default now(),
-  client_id text not null default 'client-abc'::text,
+  client_id text not null default ''::text,
   development_id uuid null,
   listing_status text not null default 'available'::text,
   current_state text not null default 'project'::text,
   client_name text null,
   constraint listings_pkey primary key (id),
-  constraint listings_development_id_fkey foreign KEY (development_id) references developments (id) ON DELETE CASCADE,
+  constraint listings_development_id_fkey foreign KEY (development_id) references developments (id) on delete CASCADE,
   constraint listings_current_state_check check (
     (
       current_state = any (
@@ -34,3 +34,6 @@ create table public.listings (
     )
   )
 ) TABLESPACE pg_default;
+
+
+

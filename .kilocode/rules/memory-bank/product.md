@@ -13,7 +13,7 @@ The chatbot solves the problem of providing instant, accurate, and context-aware
   - Queries a Pinecone vector database to find relevant text chunks.
   - Constructs a detailed prompt including the original query and the retrieved context.
   - Sends the prompt to the Google Gemini model to generate a natural language response.
-- **Frontend Chat Widget:** A React-based frontend provides a simple and clean user interface for the chat functionality. It displays the conversation history and sends user messages to the backend.
+- **Frontend Chat Widget:** A React-based frontend provides a simple and clean user interface for the chat functionality. It displays the conversation history (stored in the `chat_messages` table) and sends user messages to the backend.
 - **Context-Aware Interactions:** The chatbot is designed to receive external context from the parent application where it is embedded. This context (e.g., product details, user information) is passed to the backend and included in the prompt to the language model, allowing the chatbot's responses to be tailored to the user's current activity in the parent application.
 
 ## User Experience Goals

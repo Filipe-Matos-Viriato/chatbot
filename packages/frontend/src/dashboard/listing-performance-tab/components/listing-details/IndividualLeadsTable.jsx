@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const IndividualLeadsTable = ({ listingName, leads }) => {
     const [sortColumn, setSortColumn] = useState(null);
     const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+    const navigate = useNavigate();
 
     const sortedLeads = useMemo(() => {
         if (!leads) return [];
@@ -87,7 +89,7 @@ const IndividualLeadsTable = ({ listingName, leads }) => {
                                 <tr
                                     key={lead.visitor_id}
                                     className="cursor-pointer hover:bg-gray-50"
-                                    onClick={() => console.log('Clicked on visitor:', lead.visitor_id)} // Placeholder for click action
+                                    onClick={() => navigate(`/chat-history/${lead.visitor_id}`)}
                                 >
                                     <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900">
                                         {lead.visitor_id}
@@ -98,8 +100,8 @@ const IndividualLeadsTable = ({ listingName, leads }) => {
                                     <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center">
                                         {new Date(lead.created_at).toLocaleString()}
                                     </td>
-                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center">
-                                        <span className="material-symbols-outlined text-gray-500">chat_info</span> {/* Chat Info icon */}
+                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center align-middle">
+                                        <span className="material-symbols-sharp text-gray-500 relative top-[5px]">forum</span> {/* Chat Info icon */}
                                     </td>
                                 </tr>
                             ))}
