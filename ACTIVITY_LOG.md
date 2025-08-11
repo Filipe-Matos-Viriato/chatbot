@@ -105,3 +105,8 @@
    - Added env-configurable flags/timeouts: `RAG_TWO_QUERY_ENABLED`, `RAG_BROAD_TOPK`, `RAG_PINECONE_TIMEOUT_MS`, `RAG_OPENAI_TIMEOUT_MS`.
    - Logged lightweight citations (ids/urls) for top matches; added timing logs for Pinecone and OpenAI calls.
    - Improved token accounting by truncating context within budget.
+ - Implemented hallucination guard for aggregative pricing queries:
+   - Added `getCheapestListingsByTypology()` in `listing-service.js` and wired SQL-backed fallback for queries like "mais barato/mais caro" (typology-aware, development-aware) in `rag-service.js`.
+   - Aggregative Price Context now uses precise DB values (also lists second-cheapest when available) to avoid fabricated figures.
+ - Reduced repetitive CTAs:
+   - Added `utils/postprocess.js` and integrated into `rag-service.js` to trim redundant trailing phrases like "Como posso ajudar mais?" when unnecessary.

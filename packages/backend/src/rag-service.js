@@ -240,10 +240,23 @@ Use esta informação como o contexto principal para responder a perguntas como 
 
   if (isAggregativePriceQuery(query)) {
     try {
-      if (query.toLowerCase().includes('mais barato') || query.toLowerCase().includes('preço mínimo')) {
-        const minPrice = await listingService.getMinPrice(clientConfig.clientId);
-        aggregativeContext = minPrice !== null ? `A propriedade com o preço mais baixo disponível é de ${minPrice}€.` : `Não foi possível encontrar o preço mínimo nos documentos fornecidos.`;
-      } else if (query.toLowerCase().includes('mais caro') || query.toLowerCase().includes('preço máximo')) {
+      const qLower = query.toLowerCase();
+      if (qLower.includes('mais barato') || qLower.includes('preço mínimo')) {
+        // Try precise SQL first (typology-aware)
+        const tMatch = qLower.match(/\b(t\d)\b/i);
+        const typology = tMatch ? tMatch[1].toUpperCase() : null;
+        const devId = clientConfig.defaultDevelopmentId || null;
+        const cheapest = await listingService.getCheapestListingsByTypology(clientConfig.clientId, typology, devId, 2);
+        if (cheapest && cheapest.length > 0) {
+          const [first, second] = cheapest;
+          const firstLine = `O ${typology || ''} mais barato é ${first.name || first.id} por €${Number(first.price).toLocaleString('pt-PT')}.`.trim();
+          const secondLine = second ? ` O segundo mais barato é ${second.name || second.id} por €${Number(second.price).toLocaleString('pt-PT')}.` : '';
+          aggregativeContext = `${firstLine}${secondLine}`;
+        } else {
+          const minPrice = await listingService.getMinPrice(clientConfig.clientId);
+          aggregativeContext = minPrice !== null ? `A propriedade com o preço mais baixo disponível é de ${minPrice}€.` : `Não foi possível encontrar o preço mínimo nos documentos fornecidos.`;
+        }
+      } else if (qLower.includes('mais caro') || qLower.includes('preço máximo')) {
         const maxPrice = await listingService.getMaxPrice(clientConfig.clientId);
         aggregativeContext = maxPrice !== null ? `A propriedade com o preço mais alto disponível é de ${maxPrice}€.` : `Não foi possível encontrar o preço máximo nos documentos fornecidos.`;
       }
