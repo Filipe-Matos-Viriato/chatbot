@@ -44,6 +44,7 @@ async function getClientConfig(clientId) {
     urlPattern: data.url_pattern,
     prompts: data.prompts,
     leadScoringRules: data.lead_scoring_rules,
+    onboardingScoringRules: data.onboarding_scoring_rules || null,
     documentExtraction: data.document_extraction,
     chatHistoryTaggingRules: data.chat_history_tagging_rules,
     chunking_rules: data.chunking_rules,

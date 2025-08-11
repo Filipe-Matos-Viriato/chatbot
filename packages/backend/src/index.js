@@ -18,13 +18,15 @@ import multer from 'multer';
 
 import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
 import * as clientConfigServiceModule from './services/client-config-service.js';
-import { processDocument } from './services/ingestion-service-imoprime.js';
+// Simple PDF/Text ingestion service
+import { processDocument } from './services/ingestion-service-pdf.js';
 import listingService from './services/listing-service.js';
 import visitorService from './services/visitor-service.js';
 import supabaseModule from './config/supabase.js';
 import ChatHistoryService from './services/chat-history-service.js';
 import * as developmentService from './services/development-service.js';
 import userService from './services/user-service.js';
+import { extractListingIdFromUrl as parseListingFromUrl, extractListingIdFromQuery as parseListingFromQuery } from './utils/rag-parsing.js';
 console.log('[DEBUG] All imports in index.js completed.');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -138,23 +140,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // API endpoint to get a visitor by ID
-  app.post('/v1/visitor', async (req, res) => {
-    try {
-      const { visitorId } = req.body;
-      if (!visitorId) {
-        return res.status(400).json({ error: 'Visitor ID is required' });
-      }
-      const visitor = await visitorService.getVisitor(visitorId);
-      if (!visitor) {
-        return res.status(404).json({ error: 'Visitor not found' });
-      }
-      res.json(visitor);
-    } catch (error) {
-      console.error('Error getting visitor:', error);
-      res.status(500).json({ error: 'Failed to get visitor.' });
-    }
-  });
+   
 
 
 
@@ -165,11 +151,60 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-            const { query, visitorId, sessionId, context } = req.body;
+            const { query, visitorId, sessionId, context, pageUrl } = req.body;
+      console.log(`[CHAT] clientId=${req.clientConfig.clientId} query="${query}" pageUrl=${pageUrl || 'n/a'}`);
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
       const chatHistoryService = new ChatHistoryService();
+
+      // Helper: derive effective listing_id and development_id to persist with messages
+      const deriveContextIds = async () => {
+        let effectiveListingId = context?.listingId || null;
+        let effectiveDevelopmentId = context?.developmentId || clientConfig.defaultDevelopmentId || null;
+
+        // Try to extract listing id from pageUrl using shared util
+        if (!effectiveListingId && pageUrl) {
+          try {
+            const candidate = parseListingFromUrl(String(pageUrl));
+            if (candidate) {
+              const { data: listingRow, error: listingErr } = await supabase
+                .from('listings')
+                .select('id, development_id')
+                .eq('id', candidate)
+                .eq('client_id', clientConfig.clientId)
+                .single();
+              if (!listingErr && listingRow) {
+                effectiveListingId = listingRow.id;
+                effectiveDevelopmentId = listingRow.development_id || effectiveDevelopmentId;
+              }
+            }
+          } catch (_) {
+            // ignore URL parsing errors
+          }
+        }
+
+        // Try to extract listing id from the user's query using shared util
+        if (!effectiveListingId && query) {
+          const candidate = parseListingFromQuery(query);
+          if (candidate) {
+            const { data: listingRowQ, error: listingErrQ } = await supabase
+              .from('listings')
+              .select('id, development_id')
+              .eq('id', candidate)
+              .eq('client_id', clientConfig.clientId)
+              .single();
+            if (!listingErrQ && listingRowQ) {
+              effectiveListingId = listingRowQ.id;
+              effectiveDevelopmentId = listingRowQ.development_id || effectiveDevelopmentId;
+            }
+          }
+        }
+
+        return { effectiveListingId, effectiveDevelopmentId };
+      };
+
+      const { effectiveListingId, effectiveDevelopmentId } = await deriveContextIds();
 
       // Retrieve recent chat history for this visitor (across all sessions)
       let chatHistory = null;
@@ -272,10 +307,11 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const responseText = await generateResponse(
         query, 
         clientConfig, 
-        embeddingVector,           // Pass the actual embedding vector
-        context,                   // External context 
+        embeddingVector,
+        pageUrl ? null : context, // Prioritize pageUrl for context
         userContext, 
-        chatHistory
+        chatHistory,
+        pageUrl
       );
 
       // Store assistant response in chat_messages table
@@ -556,6 +592,34 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to save onboarding answers for a visitor
+  app.post('/v1/visitors/:visitorId/onboarding', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { clientConfig } = req;
+      const { typology, budget_bucket, buying_timeframe, name, email, consent_marketing } = req.body || {};
+
+      if (!visitorId) {
+        return res.status(400).json({ error: 'Visitor ID is required' });
+      }
+
+      const onboardingPayload = {
+        typology: typology || null,
+        budget_bucket: budget_bucket || null,
+        buying_timeframe: buying_timeframe || null,
+        name: name || null,
+        email: email || null,
+        consent_marketing: Boolean(consent_marketing),
+      };
+
+      const updated = await visitorService.saveOnboarding(visitorId, clientConfig.clientId, onboardingPayload);
+      res.json({ success: true, visitor: updated });
+    } catch (error) {
+      console.error('Error saving onboarding for visitor:', error);
+      res.status(500).json({ error: 'Failed to save onboarding.' });
+    }
+  });
+
 
 
   // API endpoint to acknowledge leads
@@ -585,7 +649,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
       const developmentData = { name, location, amenities, client_id: clientConfig.clientId };
-      const newDevelopment = await createDevelopment(developmentData);
+      const newDevelopment = await developmentService.createDevelopment(developmentData);
       console.log('[DEBUG] POST /v1/developments response:', newDevelopment);
       res.status(201).json(newDevelopment);
     } catch (error) {
@@ -597,7 +661,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { id } = req.params;
-      const development = await getDevelopmentById(id);
+      const development = await developmentService.getDevelopmentById(id);
       if (!development || development.client_id !== req.clientConfig.clientId) {
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
@@ -611,7 +675,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   app.get('/v1/developments', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
       const { clientConfig } = req;
-      const developments = await getDevelopmentsByClientId(clientConfig.clientId);
+      const developments = await developmentService.getDevelopmentsByClientId(clientConfig.clientId);
       res.json(developments);
     } catch (error) {
       console.error('Error fetching developments by client ID:', error);
@@ -625,7 +689,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       if (clientId !== req.clientConfig.clientId) {
         return res.status(403).json({ error: 'Unauthorized access to client developments.' });
       }
-      const developments = await getDevelopmentsByClientId(clientId);
+      const developments = await developmentService.getDevelopmentsByClientId(clientId);
       console.log('[DEBUG] GET /v1/clients/:clientId/developments response:', developments);
       res.json(developments);
     } catch (error) {
@@ -644,7 +708,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      const updatedDevelopment = await updateDevelopment(id, req.body);
+      const updatedDevelopment = await developmentService.updateDevelopment(id, req.body);
       res.json(updatedDevelopment);
     } catch (error) {
       console.error('Error updating development:', error);
@@ -662,7 +726,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'Development not found or unauthorized.' });
       }
 
-      await deleteDevelopment(id);
+      await developmentService.deleteDevelopment(id);
       res.json({ success: true, message: 'Development deleted successfully.' });
     } catch (error) {
       console.error('Error deleting development:', error);

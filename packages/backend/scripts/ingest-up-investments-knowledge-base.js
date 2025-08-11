@@ -11,10 +11,11 @@ import 'dotenv/config';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { processDocument, extractText } from '../src/services/ingestion-service.js';
+import { processDocument, extractText } from '../src/services/ingestion-service-imoprime.js';
 import { getClientConfig } from '../src/services/client-config-service.js';
 import * as developmentService from '../src/services/development-service.js';
 import { v4 as uuidv4 } from 'uuid';
+import supabase from '../src/config/supabase.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,12 +89,37 @@ const ingestUpInvestmentsKnowledgeBase = async () => {
       let documentCategory = 'general';
       let metadata = {};
 
-      if (baseFilename.match(/^\d+_[a-h]$/)) {
-        // Listing files (e.g., 1_a.json, 2_h.json)
-        documentCategory = 'listing';
-        metadata.development_id = evergreenPureDevId;
-        metadata.listing_id = baseFilename; // Use the filename as listing ID
-      } else if (baseFilename.includes('Evergreen')) {
+          const match = baseFilename.match(/^(\d+)_([a-h])$/);
+        if (match) {
+          documentCategory = 'listing';
+          metadata.development_id = evergreenPureDevId;
+          const block = match[1];
+          const apartment = match[2];
+          metadata.listing_id = `block_${block}_apt_${apartment}`; // Standardize listing_id
+
+          // Create a rich contextual string and extract URLs
+          const filePath = path.join(KNOWLEDGE_BASE_PATH, filename);
+          const fileContent = await fs.readFile(filePath, 'utf-8');
+          const listingData = JSON.parse(fileContent);
+          
+          // Extract price from the JSON (may be in 'preço' or 'preco' field)
+          const price = listingData.preco || listingData.preço || (listingData.preço ? listingData.preço.replace('€', '') : null);
+          
+          // Extract URLs
+          if (listingData.url_pt) metadata.url_pt = listingData.url_pt;
+          if (listingData.url_en) metadata.url_en = listingData.url_en;
+          
+          // Create listing ID and name for database
+          const listingId = `block_${block}_apt_${apartment.toUpperCase()}`;
+          const listingName = `Apartamento ${listingData.tipologia} no bloco ${block}, Fração ${apartment.toUpperCase()}`;
+          
+          // Store ID and name in metadata for database insertion
+          metadata.listing_id = listingId;
+          metadata.listing_name = listingName;
+          
+          // Rich contextual string for vector search
+          metadata.contextual_string = `Apartamento ${listingData.tipologia} no bloco ${block}, Fração ${apartment.toUpperCase()} com ${listingData.area_bruta_m2} m² por ${price}€. ${listingData.url_pt ? 'URL: ' + listingData.url_pt : ''}`;
+        } else if (baseFilename.includes('Evergreen')) {
         // Development-specific files
         documentCategory = 'development';
         metadata.development_id = evergreenPureDevId;
@@ -121,11 +147,70 @@ const ingestUpInvestmentsKnowledgeBase = async () => {
           originalname: filename,
         };
 
+        // Insert or update the listing in the database if it's a listing type
+        if (documentCategory === 'listing') {
+          try {
+            // Check if listing already exists
+            const { data: existingListing, error: queryError } = await supabase
+              .from('listings')
+              .select('id')
+              .eq('id', metadata.listing_id)
+              .single();
+            
+            if (queryError && queryError.code !== 'PGRST116') { // PGRST116 = not found
+              console.error(`Error checking if listing exists: ${queryError.message}`);
+            }
+            
+            // Prepare listing data
+            const listingData = {
+              id: metadata.listing_id,
+              name: metadata.listing_name,
+              type: 'apartamento',
+              price: parseFloat(metadata.price || listingData.preco || listingData.preço?.replace('€', '') || 0),
+              beds: parseInt(listingData.tipologia?.replace('T', '') || 0),
+              amenities: listingData.descricao?.detalhes_extra || [],
+              client_id: CLIENT_ID,
+              development_id: evergreenPureDevId,
+              listing_status: 'available',
+              current_state: 'finished',
+              url: listingData.url_pt || ''
+            };
+            
+            // Insert or update listing
+            if (!existingListing) {
+              const { error: insertError } = await supabase
+                .from('listings')
+                .insert([listingData]);
+              
+              if (insertError) {
+                console.error(`Error inserting listing: ${insertError.message}`);
+              } else {
+                console.log(`✅ Inserted listing in database: ${metadata.listing_id}`);
+              }
+            } else {
+              const { error: updateError } = await supabase
+                .from('listings')
+                .update(listingData)
+                .eq('id', metadata.listing_id);
+              
+              if (updateError) {
+                console.error(`Error updating listing: ${updateError.message}`);
+              } else {
+                console.log(`✅ Updated listing in database: ${metadata.listing_id}`);
+              }
+            }
+          } catch (dbError) {
+            console.error(`Error managing listing in database: ${dbError.message}`);
+          }
+        }
+        
+        // Process document for vector search
         const result = await processDocument({
           clientConfig,
           file: fileObject,
           documentCategory,
           metadata,
+          contextual_string: metadata.contextual_string
         }, { extractText });
 
         if (result.success) {

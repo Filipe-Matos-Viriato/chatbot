@@ -92,4 +92,61 @@ ListingService.getMaxPrice = async (clientId) => {
   return data ? data.price : null;
 };
 
+// Returns the full row for the lowest price listing
+ListingService.getMinPriceListing = async (clientId) => {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('price', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') {
+    console.error(`Error fetching minimum price listing for client ${clientId}:`, error);
+    throw new Error(`Error fetching minimum price listing: ${error.message}`);
+  }
+  return data || null;
+};
+
+// Returns the full row for the highest price listing
+ListingService.getMaxPriceListing = async (clientId) => {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('price', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') {
+    console.error(`Error fetching maximum price listing for client ${clientId}:`, error);
+    throw new Error(`Error fetching maximum price listing: ${error.message}`);
+  }
+  return data || null;
+};
+
+// Returns top-N cheapest listings filtered by typology and optional development
+ListingService.getCheapestListingsByTypology = async (clientId, typology, developmentId = null, limit = 3) => {
+  let query = supabase
+    .from('listings')
+    .select('id, name, type, price, client_id, development_id')
+    .eq('client_id', clientId)
+    .order('price', { ascending: true })
+    .limit(limit);
+
+  if (typology) {
+    // Try to filter by standardized type column; fallback to name contains
+    query = query.ilike('type', `${typology}%`);
+  }
+  if (developmentId) {
+    query = query.eq('development_id', developmentId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error(`Error fetching cheapest listings for typology ${typology}:`, error);
+    throw new Error(`Error fetching cheapest listings: ${error.message}`);
+  }
+  return Array.isArray(data) ? data.filter(r => r && r.price != null) : [];
+};
+
 export default ListingService;

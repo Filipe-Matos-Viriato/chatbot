@@ -1,335 +1,204 @@
-# Enterprise RAG Chatbot Platform
+Enterprise RAG Chatbot (Real Estate)
 
-An enterprise-grade chatbot platform built with React, Node.js, and advanced AI capabilities. This system provides multi-tenant support, real-time analytics, lead scoring, and document-based question answering for real estate agencies.
+### Overview
 
-## 🏗️ Architecture Overview
+Multi-tenant Retrieval-Augmented Generation (RAG) chatbot for real estate. The system ingests client documents and listings, stores semantic vectors in Pinecone, structured entities in Supabase, and serves context-grounded answers via an embeddable website widget and an admin-facing frontend.
 
-The platform consists of three main packages:
+### Key Features
 
-- **Backend**: Node.js/Express API with RAG (Retrieval Augmented Generation) capabilities
-- **Frontend**: React dashboard with comprehensive analytics and chat interface
-- **Test Harness**: Development testing environment
+- Multi-tenant by design: every operation is scoped by `client_id`
+- Hybrid retrieval: Pinecone semantic search + structured filters (price, bedrooms, amenities)
+- Context awareness: uses current page URL/listing for targeted answers
+- Client-specific Pinecone indexes for isolation and performance
+- Supabase-backed listings, events, questions, metrics and chat history analytics
+- Chat history storage and replay; suggested questions generation
+- Admin dashboard: manage clients, listings, developments, users, rules and prompts
+- Lightweight embeddable widget (Webpack + Preact) with dynamic configuration
 
-## 🚀 Key Features
+### Monorepo Layout
 
-### 🤖 AI-Powered Chat
-- **RAG Pipeline**: Context-aware responses using Pinecone vector database
-- **Document Ingestion**: PDF processing for property listings and general information
-- **Multi-language Support**: Configurable for different languages
-- **Fallback Handling**: Graceful degradation when information isn't available
+- packages/backend/ (Node.js + Express)
+  - src/index.js: Express app factory, routes and middleware
+  - src/rag-service.js: embeddings, hybrid search, prompt assembly, LLM calls
+  - src/services/*: client config, listings, ingestion, chat history, users, visitors
+  - supabase_sql_tables/*.sql: database schema (listings, events, questions, metrics, documents)
+  - scripts/*: ingestion, clustering, migrations, Pinecone maintenance
+- packages/frontend/ (Vite + React + Tailwind)
+  - Admin dashboard and analytics UI
+  - public/widget/loader.js: compiled widget loader served statically at /widget/loader.js
+- packages/widget/ (Webpack + Preact)
+  - Embeddable chatbot widget
+  - src/index.js: window.initViriatoChatbot(config) + auto-init with script data-attributes
+  - src/App.jsx: chat UI; calls backend /api/chat and related endpoints
+- api/ (Vercel serverless entry)
+  - database-backend.js: bootstraps the Express app from packages/backend/src/index.js
+- Docs: RAG_SYSTEM_DEVELOPER_GUIDE.md, CLIENT_SPECIFIC_INDEXES.md, PRDs
 
-### 🏢 Multi-Tenant Architecture
-- **Client Configurations**: JSON-based per-client customization
-- **Brand Customization**: Colors, fonts, messages, and prompts
-- **URL Pattern Matching**: Automatic context detection from URLs
-- **Lead Scoring Rules**: Configurable scoring algorithms per client
+### Technology Stack
 
-### 📊 Advanced Analytics
-- **Real-time Dashboard**: Performance metrics and insights
-- **Lead Performance**: Conversion tracking and qualification metrics
-- **Listing Analytics**: Property-specific performance data
-- **User Insights**: Visitor behavior and engagement analysis
-- **Question Clustering**: AI-powered question categorization
+- Backend: Node.js, Express, OpenAI API (text-embedding-3-small, gpt-3.5-turbo), Pinecone, Supabase
+- Frontend: React, Vite, Tailwind
+- Widget: Preact, Webpack (UMD loader)
 
-### 🎯 Lead Management
-- **Behavioral Scoring**: Points-based lead qualification
-- **Event Tracking**: User interaction monitoring
-- **Hot Lead Alerts**: Real-time notifications for high-value prospects
-- **Conversion Tracking**: Multi-stage funnel analysis
+### Environment Variables (backend)
 
-## 🛠️ Technology Stack
+Create packages/backend/.env with:
 
-### Backend
-- **Runtime**: Node.js with Express.js
-- **Database**: Supabase (PostgreSQL)
-- **Vector Store**: Pinecone
-- **AI Services**: Google Generative AI (Gemini 2.5 Flash)
-- **Document Processing**: PDF-parse, Mammoth (for Word docs)
-- **Scheduling**: Node-cron for automated tasks
+- OPENAI_API_KEY (required)
+- PINECONE_API_KEY (required)
+- SUPABASE_URL (required)
+- SUPABASE_ANON_KEY (required)
+- PORT (optional, default 3007)
 
-### Frontend
-- **Framework**: React 18 with Vite
-- **Styling**: Tailwind CSS
-- **UI Components**: Radix UI primitives
-- **Charts**: Chart.js with React wrapper
-- **Routing**: React Router v7
+Note: Pinecone index name can be set per-client in the client config (pineconeIndex), else defaults to rachatbot-1536.
 
-### Infrastructure
-- **Authentication**: Supabase Auth
-- **File Storage**: Supabase Storage
-- **Deployment**: Vercel-ready configuration
-- **Monitoring**: Built-in logging and error handling
+### Database Setup (Supabase)
 
-## 📋 Database Schema
+Run the SQL files in packages/backend/supabase_sql_tables/:
 
-### Core Tables
-- `listings`: Property information and metadata
-- `listing_metrics`: Performance metrics per property
-- `visitors`: User sessions with lead scores
-- `events`: User interaction tracking
-- `questions`: User queries with embeddings
-- `clustered_questions`: AI-grouped common questions
-- `handoffs`: Chat escalations to human agents
+- listings.sql
+- listing_metrics.sql
+- events.sql
+- questions.sql
+- questions_embeddings.sql
+ - documents.sql (optional registry of uploaded docs)
 
-## 🚦 Getting Started
+These define the core structured entities. Additional tables (e.g., clients, users, visitors, handoffs, clustered_questions) should exist per your environment.
 
-### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-- Supabase account
-- Pinecone account
-- Google AI API key
+### Install & Run (local)
 
-### Environment Variables
+1) Install dependencies (workspace root):
 
-Create `.env` files in both backend and frontend packages:
-
-**Backend (.env)**
-```env
-# Database
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-
-# AI Services
-GOOGLE_API_KEY=your_google_ai_key
-PINECONE_API_KEY=your_pinecone_key
-PINECONE_INDEX_NAME=your_index_name
-PINECONE_NAMESPACE=your_namespace
-
-# Server
-PORT=3006
 ```
-
-**Frontend (.env)**
-```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_API_URL=http://localhost:3006
-```
-
-### Installation
-
-1. **Clone and Install**
-```bash
-git clone <repository-url>
-cd chatbot
 npm install
 ```
 
-2. **Setup Database**
-```bash
-# Create database tables
-cd packages/backend
-node scripts/create-supabase-tables.js
+2) Start backend (loads packages/backend/.env):
 
-# Create question embeddings table
-node scripts/create-question-embeddings-table.js
-
-# Create clustered questions table
-node scripts/create-clustered-questions-table.js
-
-# Populate with test data (optional)
-node scripts/ingest-test-data.js
 ```
-
-3. **Start Development**
-```bash
-# Terminal 1: Start backend
 npm run start:backend
+```
 
-# Terminal 2: Start frontend
+Backend listens on http://localhost:3007 by default.
+
+3) Start frontend (admin dashboard):
+
+```
 npm run dev
+```
 
-# Terminal 3: Start test harness (optional)
+Frontend serves on Vite’s dev port (e.g., http://localhost:5173).
+
+4) Optional: test harness for the widget demo:
+
+```
 npm run start:harness
 ```
 
-## 📁 Project Structure
+Then open http://localhost:5175.
 
-chatbot/
-├── packages/
-│ ├── backend/ # Node.js API server
-│ │ ├── configs/ # Client configurations
-│ │ │ └── client-abc.json # Example client config
-│ │ ├── scripts/ # Database and utility scripts
-│ │ │ ├── create-supabase-tables.js
-│ │ │ ├── cluster-questions.js
-│ │ │ ├── ingest-test-data.js
-│ │ │ └── populate-.js
-│ │ ├── src/
-│ │ │ ├── config/ # Database connections
-│ │ │ │ └── supabase.js
-│ │ │ ├── services/ # Business logic
-│ │ │ │ ├── client-config-service.js
-│ │ │ │ ├── ingestion-service.js
-│ │ │ │ └── visitor-service.js
-│ │ │ ├── index.js # Express server
-│ │ │ └── rag-service.js # AI/RAG implementation
-│ │ └── test-data/ # Sample PDFs
-│ ├── frontend/ # React dashboard
-│ │ ├── src/
-│ │ │ ├── chatbot/ # Chat interface
-│ │ │ │ └── ChatInterface.jsx
-│ │ │ ├── dashboard/ # Analytics components
-│ │ │ │ ├── overview-tab/
-│ │ │ │ ├── lead-performance-tab/
-│ │ │ │ ├── listing-performance-tab/
-│ │ │ │ ├── chatbot-analytics-tab/
-│ │ │ │ └── user-insights-tab/
-│ │ │ ├── components/ # Reusable UI components
-│ │ │ │ └── ui/
-│ │ │ └── config/ # Configuration
-│ │ │ └── supabaseClient.js
-│ │ └── public/ # Static assets
-│ └── test-harness/ # Development testing
-└── package.json # Workspace configuration
+### Data Ingestion (PDF/Text simplified)
 
-## 🔧 Configuration
+- Upload documents via API (asynchronous processing): POST /v1/documents/upload
+  - Multipart fields: files, document_category (client|development|listing), listing_id (optional), development_id (optional)
+- Backend extracts text (pdf-parse for PDF), chunks with LangChain, embeds with OpenAI, and upserts to Pinecone with `metadata.text` for RAG. It best-effort logs the file to Supabase `documents`.
+- The ingestion service now lives at `packages/backend/src/services/ingestion-service-pdf.js` and is wired into `/v1/documents/upload`.
 
-### Client Setup
+### Core API Endpoints (selected)
 
-Each client requires a configuration file in `packages/backend/configs/`:
+- Health
+  - GET / → backend up
+- Chat
+  - POST /api/chat → body: { query, visitorId, sessionId, context, pageUrl } (requires X-Client-Id)
+  - POST /api/suggested-questions
+  - GET  /api/common-questions?listingId=
+  - GET  /api/v1/history/:visitorId
+- Widget configuration
+  - GET /api/v1/widget/config/:clientId
+- Visitors & sessions
+  - POST /v1/sessions → { clientId, listingId? } returns { visitor_id }
+  - POST /v1/visitor → { visitorId }
+  - POST /v1/events → { visitorId, eventType, clientId, listingId? }
+- Listings
+  - POST /v1/listings create/update
+  - GET  /v1/clients/:clientId/listings
+  - GET  /v1/listings/:id
+  - PUT  /v1/listings/:id
+  - DELETE /v1/listings/:id
+- Clients
+  - GET  /v1/clients and /api/v1/clients
+  - POST /v1/clients and /api/v1/clients
+  - GET  /v1/clients/:id
+  - PUT  /v1/clients/:id and /api/v1/clients/:id
+  - DELETE /v1/clients/:id and /api/v1/clients/:id
+- Users (agents/promoters)
+  - CRUD: /v1/users … /v1/users/:id
+  - Assign/remove listing: POST/DELETE /v1/users/:userId/listings/:listingId
+  - By client: GET /v1/clients/:clientId/users, GET /v1/clients/:clientId/agents
+- Listing analytics bundle
+  - GET /api/listing/:id?session_id= → details, metrics, unanswered, handoffs, full chat history
 
-```json
-{
-  "clientId": "client-abc",
-  "chatbotName": "PropertyBot",
-  "theme": {
-    "primaryColor": "#007bff",
-    "secondaryColor": "#6c757d",
-    "fontFamily": "Arial, sans-serif"
-  },
-  "urlPattern": "https://example-client.com/listings/(?<listingId>[a-zA-Z0-9-]+)",
-  "prompts": {
-    "systemInstruction": "You are a helpful assistant for the real estate agency...",
-    "fallbackResponse": "I'm sorry, I can't find specific information..."
-  },
-  "leadScoringRules": {
-    "engagementBehavior": {
-      "questions_3_5": 5,
-      "questions_6_10": 10,
-      "time_5_10_min": 5,
-      "clicked_listing": 5
-    },
-    "questionIntentQuality": {
-      "asked_pricing": 10,
-      "asked_location": 10,
-      "asked_details": 5
-    },
-    "conversionActions": {
-      "submitted_contact": 15,
-      "booked_viewing": 30,
-      "asked_contact_agent": 20
-    }
-  }
-}
+Headers: most authenticated endpoints expect X-Client-Id and optionally X-User-Id, X-User-Role (admin|promoter) to scope/authorise requests.
+
+### Embeddable Widget
+
+Serve the compiled loader at /widget/loader.js (part of the frontend build). Embed on any page:
+
+```html
+<script
+  src="/widget/loader.js"
+  data-client-id="<client-uuid>"
+  data-api-url="https://your-domain.example"
+  data-primary-color="#1f2937"
+  data-font-family="Inter, sans-serif"
+></script>
 ```
 
-### Document Ingestion
+The loader auto-initialises by default. Alternatively, initialise manually:
 
-Upload documents via the API:
-
-```bash
-curl -X POST http://localhost:3006/api/ingest/file \
-  -H "x-client-id: client-abc" \
-  -F "file=@document.pdf" \
-  -F "ingestionType=listing" \
-  -F "listingId=ap-01" \
-  -F "listingUrl=https://example.com/listings/ap-01"
+```html
+<script src="/widget/loader.js" data-auto-init="false"></script>
+<script>
+  window.initViriatoChatbot({
+    clientId: '<client-uuid>',
+    apiUrl: 'https://your-domain.example',
+    theme: { primaryColor: '#1f2937', fontFamily: 'Inter, sans-serif' }
+  });
+  // The widget automatically includes pageUrl in chat requests
+  // and will reuse visitorId via localStorage when available.
+</script>
 ```
 
-## 📊 API Endpoints
+Widget calls:
 
-### Chat & AI
-- `POST /api/chat` - Send chat message and get AI response
-- `POST /api/suggested-questions` - Get suggested questions
-- `GET /api/common-questions` - Get clustered common questions
+- GET /api/v1/widget/config/:clientId → dynamic configuration and copy
+- POST /v1/sessions → creates a visitor session, saves visitor_id in localStorage
+- GET /api/v1/history/:visitorId → loads chat history
+- POST /api/chat → sends messages and gets grounded responses
 
-### Session Management
-- `POST /v1/sessions` - Create visitor session
-- `POST /v1/events` - Log visitor events
-- `POST /v1/visitor` - Get visitor information
-- `POST /v1/leads/acknowledge` - Acknowledge hot leads
+### Client-Specific Pinecone Indexes
 
-### Analytics
-- `GET /api/listing/:id` - Get listing details and metrics
+To isolate data per client, set pineconeIndex in the client’s configuration record. See packages/backend/docs/CLIENT_SPECIFIC_INDEXES.md for details and migration tips.
 
-### Configuration
-- Widget config endpoint (to be implemented)
+### Deployment (Vercel)
 
-## 🧪 Testing
+- The frontend is built to packages/frontend/dist (see vercel.json)
+- Serverless functions route /api/* and /v1/* to api/database-backend.js, which initialises the Express app
+- Root scripts:
+  - npm run build → builds widget + frontend and copies the widget to frontend public/
+  - npm run vercel-build (CI convenience)
 
-The project includes a test harness for development:
+Ensure all required environment variables are set in the Vercel project.
 
-```bash
-npm run start:harness
-```
+### Troubleshooting
 
-This provides a minimal testing environment for the chat functionality.
+- 500 from /api/chat: verify OPENAI_API_KEY and that embeddings/LLM models are available
+- No results from Pinecone: confirm client index name, dimensions (1536) and that vectors exist
+- Widget CORS: backend CORS is permissive (origin: true) for embedding; ensure correct API URL
+- Supabase auth: ensure SUPABASE_URL and SUPABASE_ANON_KEY and tables exist
 
-## 🔄 Background Jobs
+### Licensing
 
-The system runs scheduled tasks:
+UNLICENSED (internal project). Update package.json and this section if publishing.
 
-- **Question Clustering**: Hourly analysis of user questions
-- **Lead Scoring**: Real-time calculation based on user behavior
-- **Metrics Updates**: Automatic performance metric calculations
 
-## 📈 Analytics Features
-
-### Overview Dashboard
-- Total leads generated
-- Conversion rates
-- Hot leads alerts
-- Chatbot resolution rates
-- Average chat duration
-
-### Lead Performance
-- Lead qualification metrics
-- Conversion rate thresholds
-- Individual lead progression
-- Lead score distribution
-
-### Listing Analytics
-- Property-specific performance
-- Common questions per listing
-- Unanswered questions tracking
-- Chat handoff analysis
-
-### User Insights
-- New vs returning users
-- Recent chat histories
-- Engagement patterns
-
-## 🚀 Deployment
-
-The project is configured for Vercel deployment:
-
-1. **Environment Setup**: Configure all environment variables in Vercel
-2. **Database**: Ensure Supabase is properly configured
-3. **Build Process**: Uses npm workspaces for optimized builds
-4. **Static Assets**: Frontend builds to `dist/` directory
-
-## 🤝 Contributing
-
-1. Follow the existing code structure
-2. Add tests for new features
-3. Update documentation for API changes
-4. Use TypeScript for new components (migration in progress)
-
-## 📝 License
-
-This project is licensed under UNLICENSED - see the package.json for details.
-
-## 🆘 Support
-
-For support and questions:
-1. Check the existing documentation
-2. Review the example configurations
-3. Test with the provided test harness
-4. Contact the development team
-
----
-
-**Note**: This is an enterprise-grade system designed for real estate agencies. Ensure proper configuration and testing before production deployment.
