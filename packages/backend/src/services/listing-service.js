@@ -149,4 +149,69 @@ ListingService.getCheapestListingsByTypology = async (clientId, typology, develo
   return Array.isArray(data) ? data.filter(r => r && r.price != null) : [];
 };
 
+  // Find listings by a case-insensitive pattern on name
+  ListingService.findByNameLike = async (clientId, ilikePattern, limit = 5) => {
+    const { data, error } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('client_id', clientId)
+      .ilike('name', ilikePattern)
+      .limit(limit);
+    if (error) {
+      throw new Error(`Error searching listing by name: ${error.message}`);
+    }
+    return data || [];
+  };
+
+  // Resolve by typology (e.g., T2), fraction letter (e.g., D) and block number (e.g., 2)
+  ListingService.findByTypologyLetterBlock = async (clientId, typology, letter, block) => {
+    const patterns = [
+      `%${typology}% ${letter}%Bloco ${block}%`,
+      `%${typology}% ${letter} - Bloco ${block}%`,
+      `%${typology}%${letter}%Bloco ${block}%`,
+      `%Apartamento ${typology} ${letter}%Bloco ${block}%`,
+    ];
+    for (const p of patterns) {
+      const rows = await ListingService.findByNameLike(clientId, p, 3);
+      if (rows.length) return rows[0];
+    }
+    return null;
+  };
+
+  // Suggest listings based on onboarding answers (typology + budget bucket)
+  ListingService.findListingsByOnboarding = async (clientId, onboarding, limit = 4) => {
+    let query = supabase
+      .from('listings')
+      .select('id, name, type, price, development_id')
+      .eq('client_id', clientId)
+      .order('price', { ascending: true })
+      .limit(limit);
+
+    const typology = onboarding?.typology ? String(onboarding.typology).toUpperCase().trim() : null;
+    if (typology) {
+      query = query.ilike('type', `${typology}%`);
+    }
+
+    // Map budget bucket to price range (EUR)
+    const bucket = String(onboarding?.budget_bucket || '').toLowerCase();
+    const ranges = {
+      '100_200k': [100000, 200000],
+      '200_300k': [200000, 300000],
+      '300_400k': [300000, 400000],
+      '400_500k': [400000, 500000],
+      '500k_plus': [500000, null],
+    };
+    if (bucket in ranges) {
+      const [min, max] = ranges[bucket];
+      if (min != null) query = query.gte('price', min);
+      if (max != null) query = query.lte('price', max);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(`Error fetching listings for onboarding: ${error.message}`);
+    }
+    return Array.isArray(data) ? data : [];
+  };
+
 export default ListingService;
