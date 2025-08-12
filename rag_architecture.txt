@@ -1,0 +1,154 @@
+Arquitetura (MVP)
+● Supabase (fonte de verdade, relacional e “fresh”): unidades, disponibilidade, cronograma, visitas agendadas, FAQ curta, regras de preço.
+● Pinecone (contexto “longo”): brochuras, descrições de tipologias, argumentos de venda, minutas legais, respostas long-form.
+● RAG Orquestrador: classifica intenção → decide entre “consulta direta” (Supabase/tools) vs. “resposta contextual” (Pinecone) → compõe resposta persuasiva → sempre propõe próximo passo (agendar, enviar proposta).
+● Functions/Tools do agente:
+1. get_unit(id|filters)
+2. get_availability(unit_id)
+3. simulate_mortgage(price, down_payment, rate, term)
+4. get_timeline(project_id)
+5. schedule_visit(unit_id, datetime, contact)
+6. get_price_status(unit_id) (preço atual + flags de urgência)
+● Camada de re-ranking (opcional mas recomendado): cross-encoder para ordenar os trechos do Pinecone.
+Modelo de dados mínimo (Supabase)
+-- Unidades
+create table units (
+id uuid primary key,
+project_id uuid not null,
+typology text, -- T1/T2/T3/T3D
+area_m2 numeric,
+floor integer,
+view text, -- rio, parque, cidade
+base_price numeric,
+media_urls jsonb, -- [".../planta.pdf",".../galeria/1.jpg"]
+features jsonb, -- {"orientation":"SE","energy_class":"A"}
+created_at timestamptz default now()
+);
+-- Disponibilidade + preço “fresh”
+create table unit_status (
+unit_id uuid references units(id),
+status text check (status in ('available','reserved','sold')) not null,
+price numeric not null,
+last_update timestamptz default now(),
+primary key (unit_id)
+);
+-- Cronograma de obra (por projeto)
+create table build_timeline (
+project_id uuid,
+phase text, -- fundacao, estrutura, acabamentos
+eta_date date,
+notes text
+);
+-- Histórico de preço (opcional MVP+, mas útil para urgência)
+create table price_history (
+unit_id uuid,
+dt date,
+price numeric
+);
+-- Agendamentos
+create table visits (
+id uuid primary key,
+unit_id uuid,
+visitor_name text,
+visitor_phone text,
+visitor_email text,
+scheduled_at timestamptz,
+created_at timestamptz default now()
+);
+-- FAQ curta (para respostas rápidas no MVP)
+create table faq (
+id serial primary key,
+category text,
+q text,
+a text
+);
+Pinecone (conteúdo + metadados)
+● Index: realestate-index
+● Namespaces: marketing, legal, faq_long
+● Metadados recomendados: {project_id, typology, phase, locale:"pt-PT", doc_type:"brochure|legal|script", audience:"investor|family|second_home"}
+● Chunking: 400–700 tokens com overlap 80–120; título + breadcrumb no início do chunk; guarda também passage_id.
+Pipeline de ingestão (essencial)
+1. Extrai texto de PDFs/HTML → normaliza → gera título + sumário de 1–2 linhas → chunk.
+2. Calcula embeddings (o mesmo modelo do runtime) → upsert em Pinecone com metadados.
+3. Sincroniza Supabase → Pinecone: NÃO duplica dados “fresh” (preço/stock) no vetor — esses vêm sempre do Supabase em runtime.
+Fluxo RAG (runtime)
+1. Classificador de intenção (regex + few-shot no prompt):
+○ Consulta factual “fresh”: disponibilidade, preço, cronograma → usar tools (Supabase).
+○ Exploração/Comparação/Storytelling: “T2 com vista e boa luz?” → retrieval em Pinecone + “tools” para preencher preço/stock.
+○ Ação: agendar visita / simular financiamento → tool direto.
+2. Retrieval (quando aplicável):
+○ Consulta Pinecone: top_k=6, filtros por project_id, typology se houver.
+○ Re-rank (se tiveres um cross-encoder; senão, segue a ordem de similaridade).
+3. Augment:
+○ Consolida 3–4 trechos no prompt.
+○ Chama tools Supabase para preço atual e status das unidades mencionadas.
+4. Resposta:
+○ Estrutura breve: Insight (1–2 linhas persuasivas) → Dados (preço/área/cronograma) → Próximo passo (CTA único).
+○ Se houver escassez: “2 unidades semelhantes reservadas nos últimos 7 dias — posso agendar X?”
+Tools (exemplos de assinaturas)
+// TS types (podes mapear para RPC Supabase ou REST)
+type GetUnitParams = { id?: string; filters?: { typology?: string; minArea?: number; view?: string; maxPrice?: number } };
+type Unit = { id:string, typology:string, area_m2:number, view:string, base_price:number, media_urls:string[], features:any };
+type Status = { unit_id:string, status:'available'|'reserved'|'sold', price:number, last_update:string };
+async function get_unit(params:GetUnitParams): Promise<Unit[]> { /* query Supabase */ }
+async function get_availability(unit_id:string): Promise<Status> { /* query unit_status */ }
+async function get_timeline(project_id:string): Promise<{phase:string, eta_date:string}[]> { /* query build_timeline */ }
+async function simulate_mortgage(price:number, down:number, rate:number, termYears:number): Promise<{monthly:number, total_interest:number}> { /* fórmula PMT */ }
+async function schedule_visit(unit_id:string, when:string, contact:{name:string,phone?:string,email?:string}): Promise<{ok:true,id:string}> { /* insert visits */ }
+async function get_price_status(unit_id:string): Promise<{price:number, trend:'up'|'down'|'flat', last_change:string}> { /* join price_history + unit_status */ }
+Prompts (MVP, prontos a colar)
+System (curto e objetivo)
+És um agente imobiliário persuasivo e honesto. Responde em pt-PT. Usa dados “fresh” dos tools para preço/stock. Conclui cada resposta com um único próximo passo claro (CTA). Evita floreados; foca em valor, escassez legítima e utilidade.
+Classifier (few-shot)
+Classifica a intenção do utilizador em {INFO_FRESH, STORY_COMPARE, ACTION}.
+● INFO_FRESH: perguntas sobre disponibilidade, preço, prazo, documentos.
+● STORY_COMPARE: explorar tipologias, vantagens, bairro, “qual escolher”.
+● ACTION: agendar visita, simular financiamento, enviar proposta. Responde só com a label.
+Answer template (quando há unidade específica)
+[Insight de 1 linha orientado ao perfil] Unidade: {typology}, {area_m2} m², vista {view}. Preço atual: €{price} | Estado: {status}. Entrega estimada: {phase} → {eta}. Próximo passo: Quer que reserve uma visita {dia útil mais próximo, 11h ou 18h}?
+Gatilhos “limpos” de urgência (só quando verdadeiros)
+● “Última {typology} com vista {view} neste piso.”
+● “Duas reservas em {7} dias para unidades semelhantes.”
+● “Mudança de preço registada em {data}.”
+Consultas / exemplos rápidos
+Supabase (JS)
+// get_unit by filters
+const { data: units } = await supabase
+.from('units')
+.select('id, typology, area_m2, view, base_price, media_urls, features')
+.eq('project_id', projectId)
+.eq('typology', 'T2')
+.lte('base_price', 450000);
+// disponibilidade + preço fresh
+const { data: st } = await supabase
+.from('unit_status')
+.select('status, price, last_update')
+.eq('unit_id', units[0].id)
+.single();
+Pinecone (Node)
+const idx = pinecone.Index('realestate-index');
+const emb = await embedder.embedQuery(userQuery);
+const queryRes = await idx.query({
+vector: emb,
+topK: 6,
+includeMetadata: true,
+filter: { project_id: projectId, ...(typology && { typology }) }
+});
+Decisões de design que evitam dores de cabeça
+● Freshness first: preço/stock/cronograma nunca do Pinecone; sempre Supabase → mantém confiança.
+● Hybrid search leve: para queries com termos exatos (“T3 Duplex vista rio”), faz também um ILIKE no Supabase para shortlist e usa Pinecone só para contexto.
+● Normaliza termos: “T3D”, “T3 Duplex”, “Duplex T3” → campo typology_norm.
+● Context window: limita o “paste” de contextos a 1.2–1.5k tokens; o resto é ruído.
+● Pseudopersonas no metadata (audience) para puxar o tom certo (investidor vs família) sem “psicologia de laboratório”.
+Como ligar psicologia de vendas ao fluxo
+● Micro-compromissos: após qualquer resposta informativa, pergunta 1 coisa: “Posso enviar 2 opções com a melhor luz da manhã?” ou “Agendo uma visita de 15 min?”
+● Prova social (quando verdadeira): puxa price_history e contagem de reservas recentes por tipologia.
+● Ancoragem: mostra uma unidade ligeiramente superior primeiro, depois a alvo.
+● Perda evitada: “se esta unidade for reservada, a alternativa próxima é +€X / piso inferior.”
+Testes e métricas (MVP)
+● KPIs: taxa de resposta com CTA clicada, % de conversas com visita marcada, tempo até 1º agendamento.
+● A/B: texto do CTA (“visita rápida de 15 min” vs “tour completo de 30 min”).
+● Guardrails: nunca inventar disponibilidade; se Supabase falhar → “Confirmo em minutos e já agendo para garantir prioridade.”
+Roadmap rápido (quando fores evoluir)
+● Reranking com cross-encoder, comparativos automáticos entre 2–3 unidades, perfis comportamentais (investidor/família), recomendação baseada em cliques, e geração de propostas PDF em 1-clique.
+se quiseres, pego num dos teus projetos (ex.: Evergreen Pure) e deixo pronto um fluxo end-to-end com: prompts prontos, chamadas a Supabase, consulta a Pinecone, e 2 CTAs testados. Queres que eu escreva o esqueleto em TypeScript (Node) ou Python?

@@ -16,17 +16,15 @@ import cors from 'cors';
 import OpenAI from 'openai';
 import multer from 'multer';
 
-import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
 import * as clientConfigServiceModule from './services/client-config-service.js';
 // Simple PDF/Text ingestion service
-import { processDocument } from './services/ingestion-service-pdf.js';
 import listingService from './services/listing-service.js';
 import visitorService from './services/visitor-service.js';
 import supabaseModule from './config/supabase.js';
-import ChatHistoryService from './services/chat-history-service.js';
 import * as developmentService from './services/development-service.js';
+import * as ragOrchestrator from './services/rag-orchestrator.js';
 import userService from './services/user-service.js';
-import { extractListingIdFromUrl as parseListingFromUrl, extractListingIdFromQuery as parseListingFromQuery } from './utils/rag-parsing.js';
+// RAG system removed: no rag-service, chat-history vectorization, or rag-parsing
 console.log('[DEBUG] All imports in index.js completed.');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -151,12 +149,19 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-            const { query, visitorId, sessionId, context, pageUrl } = req.body;
-      console.log(`[CHAT] clientId=${req.clientConfig.clientId} query="${query}" pageUrl=${pageUrl || 'n/a'}`);
-      const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
+      const { query, visitorId, sessionId } = req.body;
+      // accept snake_case as well
+      const context = req.body.context || {
+        listingId: req.body.listing_id,
+        developmentId: req.body.development_id,
+        unitId: req.body.unit_id,
+        typology: req.body.typology,
+        maxPrice: req.body.max_price,
+      };
+      console.log(`[CHAT] clientId=${req.clientConfig.clientId} query="${query}"`);
+      const { clientConfig } = req; // Config is attached by middleware
       const timestamp = new Date().toISOString();
       const turnId = Date.now().toString(); // Simple unique ID for this turn
-      const chatHistoryService = new ChatHistoryService();
 
       // Helper: derive effective listing_id and development_id to persist with messages
       // Includes deictic resolution from prior assistant response
@@ -202,120 +207,13 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         }
         return null;
       };
-      const deriveContextIds = async () => {
-        let effectiveListingId = context?.listingId || null;
-        let effectiveDevelopmentId = context?.developmentId || clientConfig.defaultDevelopmentId || null;
-
-        // Try to extract listing id from pageUrl using shared util
-        if (pageUrl) {
-          try {
-            const candidate = parseListingFromUrl(String(pageUrl));
-            if (candidate) {
-              console.log(`[${clientConfig.clientName}] URL-derived candidate listing id: ${candidate}`);
-              const { data: listingRow, error: listingErr } = await supabase
-                .from('listings')
-                .select('id, development_id')
-                .eq('id', candidate)
-                .eq('client_id', clientConfig.clientId)
-                .single();
-              if (!listingErr && listingRow) {
-                // Tentatively set from URL; may be overridden by explicit query reference below
-                effectiveListingId = listingRow.id;
-                effectiveDevelopmentId = listingRow.development_id || effectiveDevelopmentId;
-                console.log(`[${clientConfig.clientName}] Context from URL → listing ${effectiveListingId}, development ${effectiveDevelopmentId || 'null'}`);
-              }
-            }
-          } catch (_) {
-            // ignore URL parsing errors
-          }
-        }
-
-        // Try to extract listing id from the user's query using shared util
-        if (query) {
-          const candidate = parseListingFromQuery(query);
-          if (candidate) {
-            console.log(`[${clientConfig.clientName}] Query-derived candidate listing id: ${candidate}`);
-            const { data: listingRowQ, error: listingErrQ } = await supabase
-              .from('listings')
-              .select('id, development_id')
-              .eq('id', candidate)
-              .eq('client_id', clientConfig.clientId)
-              .single();
-            if (!listingErrQ && listingRowQ) {
-              effectiveListingId = listingRowQ.id;
-              effectiveDevelopmentId = listingRowQ.development_id || effectiveDevelopmentId;
-              console.log(`[${clientConfig.clientName}] Resolved query candidate directly to listing ${effectiveListingId}`);
-            }
-          }
-          // If the shared util didn't map to a numeric id, try typology+letter+block resolution (e.g., "T1 B Bloco 1")
-          {
-            const m = String(query).match(/\bT\s*([1-4])\s*([A-H])\b.*?\bBloco\s*(\d+)/i);
-            if (m) {
-              const typology = `T${m[1]}`;
-              const letter = m[2].toUpperCase();
-              const block = m[3];
-              console.log(`[${clientConfig.clientName}] Attempting TLBlock resolution → typology=${typology}, letter=${letter}, block=${block}`);
-              try {
-                const row = await listingService.findByTypologyLetterBlock(clientConfig.clientId, typology, letter, block);
-                if (row?.id) {
-                  effectiveListingId = row.id;
-                  effectiveDevelopmentId = row.development_id || effectiveDevelopmentId;
-                  console.log(`[${clientConfig.clientName}] TLBlock resolved to listing ${effectiveListingId}`);
-                }
-              } catch (_) {}
-            }
-            // Also allow explicit "ID 4271" in the query itself
-            {
-              const idInQuery = String(query).match(/\bID\s*[:#-]?\s*(\d{3,})\b/i);
-              if (idInQuery) {
-                const numericId = idInQuery[1];
-                console.log(`[${clientConfig.clientName}] Explicit ID in query detected: ${numericId}`);
-                const { data: row3, error: err3 } = await supabase
-                  .from('listings')
-                  .select('id, development_id')
-                  .eq('id', numericId)
-                  .eq('client_id', clientConfig.clientId)
-                  .single();
-                if (!err3 && row3) {
-                  effectiveListingId = row3.id;
-                  effectiveDevelopmentId = row3.development_id || effectiveDevelopmentId;
-                  console.log(`[${clientConfig.clientName}] Explicit ID resolved to listing ${effectiveListingId}`);
-                }
-              }
-            }
-          }
-        }
-
-        // If still no listing, try deictic resolution based on last assistant turn
-        if (!effectiveListingId) {
-          const deicticId = await resolveDeicticListingId();
-          if (deicticId) {
-            effectiveListingId = deicticId;
-            console.log(`[${clientConfig.clientName}] Deictic resolution resolved to listing ${effectiveListingId}`);
-          }
-        }
-
-        return { effectiveListingId, effectiveDevelopmentId };
-      };
-
-      const { effectiveListingId, effectiveDevelopmentId } = await deriveContextIds();
+      const effectiveListingId = context?.listingId || null;
+      const effectiveDevelopmentId = context?.developmentId || clientConfig.defaultDevelopmentId || null;
 
       // Retrieve recent chat history for this visitor (across all sessions)
       let chatHistory = null;
-      try {
-        if (visitorId) {
-          const recentMessages = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 10);
-          chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
-          console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages for visitor ${visitorId}`);
-          console.log(`[${clientConfig.clientName || clientConfig.clientId}] Formatted Chat History:\n---\n${chatHistory}\n---`);
-        } else {
-          console.warn('No visitorId provided, skipping chat history retrieval');
-          chatHistory = "Nenhum histórico anterior disponível";
-        }
-      } catch (error) {
-        console.error('Error retrieving chat history:', error);
-        chatHistory = "Nenhum histórico anterior disponível";
-      }
+      // Chat-history retrieval from Pinecone removed; keep placeholder
+      chatHistory = "Nenhum histórico anterior disponível";
 
       // Store user message in chat_messages table
       try {
@@ -338,20 +236,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         console.error('Error logging user message to chat_messages:', logError);
       }
 
-      // Upsert user message to Pinecone (for RAG context)
-      try {
-        await chatHistoryService.upsertMessage({
-          text: query,
-          role: 'user',
-          client_id: clientConfig.clientId,
-          visitor_id: visitorId,
-          session_id: sessionId,
-          timestamp: timestamp,
-          turn_id: `${turnId}-user`,
-        }, clientConfig);
-      } catch (error) {
-        console.error('Failed to upsert user message to Pinecone, continuing without it.', error);
-      }
+      // Pinecone chat-history upsert removed
       
       if (!query) {
         return res.status(400).json({ error: 'Query is required' });
@@ -360,62 +245,41 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received query: ${query}`);
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Received context: ${JSON.stringify(context)}`);
 
-      // Generate embedding for the query
-      let queryEmbedding;
-      try {
-        queryEmbedding = await openai.embeddings.create({
-          model: embeddingModel,
-          input: query,
-        });
-      } catch (error) {
-        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Error generating embedding:`, error);
-        return res.status(500).json({ 
-          error: 'Failed to generate embedding for query',
-          details: error.message
-        });
+      // RAG flag: if enabled and Pinecone is configured, route via orchestrator; else fallback to LLM-only
+      let responseText = '';
+      let intentLabel = 'LLM_ONLY';
+      const enableRag = String(process.env.ENABLE_RAG || '').toLowerCase() === 'true';
+      if (enableRag && process.env.PINECONE_API_KEY) {
+        try {
+          const { text, label } = await ragOrchestrator.answerWithRag({ userText: query, clientConfig, context });
+          responseText = text || '';
+          intentLabel = label || 'RAG';
+        } catch (e) {
+          console.warn('[RAG] Falling back to LLM-only due to error:', e?.message);
+        }
       }
 
-      // Validate embedding before proceeding
-      if (!queryEmbedding || !queryEmbedding.data || !queryEmbedding.data[0] || !queryEmbedding.data[0].embedding) {
-        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Invalid embedding response:`, queryEmbedding);
-        return res.status(500).json({ 
-          error: 'Failed to generate embedding for query',
-          details: 'The embedding service returned an invalid response'
-        });
+      if (!responseText) {
+        const systemInstruction = (clientConfig?.prompts && clientConfig.prompts.systemInstruction)
+          ? String(clientConfig.prompts.systemInstruction)
+          : 'És um assistente útil para imobiliário. Responde de forma concisa e útil. Se não souberes, diz que não tens essa informação.';
+        const messages = [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: query }
+        ];
+        try {
+          const completion = await openai.chat.completions.create({
+            model: 'gpt-3.5-turbo',
+            messages,
+            max_tokens: 500,
+          });
+          responseText = completion.choices?.[0]?.message?.content?.trim() || '';
+          if (!responseText) responseText = 'Desculpe, não tenho uma resposta no momento.';
+        } catch (e) {
+          console.error('OpenAI chat error:', e);
+          return res.status(500).json({ error: 'Failed to generate response.' });
+        }
       }
-
-      const embeddingVector = queryEmbedding.data[0].embedding;
-      
-      // Validate that embedding is an array of numbers
-      if (!Array.isArray(embeddingVector) || embeddingVector.length === 0 || typeof embeddingVector[0] !== 'number') {
-        console.error(`[${clientConfig.clientName || clientConfig.clientId}] Invalid embedding vector format:`, embeddingVector);
-        return res.status(500).json({ 
-          error: 'Invalid embedding vector format',
-          details: 'The embedding vector is not properly formatted'
-        });
-      }
-
-      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generated embedding vector with ${embeddingVector.length} dimensions`);
-
-      // Generate response with enhanced context including chat history
-      console.log(`[${clientConfig.clientName}] Final resolved context ids → listing=${effectiveListingId || 'null'}, development=${effectiveDevelopmentId || 'null'}`);
-
-      const externalCtx =
-        effectiveListingId
-          ? { type: 'listing', value: effectiveListingId }
-          : (effectiveDevelopmentId ? { type: 'development', value: effectiveDevelopmentId } : (pageUrl ? null : context));
-
-      console.log(`[${clientConfig.clientName}] External context passed to RAG: ${JSON.stringify(externalCtx)}`);
-
-      const responseText = await generateResponse(
-        query, 
-        clientConfig, 
-        embeddingVector,
-        externalCtx,
-        userContext, 
-        chatHistory,
-        pageUrl
-      );
 
       // Store assistant response in chat_messages table
       try {
@@ -438,20 +302,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         console.error('Error logging assistant message to chat_messages:', logError);
       }
 
-      // Upsert assistant response to Pinecone (for RAG context)
-      try {
-        await chatHistoryService.upsertMessage({
-          text: responseText,
-          role: 'assistant',
-          client_id: clientConfig.clientId,
-          visitor_id: visitorId,
-          session_id: sessionId,
-          timestamp: new Date().toISOString(),
-          turn_id: `${turnId}-assistant`,
-        }, clientConfig);
-      } catch (error) {
-        console.error('Failed to upsert assistant message to Pinecone, continuing without it.', error);
-      }
+      // Pinecone chat-history upsert removed
 
       // Log the user's question and its embedding to the questions and question_embeddings tables
       try {
@@ -465,39 +316,19 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
               status: 'answered',
               visitor_id: visitorId,
               session_id: sessionId,
+              client_id: clientConfig.clientId,
             },
           ])
           .select('id');
 
         if (insertQuestionError) {
           console.error('Error inserting question into Supabase:', insertQuestionError);
-        } else if (insertedQuestion && insertedQuestion.length > 0) {
-          const questionId = insertedQuestion[0].id;
-
-          const embeddingResult = await openai.embeddings.create({
-            model: embeddingModel,
-            input: query,
-          });
-
-          const { error: insertEmbeddingError } = await supabase
-            .from('question_embeddings')
-            .insert([
-              {
-                question_id: questionId,
-                embedding: embeddingResult.data[0].embedding,
-                ...(context?.listingId && { listing_id: context.listingId }),
-              },
-            ]);
-
-          if (insertEmbeddingError) {
-            console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
-          }
         }
       } catch (logError) {
         console.error('Error logging question or embedding:', logError);
       }
 
-      res.json({ response: responseText });
+      res.json({ response: responseText, intent: intentLabel });
     } catch (error) {
       console.error('Error processing chat request:', error);
       const errorMessage = error.status === 503
@@ -507,16 +338,36 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // API endpoint to generate suggested questions
+  // API endpoint to generate suggested questions (LLM-only)
   app.post('/api/suggested-questions', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-      const { context, chatHistory } = req.body;
-      const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
-
-      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generating suggested questions.`);
-
-      const questions = await generateSuggestedQuestions(clientConfig, context, chatHistory, userContext);
-      res.json({ questions });
+      const { context } = req.body || {};
+      const { clientConfig } = req;
+      const topic = context?.listingId ? `sobre o imóvel ${context.listingId}` : 'sobre os nossos imóveis';
+      const systemInstruction = (clientConfig?.prompts && clientConfig.prompts.systemInstruction)
+        ? String(clientConfig.prompts.systemInstruction)
+        : 'És um assistente útil para imobiliário.';
+      const prompt = `Sugere 3 perguntas úteis e curtas que um cliente poderá fazer ${topic}. Responde apenas com uma lista em português.`;
+      let suggestions = [];
+      try {
+        const completion = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: prompt }
+          ],
+          max_tokens: 150,
+        });
+        const text = completion.choices?.[0]?.message?.content || '';
+        suggestions = text.split(/\n|\r/).map(s => s.replace(/^[-•\d\.\s]+/, '').trim()).filter(Boolean).slice(0, 3);
+      } catch (_) {
+        suggestions = [
+          'Qual é o preço e a disponibilidade?',
+          'Que tipologias existem?',
+          'Podem agendar uma visita?'
+        ];
+      }
+      res.json({ questions: suggestions });
     } catch (error) {
       console.error('Error generating suggested questions:', error);
       res.status(500).json({ error: 'Failed to generate suggested questions.' });
@@ -560,73 +411,9 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  // API endpoint to handle document uploads
-  app.post('/v1/documents/upload', clientConfigMiddleware(clientConfigService), upload.fields([
-    { name: 'files', maxCount: 10 },
-    { name: 'document_category' },
-    { name: 'listing_id' },
-    { name: 'development_id' }
-  ]), async (req, res) => {
-    try {
-      const { clientConfig, body } = req;
-      const { document_category, listing_id, development_id } = body;
-      const uploadedFiles = req.files.files; // Access files from req.files.files
-
-      if (!uploadedFiles || uploadedFiles.length === 0) {
-        return res.status(400).json({ error: 'No files uploaded' });
-      }
-
-      if (!document_category || !['client', 'development', 'listing'].includes(document_category)) {
-        return res.status(400).json({ error: 'document_category (client, development, or listing) is required' });
-      }
-
-      const metadata = {
-        client_id: clientConfig.clientId,
-        document_category: document_category,
-      };
-
-      if (document_category === 'listing') {
-        if (!listing_id) {
-          return res.status(400).json({ error: 'listing_id is required for listing documents' });
-        }
-        metadata.listing_id = listing_id;
-        if (development_id) { // Add this check
-          metadata.development_id = development_id; // Add development_id to metadata
-        }
-      }
-      // Always include development_id if provided, regardless of document_category
-      else if (document_category === 'development') {
-        console.log(`[DEBUG] document_category: ${document_category}, development_id: ${development_id}`);
-        if (!development_id) {
-          return res.status(400).json({ error: 'development_id is required for development documents' });
-        }
-        metadata.development_id = development_id;
-      }
-      // Always include development_id if provided, regardless of document_category
-      else if (development_id) {
-        metadata.development_id = development_id;
-      }
-
-      // Process each uploaded file
-      for (const file of uploadedFiles) {
-        // Hand off to the service for async processing
-        // We don't wait for the processing to finish to send a response
-        ingestionService.processDocument({
-          clientConfig: clientConfig,
-          file,
-          documentCategory: document_category,
-          metadata,
-        });
-      }
-
-      res.status(202).json({
-        message: 'Files received and are being processed.',
-        filenames: uploadedFiles.map(file => file.originalname),
-      });
-    } catch (error) {
-      console.error('Error processing document upload request:', error);
-      res.status(500).json({ error: 'Failed to process document upload request.' });
-    }
+  // Ingestion endpoint disabled as RAG has been removed
+  app.post('/v1/documents/upload', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    return res.status(410).json({ error: 'Document ingestion disabled: RAG system removed.' });
   });
 
   // API endpoint to create a new visitor session
@@ -740,23 +527,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         assistantText = 'Obrigado pelas suas respostas! De momento não encontrei opções que correspondam exatamente às suas preferências. Quer ajustar o orçamento ou a tipologia para eu procurar alternativas?';
       }
 
-      // Persist assistant message to Pinecone and Supabase for immediate visibility in chat
-      try {
-        const chatHistoryService = new ChatHistoryService();
-        const sessionId = `onboarding_${visitorId}`;
-        const turnId = `${Date.now()}-assistant`;
-        await chatHistoryService.upsertMessage({
-          text: assistantText,
-          role: 'assistant',
-          client_id: clientConfig.clientId,
-          visitor_id: visitorId,
-          session_id: sessionId,
-          timestamp: now,
-          turn_id: turnId,
-        }, clientConfig);
-      } catch (e) {
-        console.warn('Failed to upsert onboarding recommendation to Pinecone:', e?.message);
-      }
+      // Pinecone upsert for onboarding recommendation removed
 
       try {
         await supabase

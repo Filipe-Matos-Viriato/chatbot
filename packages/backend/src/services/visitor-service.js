@@ -1,8 +1,7 @@
 // packages/backend/src/services/visitor-service.js
 import * as clientConfigService from './client-config-service.js';
 import supabase from '../config/supabase.js'; // Import Supabase client
-import OpenAI from 'openai';
-import { Pinecone } from '@pinecone-database/pinecone';
+// OpenAI and Pinecone dependencies related to RAG removed
 
 class VisitorService {
   constructor() {
@@ -548,47 +547,7 @@ class VisitorService {
     return capped;
   }
 
-  async upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, onboarding) {
-    try {
-      // Non-PII content summary
-      const summary = [
-        onboarding?.typology ? `Typology: ${onboarding.typology}` : null,
-        onboarding?.budget_bucket ? `Budget: ${onboarding.budget_bucket}` : null,
-        onboarding?.buying_timeframe ? `Timeframe: ${onboarding.buying_timeframe}` : null,
-      ].filter(Boolean).join(', ');
-
-      if (!summary) return;
-
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-
-      const embed = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: `Visitor preference profile for personalization. ${summary}`,
-      });
-      const vector = embed?.data?.[0]?.embedding;
-      if (!vector) return;
-
-      const indexName = process.env.PINECONE_INDEX || 'rachatbot-1536';
-      const index = pinecone.index(indexName).namespace(clientId);
-      await index.upsert([
-        {
-          id: `visitor_profile_${visitorId}`,
-          values: vector,
-          metadata: {
-            client_id: clientId,
-            visitor_id: visitorId,
-            typology: onboarding?.typology || null,
-            budget_bucket: onboarding?.budget_bucket || null,
-            buying_timeframe: onboarding?.buying_timeframe || null,
-            category: 'visitor_profile',
-          },
-        },
-      ]);
-    } catch (error) {
-      console.error('Failed to upsert visitor preference profile to Pinecone:', error);
-    }
-  }
+  // Pinecone preference profile upsert removed
 
   /**
    * Save onboarding answers into visitors table and compute/update lead_score.
@@ -633,8 +592,7 @@ class VisitorService {
       throw new Error('Failed to save onboarding');
     }
 
-    // Fire-and-forget: upsert non-PII preference profile to Pinecone
-    this.upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, mergedOnboarding).catch(() => {});
+    // Pinecone preference profile upsert removed
 
     return updated?.[0];
   }

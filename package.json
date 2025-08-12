@@ -2,7 +2,7 @@
   "name": "enterprise-rag-chatbot",
   "version": "1.0.0",
   "private": true,
-  "description": "Enterprise-grade RAG chatbot with a Node.js backend and React frontend.",
+  "description": "Enterprise chatbot with a Node.js backend and React frontend (RAG removed).",
   "workspaces": [
     "packages/*"
   ],

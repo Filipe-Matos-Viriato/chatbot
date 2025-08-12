@@ -35,6 +35,20 @@ const ListingService = {
     return data;
   },
 
+  async getListingsByIds(clientId, ids = []) {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    const uniqueIds = Array.from(new Set(ids.map(String)));
+    const { data, error } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('client_id', clientId)
+      .in('id', uniqueIds);
+    if (error) {
+      throw new Error(`Error fetching listings by IDs: ${error.message}`);
+    }
+    return Array.isArray(data) ? data : [];
+  },
+
   async updateListing(id, updates) {
     const { data, error } = await supabase
       .from('listings')

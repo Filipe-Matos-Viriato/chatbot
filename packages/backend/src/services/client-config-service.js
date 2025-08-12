@@ -40,6 +40,8 @@ async function getClientConfig(clientId) {
     clientId: data.client_id,
     clientName: data.client_name,
     chatbotName: data.chatbot_name,
+    // RAG removed; keep pineconeIndex only for backward-compat if referenced elsewhere
+    pineconeIndex: undefined,
     theme: data.theme,
     urlPattern: data.url_pattern,
     prompts: data.prompts,

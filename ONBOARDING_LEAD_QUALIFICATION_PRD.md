@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This PRD defines a quick onboarding and lead qualification flow that triggers after a user's first message in the chatbot. The flow captures the user's property typology preference, budget, and buying timeframe via a multiple-options survey, then asks for name and email. The data is saved to Supabase (authoritative system of record) and selectively to Pinecone (preference signals without PII) to enable personalized recommendations and follow-up.
+This PRD defines a quick onboarding and lead qualification flow that triggers after a user's first message in the chatbot. The flow captures the user's property typology preference, budget, and buying timeframe via a multiple-options survey, then asks for name and email. The data is saved to Supabase (authoritative system of record). Vector storage was removed along with the RAG system.
 
 Primary goal: improve lead capture rate and quality while keeping conversation momentum and adapting next steps to the user’s initial intent.
 
@@ -10,7 +10,7 @@ Primary goal: improve lead capture rate and quality while keeping conversation m
 
 - Increase qualified lead capture conversion rate with a sub-30s, low-friction survey
 - Personalize recommendations using captured preferences in the very next bot turn
-- Respect privacy by storing PII only in Supabase; store non-PII preferences in Pinecone
+- Respect privacy by storing PII only in Supabase.
 - Make the feature configurable per client (copy, options, enable/disable)
 - Ensure re-entry logic: skip or shorten onboarding for returning/known visitors
 
@@ -77,14 +77,10 @@ Notes:
 - PII (name/email) is stored only in Supabase inside `onboarding_questions`.
 - Returning users: read from `visitors.onboarding_questions` to prefill/skip steps.
 
-Pinecone (no PII; for personalization and retrieval):
-- Upsert a compact “visitor preference profile” vector document under client namespace:
-  - id: `visitor_profile_{visitorId}`
-  - metadata: { typology, budget_bucket, buying_timeframe, client_id, visitor_id }
-  - content: short natural language summary for semantic retrieval
+Vector storage removed.
 
 Privacy:
-- Do not store name/email in Pinecone. PII only in Supabase (`visitors.onboarding_questions`).
+- PII only in Supabase (`visitors.onboarding_questions`).
 
 ## 7. Backend Scope
 
@@ -93,15 +89,12 @@ New/updated services:
   - Upsert onboarding payload into `visitors.onboarding_questions`
   - Set `onboarding_completed` and update `lead_score`
   - Detect returning visitor and fetch stored preferences
-- rag-service.js (update):
-  - Accept `onboardingAnswers` in request payload and include a structured, non-PII snapshot in system prompt context
-  - Route post-onboarding: listing recommendations vs general assistance
-  - Upsert Pinecone preference profile (non-PII)
+- RAG service removed; personalization is handled directly in chat flow and listing queries.
 - listing-service.js (update): accept filters from onboarding (typology, budget bucket) for relevant listing retrieval
 
 API endpoints:
 - POST `/v1/visitors/:visitorId/onboarding` → save onboarding (typology, budget, timeframe, name, email, consent) to `visitors.onboarding_questions`, set `onboarding_completed`, update `lead_score`; returns updated visitor
-- POST `/v1/onboarding/profile` → upsert Pinecone non-PII preference profile; returns status
+- POST `/v1/onboarding/profile` → store onboarding answers in Supabase; returns status
 - Existing `/api/chat` or `/v1/chat` → accept `onboardingAnswers` and/or look up stored onboarding by `visitorId` for immediate personalization
 
 Config surface (per client):
@@ -132,7 +125,7 @@ Routing rule:
 
 - Latency: onboarding UI must feel instant (local rendering); network calls < 300ms p95
 - Resilience: failures to save data must not block conversation; retry with backoff
-- Security: never send PII to Pinecone; validate inputs server-side; rate-limit endpoints
+- Security: validate inputs server-side; rate-limit endpoints
 - Compliance: consent copy configurable; email stored with lawful basis; support deletion on request
 
 ## 11. Analytics & Events
@@ -145,10 +138,10 @@ Track in `events` (and client analytics):
 ## 12. Acceptance Criteria
 
 - New visitors are shown a 3-step survey + name/email capture after their first message (unless intent ≠ buying)
-- Data persists to Supabase (`visitors.onboarding_questions`, `visitors.onboarding_completed`, `visitors.lead_score`) and non-PII profile to Pinecone
+- Data persists to Supabase (`visitors.onboarding_questions`, `visitors.onboarding_completed`, `visitors.lead_score`)
 - Returning visitors skip onboarding and can update preferences on demand
 - Bot can immediately recommend listings matching captured preferences
-- PII never stored in Pinecone; endpoints protected and validated
+- Endpoints protected and validated
 
 ## 13. Success Metrics
 
@@ -168,7 +161,7 @@ Phase 2: Frontend onboarding UI
 - Add re-entry logic for returning users
 
 Phase 3: Personalization & routing
-- Update `rag-service` to use `onboardingAnswers` and route to listing recommendations when relevant
+- RAG references removed; recommendations logic remains via Supabase queries.
 - Update `listing-service` to support filters from onboarding
 
 Phase 4: Config, analytics, QA
