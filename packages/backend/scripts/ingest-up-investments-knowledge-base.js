@@ -177,28 +177,39 @@ const ingestUpInvestmentsKnowledgeBase = async () => {
             };
             
             // Insert or update listing
+            let listingResult;
             if (!existingListing) {
-              const { error: insertError } = await supabase
+              const { data, error: insertError } = await supabase
                 .from('listings')
-                .insert([listingData]);
+                .insert([listingData])
+                .select('listing_uuid'); // Select the newly generated UUID
               
               if (insertError) {
                 console.error(`Error inserting listing: ${insertError.message}`);
               } else {
-                console.log(`✅ Inserted listing in database: ${metadata.listing_id}`);
+                listingResult = data[0];
+                console.log(`✅ Inserted listing in database: ${metadata.listing_id} (UUID: ${listingResult.listing_uuid})`);
               }
             } else {
-              const { error: updateError } = await supabase
+              const { data, error: updateError } = await supabase
                 .from('listings')
                 .update(listingData)
-                .eq('id', metadata.listing_id);
+                .eq('id', metadata.listing_id)
+                .select('listing_uuid'); // Select the existing UUID
               
               if (updateError) {
                 console.error(`Error updating listing: ${updateError.message}`);
               } else {
-                console.log(`✅ Updated listing in database: ${metadata.listing_id}`);
+                listingResult = data[0];
+                console.log(`✅ Updated listing in database: ${metadata.listing_id} (UUID: ${listingResult.listing_uuid})`);
               }
             }
+
+            // Add the retrieved listing_uuid to metadata for Pinecone upsert
+            if (listingResult && listingResult.listing_uuid) {
+              metadata.listing_uuid = listingResult.listing_uuid;
+            }
+
           } catch (dbError) {
             console.error(`Error managing listing in database: ${dbError.message}`);
           }

@@ -57,6 +57,41 @@ const ListingService = {
     }
     return { success: true };
   },
+
+  async updateListingByUuid(uuid, updates) {
+    const { data, error } = await supabase
+      .from('listings')
+      .update(updates)
+      .eq('listing_uuid', uuid)
+      .select();
+    if (error) {
+      throw new Error(`Error updating listing by UUID: ${error.message}`);
+    }
+    return data[0];
+  },
+
+  async deleteListingByUuid(uuid) {
+    const { error } = await supabase
+      .from('listings')
+      .delete()
+      .eq('listing_uuid', uuid);
+    if (error) {
+      throw new Error(`Error deleting listing by UUID: ${error.message}`);
+    }
+    return { success: true };
+  },
+};
+ 
+ListingService.getListingByUuid = async (uuid) => {
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('listing_uuid', uuid)
+    .single();
+  if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found
+    throw new Error(`Error fetching listing by UUID: ${error.message}`);
+  }
+  return data;
 };
  
 // Add these functions to the ListingService object
@@ -128,7 +163,7 @@ ListingService.getMaxPriceListing = async (clientId) => {
 ListingService.getCheapestListingsByTypology = async (clientId, typology, developmentId = null, limit = 3) => {
   let query = supabase
     .from('listings')
-    .select('id, name, type, price, client_id, development_id')
+    .select('id, listing_uuid, name, type, price, client_id, development_id')
     .eq('client_id', clientId)
     .order('price', { ascending: true })
     .limit(limit);

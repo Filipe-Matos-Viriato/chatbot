@@ -1,4 +1,5 @@
 import supabase from '../config/supabase.js';
+import listingService from './listing-service.js'; // Import listingService
 
 class UserService {
     async createUser(userData) {
@@ -96,10 +97,17 @@ class UserService {
         return data;
     }
 
-    async assignListingToAgent(userId, listingId) {
+    async assignListingToAgent(userId, listingUuid) {
+        // Fetch the old 'id' for the listing using the new 'listing_uuid'
+        const listing = await listingService.getListingByUuid(listingUuid);
+        if (!listing) {
+            throw new Error(`Listing with UUID ${listingUuid} not found.`);
+        }
+        const listingId = listing.id; // This is the old 'id'
+
         const { data, error } = await supabase
             .from('agent_listings')
-            .insert([{ user_id: userId, listing_id: listingId }])
+            .insert([{ user_id: userId, listing_id: listingId, listing_uuid: listingUuid }])
             .select();
 
         if (error) {
@@ -109,12 +117,12 @@ class UserService {
         return data[0];
     }
 
-    async removeListingFromAgent(userId, listingId) {
+    async removeListingFromAgent(userId, listingUuid) {
         const { error } = await supabase
             .from('agent_listings')
             .delete()
             .eq('user_id', userId)
-            .eq('listing_id', listingId);
+            .eq('listing_uuid', listingUuid); // Use listing_uuid for deletion
 
         if (error) {
             console.error('Error removing listing from agent:', error);
@@ -126,14 +134,14 @@ class UserService {
     async getListingsByAgentId(userId) {
         const { data, error } = await supabase
             .from('agent_listings')
-            .select('listing_id')
+            .select('listing_id, listing_uuid') // Select both id and uuid
             .eq('user_id', userId);
 
         if (error) {
             console.error('Error fetching listings by agent ID:', error);
             throw new Error('Failed to fetch listings by agent ID.');
         }
-        return data.map(row => row.listing_id);
+        return data.map(row => ({ id: row.listing_id, uuid: row.listing_uuid }));
     }
 }
 

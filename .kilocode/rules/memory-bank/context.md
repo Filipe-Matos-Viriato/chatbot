@@ -64,6 +64,7 @@ The primary focus is on ensuring accurate and complete data ingestion into Supab
     - Standardizing the `client_id` column to `uuid` across `listings`, `events`, `listing_metrics`, and `question_embeddings` tables, and removing conflicting default values.
     - Modifying the `populate-chat-messages.js` script to generate `listing_id` values in lowercase with leading zeros (e.g., "ap-01" to "ap-09", and "ap-10") to match the format in the `listings` table.
     - Successful population of the `chat_messages` table using the updated script.
+- **Question Embeddings Source Update:** The `question_embeddings` table is now populated directly from user messages in the `chat_messages` table, using `message_text` for embeddings and `chat_messages.id` as `question_id`. The foreign key constraint to the `questions` table has been removed.
 
 - **Client and User Management Implementation:**
     - **Database Schema:** Created `clients` table (for client configurations), `users` table (for admins/promoters), and `agent_listings` table (to link promoters to specific listings).

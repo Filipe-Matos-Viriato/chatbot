@@ -21,35 +21,36 @@ const IMOPRIME_CLIENT_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
 async function populateQuestionEmbeddings() {
   console.log('Populating question_embeddings table...');
 
-  // Fetch all questions from the questions table
-  const { data: questions, error: fetchQuestionsError } = await supabase
-    .from('questions')
-    .select('id, question_text, listing_id, client_id')
-    .eq('client_id', IMOPRIME_CLIENT_ID);
+  // Fetch all user messages from the chat_messages table
+  const { data: userMessages, error: fetchMessagesError } = await supabase
+    .from('chat_messages')
+    .select('id, message_text, listing_id, client_id, listing_uuid')
+    .eq('client_id', IMOPRIME_CLIENT_ID)
+    .eq('sender_role', 'user');
 
-  if (fetchQuestionsError) {
-    console.error('Error fetching questions:', fetchQuestionsError);
+  if (fetchMessagesError) {
+    console.error('Error fetching user messages:', fetchMessagesError);
     return;
   }
 
-  if (!questions || questions.length === 0) {
-    console.log('No questions found in the questions table. Please populate it first.');
+  if (!userMessages || userMessages.length === 0) {
+    console.log('No user messages found in the chat_messages table. Please populate it first.');
     return;
   }
 
   const embeddingsToInsert = [];
-  for (const q of questions) {
+  for (const msg of userMessages) {
     try {
-      const embedding = await chatHistoryService.generateEmbedding(q.question_text);
+      const embedding = await chatHistoryService.generateEmbedding(msg.message_text);
       embeddingsToInsert.push({
-        question_id: q.id,
-        listing_id: q.listing_id,
+        question_id: msg.id, // Use chat_messages.id as question_id
+        listing_id: msg.listing_uuid, // Use listing_uuid from chat_messages
         embedding: embedding,
-        client_id: q.client_id, // Include client_id in the embedding
+        client_id: msg.client_id, // Include client_id in the embedding
       });
     } catch (embedError) {
-      console.error(`Error generating embedding for question "${q.question_text}" (ID: ${q.id}):`, embedError);
-      // Continue to next question even if one embedding fails
+      console.error(`Error generating embedding for message "${msg.message_text}" (ID: ${msg.id}):`, embedError);
+      // Continue to next message even if one embedding fails
     }
   }
 

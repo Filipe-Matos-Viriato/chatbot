@@ -76,7 +76,8 @@ Tables updated based on real visitor interactions include:
 - **Visitors Database (Supabase):** Stores `visitor_id`, `client_id`, `lead_score`, timestamps, and `is_acknowledged` (for new hot leads tracking). Updated via `POST /v1/sessions` (new visitor records), `POST /v1/events` (logging events and updating lead scores), and `POST /v1/leads/acknowledge` (marking hot leads as acknowledged).
 - **Events:** Records specific visitor actions and chatbot responses, including associated `listing_id` and `development_id`.
 - **Questions:** Tracks user queries for analysis and lead scoring.
-- **Chat Messages:** Stores individual chat messages for dashboard display, providing a granular, turn-by-turn chat history.
+- **Chat Messages:** Stores individual chat messages for dashboard display, providing a granular, turn-by-turn chat history. Now includes `is_unanswered` (boolean, true if chatbot provided fallback/insufficient answer), `answered_at` (timestamp, when a confident answer was provided by chatbot or agent), and `answered_by` (text, 'chatbot' or agent ID).
+- **Question Embeddings:** The `question_embeddings` table is now populated directly from user messages in the `chat_messages` table, using `message_text` for embeddings and `chat_messages.id` as `question_id`. The foreign key constraint to the `questions` table has been removed.
 - **Handoffs (if applicable):** Records instances where a conversation is escalated or handed off to a human agent.
 - **Listing Metrics:** Tracks engagement and performance metrics per listing, updated as visitors interact with specific listings. Now includes `engaged_users` (unique visitors who interacted with the chatbot), `total_conversions` (sum of conversion actions), `conversion_rate` (`total_conversions / engaged_users`), `unacknowledged_hot_leads`, `lead_score_distribution_hot`, `lead_score_distribution_warm`, and `lead_score_distribution_cold`.
 
@@ -110,7 +111,6 @@ graph TD
             V -- "Stores/Updates" --> X[(Agent Listings Database <br> Supabase)];
             D -- "Stores/Updates" --> Y[(Clients Database <br> Supabase)];
         end
-    end
 
     subgraph Data & Ingestion
         J[Data Sources] -- "Manual/Scheduled" --> K{Document Ingestion Pipeline};
@@ -120,6 +120,9 @@ graph TD
         E -- "Hybrid Search with client_id, listing_id, development_id, user_id filters" --> N;
         C -- "Aggregative Queries (e.g., min/max price)" --> S[(Supabase <br> Listings Table)];
         S -- "Aggregated Data" --> E;
+        
+        CM[(Chat Messages <br> Supabase)] -- "User Messages" --> QE[(Question Embeddings <br> Supabase)];
+        QE -- "Clustering" --> CQ[(Clustered Questions <br> Supabase)];
     end
 
     style G fill:#f9f,stroke:#333,stroke-width:2px
@@ -127,6 +130,9 @@ graph TD
     style W fill:#f9f,stroke:#333,stroke-width:2px
     style X fill:#f9f,stroke:#333,stroke-width:2px
     style Y fill:#f9f,stroke:#333,stroke-width:2px
+    style CM fill:#f9f,stroke:#333,stroke-width:2px
+    style QE fill:#f9f,stroke:#333,stroke-width:2px
+    style CQ fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
 ### Client-Managed Data Ingestion

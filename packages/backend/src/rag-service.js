@@ -90,8 +90,10 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   if (userContext && userContext.role === 'promoter') {
     try {
       const assignedListings = await userService.getListingsByAgentId(userContext.userId);
-      if (assignedListings.length > 0) {
-        baseFilter.listing_id = { "$in": assignedListings };
+      // Extract only the 'id' (old ID) from the assigned listings for Pinecone filtering
+      const assignedListingIds = assignedListings.map(listing => listing.id);
+      if (assignedListingIds.length > 0) {
+        baseFilter.listing_id = { "$in": assignedListingIds };
       } else {
         return { matches: [] };
       }

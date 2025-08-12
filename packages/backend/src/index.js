@@ -225,7 +225,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       // Store user message in chat_messages table
       try {
-        const { error: chatMessageError } = await supabase
+        const { data: insertedChatMessage, error: chatMessageError } = await supabase
           .from('chat_messages')
           .insert({
             visitor_id: visitorId,
@@ -236,9 +236,37 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
             timestamp: timestamp,
             listing_id: context?.listingId || null,
             development_id: context?.developmentId || null,
-          });
+          })
+          .select('id'); // Select the ID of the inserted message
+
         if (chatMessageError) {
           console.error('Error inserting user message into chat_messages:', chatMessageError);
+        } else if (insertedChatMessage && insertedChatMessage.length > 0) {
+          const chatMessageId = insertedChatMessage[0].id;
+
+          // Generate embedding for the user's question and insert into question_embeddings
+          try {
+            const embeddingResult = await openai.embeddings.create({
+              model: embeddingModel,
+              input: query,
+            });
+
+            const { error: insertEmbeddingError } = await supabase
+              .from('question_embeddings')
+              .insert([
+                {
+                  question_id: chatMessageId, // Link to the chat_messages ID
+                  embedding: embeddingResult.data[0].embedding,
+                  ...(context?.listingId && { listing_id: context.listingId }),
+                },
+              ]);
+
+            if (insertEmbeddingError) {
+              console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
+            }
+          } catch (embeddingError) {
+            console.error('Error generating or inserting question embedding:', embeddingError);
+          }
         }
       } catch (logError) {
         console.error('Error logging user message to chat_messages:', logError);
@@ -350,49 +378,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         console.error('Failed to upsert assistant message to Pinecone, continuing without it.', error);
       }
 
-      // Log the user's question and its embedding to the questions and question_embeddings tables
-      try {
-        const { data: insertedQuestion, error: insertQuestionError } = await supabase
-          .from('questions')
-          .insert([
-            {
-              question_text: query,
-              chatbot_response: responseText,
-              listing_id: context?.listingId || null,
-              status: 'answered',
-              visitor_id: visitorId,
-              session_id: sessionId,
-            },
-          ])
-          .select('id');
-
-        if (insertQuestionError) {
-          console.error('Error inserting question into Supabase:', insertQuestionError);
-        } else if (insertedQuestion && insertedQuestion.length > 0) {
-          const questionId = insertedQuestion[0].id;
-
-          const embeddingResult = await openai.embeddings.create({
-            model: embeddingModel,
-            input: query,
-          });
-
-          const { error: insertEmbeddingError } = await supabase
-            .from('question_embeddings')
-            .insert([
-              {
-                question_id: questionId,
-                embedding: embeddingResult.data[0].embedding,
-                ...(context?.listingId && { listing_id: context.listingId }),
-              },
-            ]);
-
-          if (insertEmbeddingError) {
-            console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
-          }
-        }
-      } catch (logError) {
-        console.error('Error logging question or embedding:', logError);
-      }
 
       res.json({ response: responseText });
     } catch (error) {
@@ -759,13 +744,14 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       let result;
       if (listing_id) {
-        // Update existing listing
+        // Update existing listing by its original 'id'
         result = await listingService.updateListing(listing_id, listingData);
       } else {
-        // Create new listing
+        // Create new listing, database will generate listing_uuid
         result = await listingService.createListing(listingData);
       }
       console.log('[DEBUG] POST /v1/listings response:', result);
+      // For new listings, return the generated listing_uuid along with the old id
       res.status(listing_id ? 200 : 201).json(result);
     } catch (error) {
       console.error('Error processing listing request:', error);
@@ -789,31 +775,31 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.get('/v1/listings/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
+  app.get('/v1/listings/:listingUuid', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-      const { id } = req.params;
-      const listing = await listingService.getListingById(id);
+      const { listingUuid } = req.params;
+      const listing = await listingService.getListingByUuid(listingUuid);
       if (!listing || listing.client_id !== req.clientConfig.clientId) {
         return res.status(404).json({ error: 'Listing not found or unauthorized.' });
       }
       res.json(listing);
     } catch (error) {
-      console.error('Error fetching listing:', error);
+      console.error('Error fetching listing by UUID:', error);
       res.status(500).json({ error: 'Failed to fetch listing.' });
     }
   });
 
-  app.put('/v1/listings/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
+  app.put('/v1/listings/:listingUuid', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-      const { id } = req.params;
+      const { listingUuid } = req.params;
       const { clientConfig } = req;
-      const existingListing = await listingService.getListingById(id);
+      const existingListing = await listingService.getListingByUuid(listingUuid);
 
       if (!existingListing || existingListing.client_id !== clientConfig.clientId) {
         return res.status(404).json({ error: 'Listing not found or unauthorized.' });
       }
 
-      const updatedListing = await listingService.updateListing(id, req.body);
+      const updatedListing = await listingService.updateListingByUuid(listingUuid, req.body);
       res.json(updatedListing);
     } catch (error) {
       console.error('Error updating listing:', error);
@@ -821,17 +807,17 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.delete('/v1/listings/:id', clientConfigMiddleware(clientConfigService), async (req, res) => {
+  app.delete('/v1/listings/:listingUuid', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-      const { id } = req.params;
+      const { listingUuid } = req.params;
       const { clientConfig } = req;
-      const existingListing = await listingService.getListingById(id);
+      const existingListing = await listingService.getListingByUuid(listingUuid);
 
       if (!existingListing || existingListing.client_id !== clientConfig.clientId) {
         return res.status(404).json({ error: 'Listing not found or unauthorized.' });
       }
 
-      await listingService.deleteListing(id);
+      await listingService.deleteListingByUuid(listingUuid);
       res.json({ success: true, message: 'Listing deleted successfully.' });
     } catch (error) {
       console.error('Error deleting listing:', error);
@@ -1028,9 +1014,9 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.post('/v1/users/:userId/listings/:listingId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+  app.post('/v1/users/:userId/listings/:listingUuid', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-      const { userId, listingId } = req.params;
+      const { userId, listingUuid } = req.params;
       const { clientConfig } = req;
 
       // Ensure the user belongs to the client
@@ -1044,7 +1030,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(403).json({ error: 'Only promoters can be assigned listings.' });
       }
 
-      await userService.assignListingToAgent(userId, listingId);
+      await userService.assignListingToAgent(userId, listingUuid);
       res.json({ success: true, message: 'Listing assigned to agent successfully.' });
     } catch (error) {
       console.error('Error assigning listing to agent:', error);
@@ -1052,9 +1038,9 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
-  app.delete('/v1/users/:userId/listings/:listingId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+  app.delete('/v1/users/:userId/listings/:listingUuid', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-      const { userId, listingId } = req.params;
+      const { userId, listingUuid } = req.params;
       const { clientConfig } = req;
 
       // Ensure the user belongs to the client
@@ -1063,7 +1049,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(404).json({ error: 'User not found or unauthorized for this client.' });
       }
 
-      await userService.removeListingFromAgent(userId, listingId);
+      await userService.removeListingFromAgent(userId, listingUuid);
       res.json({ success: true, message: 'Listing removed from agent successfully.' });
     } catch (error) {
       console.error('Error removing listing from agent:', error);
@@ -1109,14 +1095,14 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       ] = await Promise.all([
         supabase.from('listings').select('*').eq('id', id).eq('client_id', req.clientConfig.clientId).single(),
         supabase.from('listing_metrics').select('*').eq('listing_id', id).single(),
-        supabase.from('questions').select('question_text').eq('listing_id', id).eq('status', 'unanswered'),
+        supabase.from('chat_messages').select('message_text, timestamp, answered_at, answered_by').eq('listing_id', id).eq('is_unanswered', true).eq('sender_role', 'user'),
         supabase.from('handoffs').select('reason').eq('listing_id', id),
         (() => {
-          let query = supabase.from('questions').select('question_text, chatbot_response, asked_at, visitor_id').eq('listing_id', id);
+          let query = supabase.from('chat_messages').select('message_text, sender_role, timestamp, visitor_id').eq('listing_id', id);
           if (session_id) {
             query = query.eq('session_id', session_id);
           }
-          return query.order('asked_at', { ascending: true });
+          return query.order('timestamp', { ascending: true });
         })(),
       ]);
 
@@ -1172,10 +1158,11 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         unansweredQuestions: unansweredQuestions.map(q => q.question_text) || [],
         chatHandoffs: formattedHandoffs || [],
         fullChatHistory: fullChatHistory.map(entry => ({
-          question: entry.question_text,
-          answer: entry.chatbot_response,
-          timestamp: entry.asked_at,
+          question: entry.message_text,
+          answer: entry.sender_role === 'assistant' ? entry.message_text : null, // Assuming assistant's message is the answer
+          timestamp: entry.timestamp,
           visitor_id: entry.visitor_id,
+          sender: entry.sender_role, // Include sender role for more context
         })) || [],
       });
     } catch (error) {
@@ -1199,6 +1186,47 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error(`Error fetching leads for listing ${req.params.id}:`, error);
       res.status(500).json({ error: 'Failed to fetch leads for listing.' });
+    }
+  });
+
+  // API endpoint to get a summary of unanswered questions per listing
+  app.get('/api/unanswered-questions-summary', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+      const { data, error } = await supabase
+        .rpc('get_unanswered_questions_summary', { p_client_id: clientConfig.clientId });
+
+      if (error) {
+        console.error('Error calling get_unanswered_questions_summary function:', error);
+        return res.status(500).json({ error: 'Failed to fetch unanswered questions summary.' });
+      }
+
+      // The RPC function already returns listing_id and unanswered_count.
+      // We still need to fetch listing names.
+      const listingIds = data.map(item => item.listing_id);
+      const { data: listings, error: listingsError } = await supabase
+        .from('listings')
+        .select('id, name')
+        .in('id', listingIds)
+        .eq('client_id', clientConfig.clientId);
+
+      if (listingsError) {
+        console.error('Error fetching listing names:', listingsError);
+        return res.status(500).json({ error: 'Failed to fetch listing names.' });
+      }
+
+      const listingNameMap = new Map(listings.map(listing => [listing.id, listing.name]));
+
+      const summary = data.map(item => ({
+        listing_id: item.listing_id,
+        listing_name: listingNameMap.get(item.listing_id) || 'Unknown Listing',
+        unanswered_count: item.unanswered_count, // Use unanswered_count from RPC result
+      }));
+
+      res.json({ summary });
+    } catch (error) {
+      console.error('Error in /api/unanswered-questions-summary endpoint:', error);
+      res.status(500).json({ error: 'Internal server error.' });
     }
   });
 
