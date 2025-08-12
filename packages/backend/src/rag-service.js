@@ -104,13 +104,40 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   }
 
   // Two-query path: 1) Targeted (listing OR development OR query-derived listing), 2) Broad
-  const targetedFilter = (() => {
+  console.log(`[${clientConfig.clientName}] 🔎 performHybridSearch: originalQuery="${originalQuery}", queryFilters=${JSON.stringify(queryFilters)}`);
+  const targetedFilter = (await (async () => {
     if (contextListingId) return { ...baseFilter, listing_id: contextListingId };
+
+    // Try to resolve a numeric listing_id from a natural pattern like "block_2_apt_B" plus typology in query
     const derived = extractListingIdFromQuery(originalQuery);
-    if (derived) return { ...baseFilter, listing_id: derived };
+    if (derived) {
+      // If derived is already numeric, use it directly
+      if (/^\d{3,}$/.test(String(derived))) {
+        return { ...baseFilter, listing_id: derived };
+      }
+      // Map block/letter pattern to real numeric ID via DB lookup
+      const blockPattern = derived.match(/^block_(\d+)_apt_([A-H])$/i);
+      if (blockPattern) {
+        const blockNum = blockPattern[1];
+        const letter = blockPattern[2].toUpperCase();
+        const tMatch = String(originalQuery || '').match(/\bT\s*([1-4])\b/i);
+        const typology = tMatch ? `T${tMatch[1]}` : null;
+        if (typology) {
+          try {
+            console.log(`[${clientConfig.clientName}] Mapping derived ${derived} + typology=${typology} to numeric listing via DB...`);
+            const row = await listingService.findByTypologyLetterBlock(baseFilter.client_id, typology, letter, blockNum);
+            if (row?.id) {
+              console.log(`[${clientConfig.clientName}] Derived mapping resolved to listing ${row.id}`);
+              return { ...baseFilter, listing_id: row.id };
+            }
+          } catch (_) {}
+        }
+      }
+    }
     if (contextDevelopmentId) return { ...baseFilter, development_id: contextDevelopmentId };
     return null;
-  })();
+  })());
+  console.log(`[${clientConfig.clientName}] 🔎 targetedFilter=${JSON.stringify(targetedFilter)}`);
 
   const queries = [];
   if (TWO_QUERY_ENABLED && targetedFilter) {
@@ -145,6 +172,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
   let matches = (targetedResponse?.matches || []);
   const broadMatches = (broadResponse?.matches || []);
+  console.log(`[${clientConfig.clientName}] targeted matches=${matches.length}, broad matches=${broadMatches.length}`);
 
   console.log(`Found ${matches.length} matches in targeted listing search.`);
   console.log(`Found ${broadMatches.length} matches in broad search.`);
@@ -194,6 +222,23 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     }
   }
 
+  // Cross-namespace fallback: if still no matches, try querying the base index without namespace
+  if (matches.length === 0) {
+    try {
+      console.log(`[${clientConfig.clientName}] ⚠️ No matches in namespace. Trying cross-namespace broad search (with client filter)...`);
+      const cross = await clientPineconeIndex.query({
+        vector: searchVector,
+        topK: 50,
+        includeMetadata: true,
+        filter: baseFilter,
+      });
+      matches = cross?.matches || [];
+      console.log(`[${clientConfig.clientName}] Cross-namespace broad search found ${matches.length} matches`);
+    } catch (e) {
+      console.error(`[${clientConfig.clientName}] Cross-namespace broad search failed:`, e);
+    }
+  }
+
   if (matches.length > 0) {
     const reRankQueryFilters = extractQueryFilters(originalQuery, currentListingPrice);
     matches = reRankMatches({
@@ -215,28 +260,28 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   let aggregativeContext = '';
   let pageContext = '';
 
-  // 1. Check for context from the current page URL
+  // 1. Prefer targeted listing context over page URL, to avoid mixing contexts
   const listingIdFromUrl = extractListingIdFromUrl(pageUrl);
-  if (listingIdFromUrl) {
+  const targetedListingId = (externalContext && externalContext.type === 'listing' && externalContext.value) ? externalContext.value : null;
+  const preferredListingId = targetedListingId || listingIdFromUrl || null;
+  if (preferredListingId) {
     try {
-      const listing = await listingService.getListingById(listingIdFromUrl);
+      const listing = await listingService.getListingById(preferredListingId);
       if (listing) {
-        // Construct a detailed summary of the listing
-        pageContext = `O utilizador está atualmente a ver a página do seguinte imóvel:
-- **Nome:** ${listing.name}
-- **ID:** ${listing.id}
-- **Preço:** €${listing.price.toLocaleString()}
-- **Tipo:** ${listing.type}
-- **Quartos:** ${listing.beds}
-- **Casas de Banho:** ${listing.baths}
-- **Comodidades:** ${listing.amenities ? listing.amenities.join(', ') : 'N/A'}
-Use esta informação como o contexto principal para responder a perguntas como "qual é o preço?" ou "quantos quartos tem?".
----
+        pageContext = `O utilizador está interessado no seguinte imóvel:
+ - **Nome:** ${listing.name}
+ - **ID:** ${listing.id}
+ - **Preço:** €${Number(listing.price).toLocaleString('pt-PT')}
+ - **Tipo:** ${listing.type}
+ - **Quartos:** ${listing.beds}
+ - **Casas de Banho:** ${listing.baths}
+ - **Comodidades:** ${listing.amenities ? listing.amenities.join(', ') : 'N/A'}
+ ---
 `;
-        console.log(`[${clientConfig.clientName}]  enriched context with data for listing ID: ${listingIdFromUrl}`);
+        console.log(`[${clientConfig.clientName}]  enriched context with data for listing ID: ${preferredListingId} (preferred)`);
       }
     } catch (error) {
-      console.error(`[${clientConfig.clientName}] failed to fetch listing data for ID ${listingIdFromUrl} from URL:`, error);
+      console.error(`[${clientConfig.clientName}] failed to fetch listing data for ID ${preferredListingId}:`, error);
     }
   }
 
@@ -277,14 +322,12 @@ Use esta informação como o contexto principal para responder a perguntas como 
   console.log(`  Original query: "${query}"`);
 
   let queryResponse = { matches: [] };
-  if (!listingIdFromUrl) {
-    try {
-      queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters);
-    } catch (error) {
-      console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
-      // Return empty matches if search fails due to invalid embedding
-      queryResponse = { matches: [] };
-    }
+  try {
+    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters);
+  } catch (error) {
+    console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
+    // Return empty matches if search fails due to invalid embedding
+    queryResponse = { matches: [] };
   }
   
   // Add debugging for matches found
@@ -316,7 +359,35 @@ Use esta informação como o contexto principal para responder a perguntas como 
       };
     });
     log.info('context.citations', { count: citations.length, citations });
+
+    // Surface URLs explicitly to help the model include the correct link
+    const lines = citations
+      .map(c => {
+        const url = c.url_pt || c.url_en;
+        return url ? `- ${c.id}: ${url}` : null;
+      })
+      .filter(Boolean);
+    if (lines.length) {
+      context += `\n\nLinks úteis (usar o que corresponder ao imóvel referido):\n${lines.join('\n')}\n`;
+    }
   } catch (_) {}
+  
+  // If we have a targeted listing but no matches/citations, synthesize URLs and return a deterministic answer
+  // Only if user intent suggests asking for a link/URL or the query references a specific listing/typology
+  const qLower = String(query || '').toLowerCase();
+  const linkIntent = /(url|link|mostra|mostrar|mostra-me|ver|abre|abrir|aceder|acessar|envia o link|manda o link)/i.test(qLower);
+  const hasSpecificRef = queryFilters && Object.keys(queryFilters).length > 0;
+  const lastAssistantLine = (typeof chatHistory === 'string') ? (chatHistory.split('\n').reverse().find(l => l.startsWith('Assistente: ')) || '') : '';
+  const lastAssistantMsg = lastAssistantLine.replace('Assistente: ', '');
+  const onboardingPromptDetected = /perguntas rápidas|recomendar os melhores apartamentos/i.test(lastAssistantMsg || '');
+  if (queryResponse.matches.length === 0 && targetedListingId && (linkIntent || hasSpecificRef) && !onboardingPromptDetected) {
+    const id = String(targetedListingId);
+    const base = 'https://upinvestments.pt';
+    const urlPt = `${base}/pt/imoveis/aveiro/${id}`;
+    const urlEn = `${base}/en/real-estate/aveiro/${id}`;
+    console.log(`[${clientConfig.clientName}] Returning deterministic URL response for listing ${id}`);
+    return `Aqui está o URL do imóvel: ${urlPt}\n(English) ${urlEn}`;
+  }
   try {
     const texts = queryResponse.matches.map(m => pickText(m.metadata)).filter(Boolean);
     const topMatchSummaries = queryResponse.matches.slice(0, 5).map(m => ({
@@ -399,7 +470,13 @@ Use esta informação como o contexto principal para responder a perguntas como 
     question: query,
     pageUrl: pageUrl || 'Não disponível'
   };
-  const systemPrompt = renderTemplate(systemPromptTemplate, templateVariables);
+  let systemPrompt = renderTemplate(systemPromptTemplate, templateVariables);
+  // Gentle nudge: if we have a targeted listing/development in externalContext, instruct model to include the link
+  if (externalContext && (externalContext.type === 'listing' || externalContext.type === 'development')) {
+    systemPrompt += "\n\nNota: Se houver um URL correspondente no contexto para o imóvel referido, inclui-o explicitamente na resposta.";
+  }
+  // Enforce concise response style globally
+  systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
   console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt. Final token estimate: ${MAX_TOTAL_TOKENS - remainingTokens}`);
 

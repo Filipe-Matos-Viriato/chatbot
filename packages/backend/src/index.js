@@ -159,15 +159,59 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const chatHistoryService = new ChatHistoryService();
 
       // Helper: derive effective listing_id and development_id to persist with messages
+      // Includes deictic resolution from prior assistant response
+      const isDeictic = /\b(este|esta|isto|isso|aquilo|aquele|aquela|this one|that one)\b/i.test(String(query || ''));
+      const resolveDeicticListingId = async () => {
+        if (!isDeictic || !recentMessages?.length) return null;
+        const lastAssistant = recentMessages.find(m => m.role === 'assistant');
+        if (!lastAssistant?.text) return null;
+        // Try to recover a numeric ID from any URL mentioned previously
+        const urlIdMatch = lastAssistant.text.match(/\/(\d{3,})(?!.*\d)/);
+        if (urlIdMatch) {
+          const candidateId = urlIdMatch[1];
+          const { data: row, error: err } = await supabase
+            .from('listings')
+            .select('id, development_id')
+            .eq('id', candidateId)
+            .eq('client_id', clientConfig.clientId)
+            .single();
+          if (!err && row) return row.id;
+        }
+        // Try to recover a numeric ID from explicit "ID: 4271" patterns in prior suggestions
+        const idTagMatch = lastAssistant.text.match(/\bID\s*[:#-]?\s*(\d{3,})\b/i);
+        if (idTagMatch) {
+          const candidateId = idTagMatch[1];
+          const { data: row2, error: err2 } = await supabase
+            .from('listings')
+            .select('id, development_id')
+            .eq('id', candidateId)
+            .eq('client_id', clientConfig.clientId)
+            .single();
+          if (!err2 && row2) return row2.id;
+        }
+        // Try to parse a typology + letter + block mention, e.g., "T2 D - Bloco 2"
+        const m = lastAssistant.text.match(/\bT\s*([1-4])\s*([A-H])\b.*?\bBloco\s*(\d+)/i);
+        if (m) {
+          const typology = `T${m[1]}`;
+          const letter = m[2].toUpperCase();
+          const block = m[3];
+          try {
+            const row = await listingService.findByTypologyLetterBlock(clientConfig.clientId, typology, letter, block);
+            if (row?.id) return row.id;
+          } catch (_) {}
+        }
+        return null;
+      };
       const deriveContextIds = async () => {
         let effectiveListingId = context?.listingId || null;
         let effectiveDevelopmentId = context?.developmentId || clientConfig.defaultDevelopmentId || null;
 
         // Try to extract listing id from pageUrl using shared util
-        if (!effectiveListingId && pageUrl) {
+        if (pageUrl) {
           try {
             const candidate = parseListingFromUrl(String(pageUrl));
             if (candidate) {
+              console.log(`[${clientConfig.clientName}] URL-derived candidate listing id: ${candidate}`);
               const { data: listingRow, error: listingErr } = await supabase
                 .from('listings')
                 .select('id, development_id')
@@ -175,8 +219,10 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
                 .eq('client_id', clientConfig.clientId)
                 .single();
               if (!listingErr && listingRow) {
+                // Tentatively set from URL; may be overridden by explicit query reference below
                 effectiveListingId = listingRow.id;
                 effectiveDevelopmentId = listingRow.development_id || effectiveDevelopmentId;
+                console.log(`[${clientConfig.clientName}] Context from URL → listing ${effectiveListingId}, development ${effectiveDevelopmentId || 'null'}`);
               }
             }
           } catch (_) {
@@ -185,9 +231,10 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         }
 
         // Try to extract listing id from the user's query using shared util
-        if (!effectiveListingId && query) {
+        if (query) {
           const candidate = parseListingFromQuery(query);
           if (candidate) {
+            console.log(`[${clientConfig.clientName}] Query-derived candidate listing id: ${candidate}`);
             const { data: listingRowQ, error: listingErrQ } = await supabase
               .from('listings')
               .select('id, development_id')
@@ -197,7 +244,54 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
             if (!listingErrQ && listingRowQ) {
               effectiveListingId = listingRowQ.id;
               effectiveDevelopmentId = listingRowQ.development_id || effectiveDevelopmentId;
+              console.log(`[${clientConfig.clientName}] Resolved query candidate directly to listing ${effectiveListingId}`);
             }
+          }
+          // If the shared util didn't map to a numeric id, try typology+letter+block resolution (e.g., "T1 B Bloco 1")
+          {
+            const m = String(query).match(/\bT\s*([1-4])\s*([A-H])\b.*?\bBloco\s*(\d+)/i);
+            if (m) {
+              const typology = `T${m[1]}`;
+              const letter = m[2].toUpperCase();
+              const block = m[3];
+              console.log(`[${clientConfig.clientName}] Attempting TLBlock resolution → typology=${typology}, letter=${letter}, block=${block}`);
+              try {
+                const row = await listingService.findByTypologyLetterBlock(clientConfig.clientId, typology, letter, block);
+                if (row?.id) {
+                  effectiveListingId = row.id;
+                  effectiveDevelopmentId = row.development_id || effectiveDevelopmentId;
+                  console.log(`[${clientConfig.clientName}] TLBlock resolved to listing ${effectiveListingId}`);
+                }
+              } catch (_) {}
+            }
+            // Also allow explicit "ID 4271" in the query itself
+            {
+              const idInQuery = String(query).match(/\bID\s*[:#-]?\s*(\d{3,})\b/i);
+              if (idInQuery) {
+                const numericId = idInQuery[1];
+                console.log(`[${clientConfig.clientName}] Explicit ID in query detected: ${numericId}`);
+                const { data: row3, error: err3 } = await supabase
+                  .from('listings')
+                  .select('id, development_id')
+                  .eq('id', numericId)
+                  .eq('client_id', clientConfig.clientId)
+                  .single();
+                if (!err3 && row3) {
+                  effectiveListingId = row3.id;
+                  effectiveDevelopmentId = row3.development_id || effectiveDevelopmentId;
+                  console.log(`[${clientConfig.clientName}] Explicit ID resolved to listing ${effectiveListingId}`);
+                }
+              }
+            }
+          }
+        }
+
+        // If still no listing, try deictic resolution based on last assistant turn
+        if (!effectiveListingId) {
+          const deicticId = await resolveDeicticListingId();
+          if (deicticId) {
+            effectiveListingId = deicticId;
+            console.log(`[${clientConfig.clientName}] Deictic resolution resolved to listing ${effectiveListingId}`);
           }
         }
 
@@ -332,11 +426,20 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generated embedding vector with ${embeddingVector.length} dimensions`);
 
       // Generate response with enhanced context including chat history
+      console.log(`[${clientConfig.clientName}] Final resolved context ids → listing=${effectiveListingId || 'null'}, development=${effectiveDevelopmentId || 'null'}`);
+
+      const externalCtx =
+        effectiveListingId
+          ? { type: 'listing', value: effectiveListingId }
+          : (effectiveDevelopmentId ? { type: 'development', value: effectiveDevelopmentId } : (pageUrl ? null : context));
+
+      console.log(`[${clientConfig.clientName}] External context passed to RAG: ${JSON.stringify(externalCtx)}`);
+
       const responseText = await generateResponse(
         query, 
         clientConfig, 
         embeddingVector,
-        pageUrl ? null : context, // Prioritize pageUrl for context
+        externalCtx,
         userContext, 
         chatHistory,
         pageUrl
@@ -598,7 +701,68 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       };
 
       const updated = await visitorService.saveOnboarding(visitorId, clientConfig.clientId, onboardingPayload);
-      res.json({ success: true, visitor: updated });
+
+      // Automatically recommend listings based on onboarding preferences
+      let recommendations = [];
+      try {
+        recommendations = await listingService.findListingsByOnboarding(clientConfig.clientId, onboardingPayload, 4);
+      } catch (e) {
+        console.warn('Failed to fetch onboarding-based recommendations:', e?.message);
+      }
+
+      // Compose assistant message with recommendations
+      const now = new Date().toISOString();
+      let assistantText;
+      if (recommendations && recommendations.length > 0) {
+        const lines = recommendations.map(r => {
+          const priceStr = (r.price != null) ? `€${Number(r.price).toLocaleString('pt-PT')}` : '';
+          const display = r.name || `${r.type || ''} ${r.id}`.trim();
+          const urlPt = `https://upinvestments.pt/pt/imoveis/aveiro/${r.id}`;
+          return `- ${display} — ${priceStr} (ID: ${r.id})\n  Link: ${urlPt}`;
+        }).join('\n');
+        assistantText = `Com base nas suas preferências, aqui estão algumas opções:\n\n${lines}\n\nQuer falar sobre algum destes?`;
+      } else {
+        assistantText = 'Obrigado pelas suas respostas! De momento não encontrei opções que correspondam exatamente às suas preferências. Quer ajustar o orçamento ou a tipologia para eu procurar alternativas?';
+      }
+
+      // Persist assistant message to Pinecone and Supabase for immediate visibility in chat
+      try {
+        const chatHistoryService = new ChatHistoryService();
+        const sessionId = `onboarding_${visitorId}`;
+        const turnId = `${Date.now()}-assistant`;
+        await chatHistoryService.upsertMessage({
+          text: assistantText,
+          role: 'assistant',
+          client_id: clientConfig.clientId,
+          visitor_id: visitorId,
+          session_id: sessionId,
+          timestamp: now,
+          turn_id: turnId,
+        }, clientConfig);
+      } catch (e) {
+        console.warn('Failed to upsert onboarding recommendation to Pinecone:', e?.message);
+      }
+
+      try {
+        await supabase
+          .from('chat_messages')
+          .insert([
+            {
+              visitor_id: visitorId,
+              session_id: `onboarding_${visitorId}`,
+              client_id: clientConfig.clientId,
+              message_text: assistantText,
+              sender_role: 'assistant',
+              timestamp: now,
+              listing_id: null,
+              development_id: clientConfig.defaultDevelopmentId || null,
+            },
+          ]);
+      } catch (e) {
+        console.warn('Failed to insert onboarding recommendation into chat_messages:', e?.message);
+      }
+
+      res.json({ success: true, visitor: updated, recommendations, assistantMessage: assistantText });
     } catch (error) {
       console.error('Error saving onboarding for visitor:', error);
       res.status(500).json({ error: 'Failed to save onboarding.' });

@@ -110,3 +110,28 @@
    - Aggregative Price Context now uses precise DB values (also lists second-cheapest when available) to avoid fabricated figures.
  - Reduced repetitive CTAs:
    - Added `utils/postprocess.js` and integrated into `rag-service.js` to trim redundant trailing phrases like "Como posso ajudar mais?" when unnecessary.
+
+2025-08-11
+- Implemented deictic reference resolution and explicit link surfacing for UpInvestments:
+  - Added resolver to map pronouns and explicit patterns (e.g., "T1 B Bloco 1", "ID: 4271") to real `listing_id` using chat history and helper lookups.
+  - Enhanced `/api/chat` to pass a targeted external context (`type: 'listing'|'development'`) into RAG when a referenced property is detected.
+  - Updated `rag-service.js` to inject top citation URLs into the prompt context, increasing the likelihood that the assistant includes the correct link.
+  - Added `findByNameLike` and `findByTypologyLetterBlock` helpers to `listing-service.js` to resolve typology+letter+block to a listing.
+  - Improved query parsing in the chat handler to detect "ID 4271" style references and typology+letter+block directly from user input.
+  - Files edited: `packages/backend/src/index.js`, `packages/backend/src/rag-service.js`, `packages/backend/src/services/listing-service.js`.
+  - Impact: Queries like "mostra-me este" and "mostra-me o T1 B do Bloco 1" now resolve to the intended apartment and include the listing link instead of falling back to a generic domain response.
+
+2025-08-11
+- Added deep debug logging for UpInvestments resolution and retrieval flow:
+  - Logs URL-derived candidate id, query-derived candidate id, TLBlock (typology+letter+block) parsing and resolution, explicit ID detection, deictic resolution outcome.
+  - Logs final resolved context ids and the exact external context passed into RAG.
+  - In retrieval, logs original query, queryFilters, targetedFilter mapping from `block_X_apt_Y` to numeric listing id, and targeted vs broad match counts.
+  - Files edited: `packages/backend/src/index.js`, `packages/backend/src/rag-service.js`.
+  - Impact: Enables precise diagnostics when Pinecone returns 0 matches or when the assistant falls back to page context, helping pinpoint where resolution fails.
+
+2025-08-11
+- Implemented automatic post-onboarding recommendations:
+  - New helper `findListingsByOnboarding` in `listing-service.js` filters by typology and budget bucket.
+  - `/v1/visitors/:visitorId/onboarding` now returns and pushes an assistant message with the top 4 matching listings, including direct links.
+  - Persisted the assistant message to both Pinecone chat history and Supabase `chat_messages` for immediate display.
+  - Files edited: `packages/backend/src/index.js`, `packages/backend/src/services/listing-service.js`.
