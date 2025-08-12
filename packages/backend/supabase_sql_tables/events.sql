@@ -5,8 +5,9 @@ create table public.events (
   timestamp timestamp with time zone not null default now(),
   score_impact smallint null default '0'::smallint,
   listing_id text null,
-  client_id text not null default 'client-abc'::text,
+  client_id uuid not null,
+  listing_uuid uuid null,
   constraint events_pkey primary key (id),
-  constraint events_listing_id_fkey foreign KEY (listing_id) references listings (id) ON DELETE CASCADE,
-  constraint events_visitor_id_fkey foreign KEY (visitor_id) references visitors (visitor_id) ON DELETE CASCADE
+  constraint events_listing_uuid_fkey foreign KEY (listing_uuid) references listings (listing_uuid),
+  constraint events_visitor_id_fkey foreign KEY (visitor_id) references visitors (visitor_id) on delete CASCADE
 ) TABLESPACE pg_default;
