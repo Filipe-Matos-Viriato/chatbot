@@ -3,6 +3,7 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import { encode } from 'gpt-3-encoder';
 import * as userService from './services/user-service.js';
 import listingService from './services/listing-service.js';
+import * as developmentService from './services/development-service.js';
 import { withTimeout } from './utils/async-timeout.js';
 import { reRankMatches } from './utils/rerank.js';
 import { buildContext, pickText } from './utils/context.js';
@@ -81,8 +82,8 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   })}`);
   console.log(`[${clientConfig.clientName}] 🔍 DEBUG: External context: ${JSON.stringify(externalContext)}`);
   
-  const contextListingId = externalContext?.type === 'listing' ? externalContext.value : null;
-  const contextDevelopmentId = externalContext?.type === 'development' ? externalContext.value : clientConfig.defaultDevelopmentId;
+  const contextListingId = externalContext?.value;
+  const contextDevelopmentId = externalContext?.developmentId || (externalContext?.type === 'development' ? externalContext.value : clientConfig.defaultDevelopmentId);
   
   console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Context listing ID: ${contextListingId || 'none'}`);
   console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Context development ID: ${contextDevelopmentId || 'none'}`);
@@ -256,17 +257,30 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
 // parsing helpers now imported from ./utils/rag-parsing.js
 
-async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null) {
+async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false) {
   let aggregativeContext = '';
   let pageContext = '';
 
   // 1. Prefer targeted listing context over page URL, to avoid mixing contexts
   const listingIdFromUrl = extractListingIdFromUrl(pageUrl);
-  const targetedListingId = (externalContext && externalContext.type === 'listing' && externalContext.value) ? externalContext.value : null;
+  const targetedListingId = externalContext?.value;
   const preferredListingId = targetedListingId || listingIdFromUrl || null;
   if (preferredListingId) {
     try {
       const listing = await listingService.getListingById(preferredListingId);
+      let developmentName = null;
+      if (listing && listing.development_id) {
+        try {
+          const development = await developmentService.getDevelopmentById(listing.development_id);
+          if (development) {
+            developmentName = development.name;
+            console.log(`[${clientConfig.clientName}] Fetched development name: ${developmentName} for listing ${preferredListingId}`);
+          }
+        } catch (error) {
+          console.warn(`[${clientConfig.clientName}] Failed to fetch development details for ID ${listing.development_id}:`, error.message);
+        }
+      }
+
       if (listing) {
         pageContext = `O utilizador está interessado no seguinte imóvel:
  - **Nome:** ${listing.name}
@@ -276,6 +290,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
  - **Quartos:** ${listing.beds}
  - **Casas de Banho:** ${listing.baths}
  - **Comodidades:** ${listing.amenities ? listing.amenities.join(', ') : 'N/A'}
+ ${developmentName ? `- **Empreendimento:** ${developmentName}` : ''}
  ---
 `;
         console.log(`[${clientConfig.clientName}]  enriched context with data for listing ID: ${preferredListingId} (preferred)`);
@@ -348,7 +363,28 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
+  // Prioritize targeted listing's text in the context
+  let targetedListingText = '';
+  if (targetedListingId && queryResponse.matches.length > 0) {
+    const targetedMatch = queryResponse.matches.find(m =>
+      (m.metadata?.listing_id === targetedListingId) ||
+      (m.metadata?.development_id === targetedListingId) // Also check for development ID if it's a targeted development
+    );
+    if (targetedMatch) {
+      targetedListingText = pickText(targetedMatch.metadata);
+      if (targetedListingText) {
+        console.log(`[${clientConfig.clientName}] Prioritizing text from targeted listing ID: ${targetedListingId}`);
+      }
+    }
+  }
+
   let context = buildContext({ pageContext, matches: queryResponse.matches });
+  
+  // Prepend targeted listing text to the context if found and not already at the very beginning
+  if (targetedListingText && !context.startsWith(targetedListingText)) {
+    context = targetedListingText + "\n\n---\n\n" + context;
+  }
+
   try {
     const citations = queryResponse.matches.slice(0, 5).map(m => {
       const meta = m.metadata || {};
@@ -431,8 +467,16 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   // Truncate chat history
   let truncatedChatHistory = '';
   const chatMessagesArray = [];
-  if (chatHistory && chatHistory !== "Nenhum histórico anterior disponível") {
-    // Ensure chatHistory is a string
+
+  // If no specific listing or development context is provided, discard chat history
+  // This prevents "context bleeding" from previous listing-specific conversations
+  const hasSpecificContext = externalContext && (externalContext.value || externalContext.developmentId);
+  if (!hasSpecificContext) {
+    console.log(`[${clientConfig.clientName}] ⚠️ No specific context (listing/development) provided. Discarding chat history to prevent context bleeding.`);
+    truncatedChatHistory = "Nenhum histórico anterior disponível";
+  } else if (chatHistory && chatHistory !== "Nenhum histórico anterior disponível") {
+    // The chatHistory string is now pre-filtered in index.js if a context shift occurred.
+    // So, we just need to truncate and format it for the prompt.
     const chatHistoryString = typeof chatHistory === 'string' ? chatHistory : JSON.stringify(chatHistory);
     const historyLines = chatHistoryString.split('\n').reverse(); // Process from newest to oldest
     const tempHistory = [];
@@ -446,8 +490,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       }
     }
     truncatedChatHistory = tempHistory.join('\n');
-    
-    // Create the messages array for the API call from the truncated history
+
     for (const line of tempHistory) {
       if (line.startsWith('Utilizador: ')) {
         chatMessagesArray.push({ role: 'user', content: line.replace('Utilizador: ', '') });
@@ -471,12 +514,24 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     pageUrl: pageUrl || 'Não disponível'
   };
   let systemPrompt = renderTemplate(systemPromptTemplate, templateVariables);
+  
+  // If context shifted, add a strong instruction to prioritize new context
+  if (contextShifted && externalContext && externalContext.type === 'listing' && externalContext.value) {
+    systemPrompt += `\n\nAtenção: O utilizador mudou o foco para um novo imóvel (ID: ${externalContext.value}). Priorize as informações sobre este novo imóvel e desconsidere detalhes conflitantes de conversas anteriores sobre outros imóveis.`;
+  } else if (contextShifted && (!externalContext || !externalContext.value)) {
+    systemPrompt += `\n\nCRITICAL: O utilizador selecionou 'Nenhum Imóvel Selecionado'. A conversa anterior era sobre um imóvel específico, mas a pergunta atual NÃO É sobre ele. IGNORE COMPLETAMENTE os detalhes do imóvel da conversa anterior e responda à pergunta atual com base apenas em informações gerais ou no que está explicitamente na pergunta. NÃO mencione o imóvel anterior (preço, nome, ID, etc.).`;
+  } else if (!externalContext || (!externalContext.value && !externalContext.developmentId)) {
+    // If no specific listing or development context is provided, instruct the LLM to provide general answers
+    // or offer multiple options, rather than focusing on a single listing from broad search results.
+    // This instruction is made stronger to override potential biases from general system instructions.
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Não há um imóvel ou empreendimento específico selecionado. A sua resposta DEVE ser GERAL e abranger MÚLTIPLAS opções/exemplos, se aplicável. É PROIBIDO focar-se num único imóvel ou empreendimento, a menos que o utilizador o solicite explicitamente na pergunta. Se o contexto relevante contiver detalhes de vários imóveis, resuma-os ou apresente-os como exemplos de forma não específica.`;
+  }
+
   // Gentle nudge: if we have a targeted listing/development in externalContext, instruct model to include the link
   if (externalContext && (externalContext.type === 'listing' || externalContext.type === 'development')) {
-    systemPrompt += "\n\nNota: Se houver um URL correspondente no contexto para o imóvel referido, inclui-o explicitamente na resposta.";
+    // Removed: systemPrompt += "\n\nNota: Se houver um URL correspondente no contexto para o imóvel referido, inclui-o explicitamente na resposta.";
   }
-  // Enforce concise response style globally
-  systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
+  // Removed: systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
   console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt. Final token estimate: ${MAX_TOTAL_TOKENS - remainingTokens}`);
 
@@ -502,7 +557,15 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       timer.end({ model: generativeModel, maxTokens: MAX_RESPONSE_TOKENS });
       const raw = completion.choices[0].message.content;
       const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';
-      return removeRedundantClosingCTA(raw, previousAssistantText);
+      const processedResponse = removeRedundantClosingCTA(raw, previousAssistantText);
+
+      // Return both the response and the debug payload
+      return {
+        response: processedResponse,
+        debug: {
+          openaiPayload: messages
+        }
+      };
     } catch (error) {
       if (error.status === 503 && retries > 1) {
         console.log(`Model is overloaded. Retrying in 2 seconds... (${retries - 1} retries left)`);

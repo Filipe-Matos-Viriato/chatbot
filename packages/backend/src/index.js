@@ -151,22 +151,37 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-            const { query, visitorId, sessionId, context, pageUrl } = req.body;
-      console.log(`[CHAT] clientId=${req.clientConfig.clientId} query="${query}" pageUrl=${pageUrl || 'n/a'}`);
-      const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
-      const timestamp = new Date().toISOString();
-      const turnId = Date.now().toString(); // Simple unique ID for this turn
-      const chatHistoryService = new ChatHistoryService();
+            const { query, visitor_id, sessionId, context, pageUrl } = req.body; // Changed visitorId to visitor_id
+            const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
+            const timestamp = new Date().toISOString();
+            const turnId = Date.now().toString(); // Simple unique ID for this turn
+            const chatHistoryService = new ChatHistoryService();
 
+            // Retrieve recent chat history for this visitor (across all sessions)
+            let recentMessages = [];
+            let chatHistory = null;
+            let contextShifted = false; // Declare here so it is in scope for generateResponse
+
+            try {
+              if (visitor_id) {
+                recentMessages = await chatHistoryService.getVisitorChatHistory(visitor_id, clientConfig.clientId, 10);
+                console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages for visitor ${visitor_id}`);
+              } else {
+                console.warn('No visitorId provided, skipping chat history retrieval');
+              }
+            } catch (error) {
+              console.error('Error retrieving chat history:', error);
+            }
+      
       // Helper: derive effective listing_id and development_id to persist with messages
       // Includes deictic resolution from prior assistant response
       const isDeictic = /\b(este|esta|isto|isso|aquilo|aquele|aquela|this one|that one)\b/i.test(String(query || ''));
-      const resolveDeicticListingId = async () => {
-        if (!isDeictic || !recentMessages?.length) return null;
-        const lastAssistant = recentMessages.find(m => m.role === 'assistant');
-        if (!lastAssistant?.text) return null;
+      const resolveDeicticListingId = async (recentMessages) => {
+        if (!isDeictic || !recentMessages || recentMessages.length === 0) return null;
+        const lastAssistant = recentMessages.find(m => m.sender_role === 'assistant'); // Use sender_role from chat_messages table
+        if (!lastAssistant?.message_text) return null; // Use message_text
         // Try to recover a numeric ID from any URL mentioned previously
-        const urlIdMatch = lastAssistant.text.match(/\/(\d{3,})(?!.*\d)/);
+        const urlIdMatch = lastAssistant.message_text.match(/\/(\d{3,})(?!.*\d)/);
         if (urlIdMatch) {
           const candidateId = urlIdMatch[1];
           const { data: row, error: err } = await supabase
@@ -178,7 +193,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           if (!err && row) return row.id;
         }
         // Try to recover a numeric ID from explicit "ID: 4271" patterns in prior suggestions
-        const idTagMatch = lastAssistant.text.match(/\bID\s*[:#-]?\s*(\d{3,})\b/i);
+        const idTagMatch = lastAssistant.message_text.match(/\bID\s*[:#-]?\s*(\d{3,})\b/i);
         if (idTagMatch) {
           const candidateId = idTagMatch[1];
           const { data: row2, error: err2 } = await supabase
@@ -190,7 +205,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           if (!err2 && row2) return row2.id;
         }
         // Try to parse a typology + letter + block mention, e.g., "T2 D - Bloco 2"
-        const m = lastAssistant.text.match(/\bT\s*([1-4])\s*([A-H])\b.*?\bBloco\s*(\d+)/i);
+        const m = lastAssistant.message_text.match(/\bT\s*([1-4])\s*([A-H])\b.*?\bBloco\s*(\d+)/i);
         if (m) {
           const typology = `T${m[1]}`;
           const letter = m[2].toUpperCase();
@@ -202,9 +217,31 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         }
         return null;
       };
-      const deriveContextIds = async () => {
+      const deriveContextIds = async (recentMessages) => { // Pass recentMessages here
+        // Determine if the frontend explicitly sent a null listingId, meaning "no listing selected"
+        const isExplicitlyNoListing = req.body.context === null || req.body.context.listingId === null;
+
         let effectiveListingId = context?.listingId || null;
         let effectiveDevelopmentId = context?.developmentId || clientConfig.defaultDevelopmentId || null;
+
+        // Detect context shift (moved here from main handler)
+        const currentListingId = effectiveListingId; // The listing ID from the current request
+        // Find the most recent message that had a listing_id to detect shifts
+        const lastMessageWithListing = recentMessages.find(m => m.listing_id);
+
+        if (effectiveListingId && (!lastMessageWithListing || lastMessageWithListing.listing_id !== effectiveListingId)) {
+            // This covers shifting TO a new listing from either no listing or a different listing.
+            console.log(`[${clientConfig.clientName}] Context shift detected: moving TO listing ${effectiveListingId} from ${lastMessageWithListing?.listing_id || 'no listing'}.`);
+            contextShifted = true;
+        } else if (!effectiveListingId && lastMessageWithListing) {
+            // This covers shifting FROM a listing TO no listing.
+            console.log(`[${clientConfig.clientName}] Context shift detected: moving FROM listing ${lastMessageWithListing.listing_id} TO no listing.`);
+            contextShifted = true;
+            // If context shifted to null, filter out listing/development specific messages from history
+            console.log(`[${clientConfig.clientName}] Filtering chat history due to context shift to no listing.`);
+            recentMessages = recentMessages.filter(msg => !msg.listing_id && !msg.development_id);
+        }
+
 
         // Try to extract listing id from pageUrl using shared util
         if (pageUrl) {
@@ -221,7 +258,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
               if (!listingErr && listingRow) {
                 // Tentatively set from URL; may be overridden by explicit query reference below
                 effectiveListingId = listingRow.id;
-                effectiveDevelopmentId = listingRow.development_id || effectiveDevelopmentId;
+                effectiveDevelopmentId = listingRow.development_id || effectiveDevelopmentId; // Ensure development_id is updated
                 console.log(`[${clientConfig.clientName}] Context from URL → listing ${effectiveListingId}, development ${effectiveDevelopmentId || 'null'}`);
               }
             }
@@ -243,7 +280,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
               .single();
             if (!listingErrQ && listingRowQ) {
               effectiveListingId = listingRowQ.id;
-              effectiveDevelopmentId = listingRowQ.development_id || effectiveDevelopmentId;
+              effectiveDevelopmentId = listingRowQ.development_id || effectiveDevelopmentId; // Ensure development_id is updated
               console.log(`[${clientConfig.clientName}] Resolved query candidate directly to listing ${effectiveListingId}`);
             }
           }
@@ -259,7 +296,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
                 const row = await listingService.findByTypologyLetterBlock(clientConfig.clientId, typology, letter, block);
                 if (row?.id) {
                   effectiveListingId = row.id;
-                  effectiveDevelopmentId = row.development_id || effectiveDevelopmentId;
+                  effectiveDevelopmentId = row.development_id || effectiveDevelopmentId; // Ensure development_id is updated
                   console.log(`[${clientConfig.clientName}] TLBlock resolved to listing ${effectiveListingId}`);
                 }
               } catch (_) {}
@@ -278,7 +315,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
                   .single();
                 if (!err3 && row3) {
                   effectiveListingId = row3.id;
-                  effectiveDevelopmentId = row3.development_id || effectiveDevelopmentId;
+                  effectiveDevelopmentId = row3.development_id || effectiveDevelopmentId; // Ensure development_id is updated
                   console.log(`[${clientConfig.clientName}] Explicit ID resolved to listing ${effectiveListingId}`);
                 }
               }
@@ -286,56 +323,61 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           }
         }
 
-        // If still no listing, try deictic resolution based on last assistant turn
-        if (!effectiveListingId) {
-          const deicticId = await resolveDeicticListingId();
+        // If still no listing AND it's not explicitly "no listing selected" from frontend,
+        // then try deictic resolution based on last assistant turn
+        if (!effectiveListingId && !isExplicitlyNoListing) {
+          const deicticId = await resolveDeicticListingId(recentMessages); // Pass recentMessages here
           if (deicticId) {
             effectiveListingId = deicticId;
-            console.log(`[${clientConfig.clientName}] Deictic resolution resolved to listing ${effectiveListingId}`);
+            // When deictic resolution finds a listing, also fetch its development_id
+            try {
+              const { data: deicticListing, error: deicticErr } = await supabase
+                .from('listings')
+                .select('development_id')
+                .eq('id', deicticId)
+                .eq('client_id', clientConfig.clientId)
+                .single();
+              if (!deicticErr && deicticListing) {
+                effectiveDevelopmentId = deicticListing.development_id || effectiveDevelopmentId;
+              }
+            } catch (e) {
+              console.warn(`[${clientConfig.clientName}] Failed to fetch development_id for deictic listing ${deicticId}:`, e.message);
+            }
+            console.log(`[${clientConfig.clientName}] Deictic resolution resolved to listing ${effectiveListingId}, development ${effectiveDevelopmentId || 'null'}`);
           }
         }
 
         return { effectiveListingId, effectiveDevelopmentId };
       };
 
-      const { effectiveListingId, effectiveDevelopmentId } = await deriveContextIds();
-
-      // Retrieve recent chat history for this visitor (across all sessions)
-      let chatHistory = null;
-      try {
-        if (visitorId) {
-          const recentMessages = await chatHistoryService.getVisitorChatHistory(visitorId, clientConfig.clientId, 10);
-          chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
-          console.log(`[${clientConfig.clientName || clientConfig.clientId}] Retrieved ${recentMessages.length} recent messages for visitor ${visitorId}`);
-          console.log(`[${clientConfig.clientName || clientConfig.clientId}] Formatted Chat History:\n---\n${chatHistory}\n---`);
-        } else {
-          console.warn('No visitorId provided, skipping chat history retrieval');
-          chatHistory = "Nenhum histórico anterior disponível";
-        }
-      } catch (error) {
-        console.error('Error retrieving chat history:', error);
-        chatHistory = "Nenhum histórico anterior disponível";
-      }
+      const { effectiveListingId, effectiveDevelopmentId } = await deriveContextIds(recentMessages); // Pass recentMessages here
+      
+      // Format chat history AFTER context shift detection and filtering
+      chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
+      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Formatted Chat History:\n---\n${chatHistory}\n---`);
 
       // Store user message in chat_messages table
       try {
+        const userMessageData = {
+          visitor_id: visitor_id,
+          session_id: sessionId,
+          client_id: clientConfig.clientId,
+          message_text: query,
+          sender_role: 'user',
+          timestamp: timestamp,
+          listing_id: effectiveListingId,
+          development_id: effectiveDevelopmentId,
+        };
+        console.log('Attempting to insert user message into chat_messages:', userMessageData);
         const { data: insertedChatMessage, error: chatMessageError } = await supabase
           .from('chat_messages')
-          .insert({
-            visitor_id: visitorId,
-            session_id: sessionId,
-            client_id: clientConfig.clientId,
-            message_text: query,
-            sender_role: 'user',
-            timestamp: timestamp,
-            listing_id: context?.listingId || null,
-            development_id: context?.developmentId || null,
-          })
+          .insert([userMessageData])
           .select('id'); // Select the ID of the inserted message
 
         if (chatMessageError) {
           console.error('Error inserting user message into chat_messages:', chatMessageError);
         } else if (insertedChatMessage && insertedChatMessage.length > 0) {
+          console.log('User message inserted successfully:', insertedChatMessage[0]);
           const chatMessageId = insertedChatMessage[0].id;
 
           // Generate embedding for the user's question and insert into question_embeddings
@@ -345,18 +387,21 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
               input: query,
             });
 
+            const embeddingData = {
+              question_id: chatMessageId, // Link to the chat_messages ID
+              embedding: embeddingResult.data[0].embedding,
+              client_id: clientConfig.clientId, // Add client_id here
+              ...(context?.listingId && { listing_id: context.listingId }),
+            };
+            console.log('Attempting to insert question embedding:', embeddingData);
             const { error: insertEmbeddingError } = await supabase
               .from('question_embeddings')
-              .insert([
-                {
-                  question_id: chatMessageId, // Link to the chat_messages ID
-                  embedding: embeddingResult.data[0].embedding,
-                  ...(context?.listingId && { listing_id: context.listingId }),
-                },
-              ]);
+              .insert([embeddingData]);
 
             if (insertEmbeddingError) {
               console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
+            } else {
+              console.log('Question embedding inserted successfully.');
             }
           } catch (embeddingError) {
             console.error('Error generating or inserting question embedding:', embeddingError);
@@ -372,7 +417,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           text: query,
           role: 'user',
           client_id: clientConfig.clientId,
-          visitor_id: visitorId,
+          visitor_id: visitor_id, // Use visitor_id
           session_id: sessionId,
           timestamp: timestamp,
           turn_id: `${turnId}-user`,
@@ -428,39 +473,55 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       // Generate response with enhanced context including chat history
       console.log(`[${clientConfig.clientName}] Final resolved context ids → listing=${effectiveListingId || 'null'}, development=${effectiveDevelopmentId || 'null'}`);
 
-      const externalCtx =
-        effectiveListingId
-          ? { type: 'listing', value: effectiveListingId }
-          : (effectiveDevelopmentId ? { type: 'development', value: effectiveDevelopmentId } : (pageUrl ? null : context));
+      let externalCtx = null;
+      if (effectiveListingId) {
+        externalCtx = {
+          type: 'listing',
+          value: effectiveListingId,
+          developmentId: effectiveDevelopmentId, // Pass developmentId for richer context
+        };
+      } else if (effectiveDevelopmentId) {
+        externalCtx = {
+          type: 'development',
+          value: effectiveDevelopmentId,
+        };
+      } else {
+        externalCtx = context || null;
+      }
 
       console.log(`[${clientConfig.clientName}] External context passed to RAG: ${JSON.stringify(externalCtx)}`);
 
-      const responseText = await generateResponse(
-        query, 
-        clientConfig, 
+      const { response: responseText, debug: debugPayload } = await generateResponse(
+        query,
+        clientConfig,
         embeddingVector,
         externalCtx,
-        userContext, 
+        userContext,
         chatHistory,
-        pageUrl
+        pageUrl,
+        contextShifted // Pass the contextShifted flag
       );
 
       // Store assistant response in chat_messages table
       try {
+        const assistantMessageData = {
+          visitor_id: visitor_id,
+          session_id: sessionId,
+          client_id: clientConfig.clientId,
+          message_text: responseText, // Still log the string response
+          sender_role: 'assistant',
+          timestamp: new Date().toISOString(),
+          listing_id: effectiveListingId,
+          development_id: effectiveDevelopmentId,
+        };
+        console.log('Attempting to insert assistant message into chat_messages:', assistantMessageData);
         const { error: chatMessageError } = await supabase
           .from('chat_messages')
-          .insert({
-            visitor_id: visitorId,
-            session_id: sessionId,
-            client_id: clientConfig.clientId,
-            message_text: responseText,
-            sender_role: 'assistant',
-            timestamp: new Date().toISOString(),
-            listing_id: context?.listingId || null,
-            development_id: context?.developmentId || null,
-          });
+          .insert([assistantMessageData]);
         if (chatMessageError) {
           console.error('Error inserting assistant message into chat_messages:', chatMessageError);
+        } else {
+          console.log('Assistant message inserted successfully.');
         }
       } catch (logError) {
         console.error('Error logging assistant message to chat_messages:', logError);
@@ -472,7 +533,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
           text: responseText,
           role: 'assistant',
           client_id: clientConfig.clientId,
-          visitor_id: visitorId,
+          visitor_id: visitor_id, // Use visitor_id
           session_id: sessionId,
           timestamp: new Date().toISOString(),
           turn_id: `${turnId}-assistant`,
@@ -482,7 +543,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
 
-      res.json({ response: responseText });
+      res.json({ response: responseText, debug: debugPayload });
     } catch (error) {
       console.error('Error processing chat request:', error);
       const errorMessage = error.status === 503
