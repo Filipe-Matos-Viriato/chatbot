@@ -26,6 +26,15 @@ function getIndexName() {
   return process.env.PINECONE_INDEX || 'rachatbot-1536';
 }
 
+function getNamespaces() {
+  const list = process.env.PINECONE_NAMESPACES;
+  if (list && list.trim().length > 0) {
+    return list.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  const single = process.env.PINECONE_NAMESPACE;
+  return single ? [single] : [];
+}
+
 app.get('/', (_req, res) => {
   res.json({ ok: true, name: 'new-chatbot-backend', status: 'running' });
 });
@@ -40,12 +49,40 @@ app.post('/api/chat', async (req, res) => {
     const vector = emb.data?.[0]?.embedding;
     if (!Array.isArray(vector)) return res.status(500).json({ error: 'embedding failed' });
 
-    // 2) retrieve (namespace optional env)
+    // 2) retrieve (query across multiple namespaces if provided)
     const index = pinecone.index(getIndexName());
-    const namespace = process.env.PINECONE_NAMESPACE || undefined;
-    const queryArgs = { topK: 8, includeMetadata: true, vector };
-    const results = namespace ? await index.namespace(namespace).query(queryArgs) : await index.query(queryArgs);
-    const context = (results.matches || []).map(m => m.metadata?.text).filter(Boolean).join('\n\n---\n\n');
+    const namespaces = getNamespaces();
+    const topK = Number(process.env.RAG_TOPK || 8);
+    const queryArgs = { topK, includeMetadata: true, vector };
+
+    let matches = [];
+    if (namespaces.length > 0) {
+      const queries = namespaces.map(ns => index.namespace(ns).query(queryArgs));
+      const settled = await Promise.allSettled(queries);
+      for (const r of settled) {
+        if (r.status === 'fulfilled') {
+          matches = matches.concat(r.value?.matches || []);
+        }
+      }
+      // De-duplicate by id and sort by score desc, then take topK overall
+      const seen = new Set();
+      matches = matches
+        .filter(m => {
+          if (!m?.id || seen.has(m.id)) return false;
+          seen.add(m.id);
+          return true;
+        })
+        .sort((a, b) => (b?.score || 0) - (a?.score || 0))
+        .slice(0, topK);
+    } else {
+      const res = await index.query(queryArgs);
+      matches = res.matches || [];
+    }
+
+    const context = matches
+      .map(m => m?.metadata?.text || m?.metadata?.chunk || m?.metadata?.content || m?.metadata?.body || m?.metadata?.page_text)
+      .filter(Boolean)
+      .join('\n\n---\n\n');
 
     // 3) generate
     const completion = await openai.chat.completions.create({
