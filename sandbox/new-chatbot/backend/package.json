@@ -1,0 +1,23 @@
+{
+  "name": "new-chatbot-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "create:index": "node scripts/create-index.js",
+    "create:index:new": "node scripts/create-index.js --name new-chatbot-1536 --dims 1536 --metric cosine",
+    "create:namespace": "node scripts/create-namespace.js --namespace upinvestments"
+  },
+  "dependencies": {
+    "@pinecone-database/pinecone": "^2.2.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "openai": "^4.52.0"
+  }
+}
+
+
