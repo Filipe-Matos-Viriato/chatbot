@@ -4,7 +4,7 @@ import PropertyTypeFeatureInterest from './components/PropertyTypeFeatureInteres
 import ListingsWithUnansweredQuestions from './components/ListingsWithUnansweredQuestions';
 import ListingSearchInput from './components/ListingSearchInput';
 
-const ListingPerformanceTab = ({ listings, listingMetrics }) => {
+const ListingPerformanceTab = ({ listings, listingMetrics, clusteredQuestions, hideConversionMetrics }) => {
     const [searchTerm, setSearchTerm] = useState('');
 
     const handleSearchChange = (event) => {
@@ -16,7 +16,7 @@ const ListingPerformanceTab = ({ listings, listingMetrics }) => {
     };
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 w-full">
             <h2 className="text-2xl font-bold text-gray-800">Listing Performance</h2>
             <ListingSearchInput
                 searchTerm={searchTerm}
@@ -24,11 +24,11 @@ const ListingPerformanceTab = ({ listings, listingMetrics }) => {
                 onClearSearch={handleClearSearch}
             />
 
-            <OverallListingPerformance listings={listings} listingMetrics={listingMetrics} searchTerm={searchTerm} />
+            <OverallListingPerformance listings={listings} listingMetrics={listingMetrics} searchTerm={searchTerm} hideConversionMetrics={hideConversionMetrics} />
 
             {/* Property Type & Feature Interest */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                <PropertyTypeFeatureInterest />
+                <PropertyTypeFeatureInterest listings={listings} listingMetrics={listingMetrics} clusteredQuestions={clusteredQuestions} />
                 <ListingsWithUnansweredQuestions />
             </div>
         </div>

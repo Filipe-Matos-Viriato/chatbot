@@ -6,7 +6,7 @@ const PropertyInformation = ({ listing }) => {
     }
 
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800 mb-4">Property Information</h3>
             <div className="space-y-2 text-gray-600">
                 <p><strong>Address:</strong> {listing.address}</p>

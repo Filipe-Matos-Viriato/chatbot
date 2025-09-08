@@ -4,7 +4,7 @@ const ChatHistory = ({ chatHistory }) => {
     console.log("ChatHistory component received chatHistory (after backend mapping):", chatHistory);
     if (!chatHistory || chatHistory.length === 0) {
         return (
-            <div className="bg-white p-6 rounded-lg shadow">
+            <div className="card-standard">
                 <h3 className="text-xl font-semibold text-gray-800 mb-4">Chat History</h3>
                 <p className="text-gray-600">No chat history available for this listing.</p>
             </div>
@@ -12,7 +12,7 @@ const ChatHistory = ({ chatHistory }) => {
     }
 
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-xl font-semibold text-gray-800 mb-4">Chat History</h3>
             <div className="space-y-4 max-h-96 overflow-y-auto">
                 {chatHistory.map((entry, index) => {

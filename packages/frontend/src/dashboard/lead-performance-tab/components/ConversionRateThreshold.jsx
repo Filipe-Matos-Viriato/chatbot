@@ -2,7 +2,7 @@ import React from 'react';
 
 const ConversionRateThreshold = () => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800">Conversion Rate by Lead Score Threshold</h3>
             <p className="text-sm text-gray-500 mt-1">Line Chart: Conversion Rate vs. Lead Score</p>
             <p className="text-sm text-gray-500 mt-1">Shows how higher lead scores correlate with conversion success.</p>

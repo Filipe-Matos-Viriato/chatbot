@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const OverallListingPerformance = ({ listings, listingMetrics, searchTerm }) => {
+const OverallListingPerformance = ({ listings, listingMetrics, searchTerm, hideConversionMetrics = false }) => {
     const navigate = useNavigate();
     const [currentPage, setCurrentPage] = useState(1);
     const [sortColumn, setSortColumn] = useState(null);
@@ -95,12 +95,18 @@ const OverallListingPerformance = ({ listings, listingMetrics, searchTerm }) => 
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('inquiries')}>
                                 Inquiries {getSortIndicator('inquiries')}
                             </th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('total_conversions')}>
-                                Total Conversions {getSortIndicator('total_conversions')}
-                            </th>
-                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('conversion_rate')}>
-                                Conversion Rate {getSortIndicator('conversion_rate')}
-                            </th>
+                            {/* Conditionally hide Total Conversions column */}
+                            {!hideConversionMetrics && (
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('total_conversions')}>
+                                    Total Conversions {getSortIndicator('total_conversions')}
+                                </th>
+                            )}
+                            {/* Conditionally hide Conversion Rate column */}
+                            {!hideConversionMetrics && (
+                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('conversion_rate')}>
+                                    Conversion Rate {getSortIndicator('conversion_rate')}
+                                </th>
+                            )}
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('unacknowledged_hot_leads')}>
                                 Unacknowledged Hot Leads {getSortIndicator('unacknowledged_hot_leads')}
                             </th>
@@ -116,13 +122,23 @@ const OverallListingPerformance = ({ listings, listingMetrics, searchTerm }) => 
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.name}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.engaged_users}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.inquiries}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.total_conversions}</td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.conversion_rate !== null ? listing.conversion_rate.toFixed(2) : '0.00'}%</td>
+                                {/* Conditionally hide Total Conversions data cell */}
+                                {!hideConversionMetrics && (
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.total_conversions}</td>
+                                )}
+                                {/* Conditionally hide Conversion Rate data cell */}
+                                {!hideConversionMetrics && (
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.conversion_rate !== null ? listing.conversion_rate.toFixed(2) : '0.00'}%</td>
+                                )}
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{listing.unacknowledged_hot_leads}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <button
-                                        onClick={() => navigate(`/dashboard/listing/${listing.id}?clientId=${listing.client_id}`)}
-                                        className="text-blue-600 hover:text-blue-900"
+                                        onClick={() => {
+                                            const upInvestmentsClientId = "e6f484a3-c3cb-4e01-b8ce-a276f4b7355c";
+                                            const basePath = listing.client_id === upInvestmentsClientId ? '/dashboard-up-investments/listagem' : '/dashboard/listing';
+                                            navigate(`${basePath}/${listing.id}?clientId=${listing.client_id}`);
+                                        }}
+                                        className="text-blue-600 hover:text-blue-900 hover:cursor-pointer"
                                     >
                                         View Details
                                     </button>

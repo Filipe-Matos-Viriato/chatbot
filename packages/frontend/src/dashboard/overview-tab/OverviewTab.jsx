@@ -13,7 +13,7 @@ import { supabase, getLeadDistributionMetrics } from '../../config/supabaseClien
 import { useClient } from '../../context/ClientContext'; // Import useClient
 
 
-const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
+const OverviewTab = ({ onViewHotLeads, topInquiredListings, hiddenMetrics = [] }) => {
     const { selectedClientId } = useClient(); // Get selectedClientId from context
     const [leadDistributionData, setLeadDistributionData] = useState(null);
     const [newHotLeadsCount, setNewHotLeadsCount] = useState(0);
@@ -130,22 +130,25 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
                         return label;
                     }
                 }
+            },
+            datalabels: {
+                display: false
             }
         }
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 w-full">
             <h2 className="text-xl font-semibold text-gray-800">Dashboard Overview</h2>
 
             <HotLeadsAlert newHotLeadsCount={newHotLeadsCount} onAcknowledgeLeads={handleAcknowledgeHotLeads} />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
                 <TotalLeadsGeneratedMetric />
-                <ChatbotResolutionRateMetric />
+                {!hiddenMetrics.includes('chatbot-resolution-rate') && <ChatbotResolutionRateMetric />}
                 <NewHotLeadsMetric newHotLeadsCount={newHotLeadsCount} />
-                <AvgChatDurationMetric />
-                <PropertyViewingsBookedMetric />
+                {!hiddenMetrics.includes('avg-chat-duration') && <AvgChatDurationMetric />}
+                {!hiddenMetrics.includes('property-viewings-booked') && <PropertyViewingsBookedMetric />}
                 <UnansweredQuestionsMetric />
             </div>
 
@@ -156,7 +159,7 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings }) => {
                     chartData={leadDistributionData}
                     chartOptions={chartOptions}
                 />
-                <TopListings listings={topInquiredListings} />
+                <TopListings listings={topInquiredListings} clientId={selectedClientId} />
             </div>
         </div>
     );

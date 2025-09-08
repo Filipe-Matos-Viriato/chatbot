@@ -83,8 +83,8 @@ const ListingsWithUnansweredQuestions = () => {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <button
-                                            onClick={() => navigate(`/dashboard/listing-performance/${item.listing_id}?clientId=${selectedClientId}`)}
-                                            className="text-blue-600 hover:text-blue-900"
+                                            onClick={() => navigate(`/dashboard/unanswered-questions?listingId=${item.listing_id}`)}
+                                            className="text-blue-600 hover:text-blue-900 hover:cursor-pointer"
                                         >
                                             View
                                         </button>

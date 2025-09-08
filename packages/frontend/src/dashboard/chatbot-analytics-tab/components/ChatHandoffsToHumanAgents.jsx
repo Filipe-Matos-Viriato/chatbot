@@ -2,7 +2,7 @@ import React from 'react';
 
 const ChatHandoffsToHumanAgents = () => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800">Chat Handoffs to Human Agents</h3>
             <div className="mt-4 flex justify-around text-center">
                 <div>

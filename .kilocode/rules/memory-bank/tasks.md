@@ -14,6 +14,25 @@
     *   If the IDs do not match, the job will be marked as "Failed," and a detailed error message will be logged for administrative review.
 
 
+## Implement Unanswered Questions Review Page
+**Status:** Completed
+**Goal:** Create a centralized and intelligent interface for client administrators and agents to review, manage, and respond to user questions that the chatbot could not answer.
+**Completion Date:** 2025-09-04
+
+### Implementation Details:
+- **Database Schema:** Added new columns to `chat_messages` (`requires_kb_update`, `answered_by_user_id`, `resolution_notes`, `follow_up_sent_at`, `follow_up_channel`) and `phone` to `visitors` table.
+- **Backend Services:** Created `unanswered_question_service.js` with RBAC support and `communication_service.js` for email/SMS placeholders.
+- **API Endpoints:** Implemented `GET /api/unanswered-questions`, `POST /api/unanswered-questions/:id/status`, `POST /api/unanswered-questions/:id/reply`, and AI endpoints.
+- **Frontend Components:** Built complete `unanswered-questions-tab/` with `UnansweredQuestionsPage.jsx`, `QuestionTable.jsx`, `FilterSidebar.jsx`, and `ReplyModal.jsx`.
+- **Navigation:** Integrated with dashboard routing and made metrics clickable.
+- **Features:** Smart contact masking, AI-assisted replies, comprehensive filtering, and RBAC enforcement.
+
+### Business Value:
+- ✅ Improve chatbot accuracy by addressing knowledge gaps
+- ✅ Increase lead conversion through timely responses
+- ✅ Enhance customer satisfaction with proactive support
+- ✅ Boost operational efficiency for support staff
+
 ## Implement Lead Scoring & Visitor Tracking System
 **Status:** Completed
 **Goal:** Developed a system to track visitor interactions across domains and assign a lead score to prioritize high-intent individuals for the sales team.

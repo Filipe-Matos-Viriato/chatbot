@@ -1,7 +1,7 @@
 import React from 'react';
 import { useClient } from '../context/ClientContext'; // Import useClient
 
-const DashboardHeader = () => {
+const DashboardHeader = ({ title, hideClientSelect }) => {
     const { clients, selectedClientId, setSelectedClientId } = useClient();
 
     const handleClientChange = (event) => {
@@ -10,11 +10,11 @@ const DashboardHeader = () => {
     };
 
     return (
-        <header className="bg-white shadow-sm py-4 px-6 md:px-8">
-            <div className="max-w-7xl mx-auto flex justify-between items-center">
-                <h1 className="text-2xl font-bold text-gray-800">Real Estate Chatbot Dashboard</h1>
+        <header className="bg-white shadow-sm py-4 px-6">
+            <div className="max-w-dashboard mx-auto px-6 flex justify-between items-center">
+                <h1 className="text-2xl font-bold text-gray-800">{title || "Real Estate Chatbot Dashboard"}</h1>
                 <div className="flex items-center space-x-4">
-                    {selectedClientId !== null && ( // Conditionally render select
+                    {!hideClientSelect && selectedClientId !== null && ( // Conditionally render select based on hideClientSelect prop
                         <select
                             value={selectedClientId}
                             onChange={handleClientChange}

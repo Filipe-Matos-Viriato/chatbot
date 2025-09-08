@@ -16,7 +16,7 @@ const LeadPerformanceTab = ({ visitors, listings, listingMetrics }) => {
     const avgTimeToQualify = "1.5 days";
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 w-full">
             <h2 className="text-2xl font-bold text-gray-800">Lead Performance Analysis</h2>
 
             <LeadTypeFilters />

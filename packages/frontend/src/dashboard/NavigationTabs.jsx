@@ -1,13 +1,17 @@
 import React from 'react';
 
-const NavigationTabs = ({ activeTab, onTabClick }) => {
-    const tabs = [
+const NavigationTabs = ({ activeTab, onTabClick, tabs: propTabs }) => {
+    // Use the tabs array passed as a prop, or fall back to the default hardcoded tabs
+    // This ensures backward compatibility for components that don't pass the 'tabs' prop.
+    const defaultTabs = [
         { id: 'overview', label: 'Overview' },
         { id: 'lead-performance', label: 'Lead Performance' },
         { id: 'chatbot-analytics', label: 'Chatbot Analytics' },
         { id: 'listing-performance', label: 'Listing Performance' },
+        { id: 'unanswered-questions', label: 'Unanswered Questions' },
         { id: 'user-insights', label: 'User Insights' }
     ];
+    const tabs = propTabs || defaultTabs;
 
     return (
         <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg mb-6">

@@ -1,3 +1,8 @@
+// File location: packages/frontend/src/dashboard/listing-performance-tab/components/ListingDetailsPageUpInvestments.jsx
+// Description: This file implements the listing details page specifically for the Up Investments dashboard.
+// Why this file exists: To allow for client-specific modifications to the listing details view without affecting the general dashboard's listing details page.
+// Relevant files: packages/frontend/src/dashboard/DashboardUpInvestments.jsx, packages/frontend/src/dashboard/listing-performance-tab/components/OverallListingPerformance.jsx, packages/frontend/src/dashboard/listing-performance-tab/components/ListingDetailsPage.jsx
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../../config/apiClient';
@@ -11,7 +16,6 @@ import UnansweredQuestions from './listing-details/UnansweredQuestions'; // Re-i
 import ChatHandoffs from './listing-details/ChatHandoffs';
 import IndividualLeadsTable from './listing-details/IndividualLeadsTable';
 import ChatHistory from './listing-details/ChatHistory'; // Import the new component
-import ChatHistoryPage from './listing-details/ChatHistoryPage'; // Import ChatHistoryPage for modal
 
 const ListingDetailsPage = () => {
     const { id } = useParams();
@@ -27,8 +31,6 @@ const ListingDetailsPage = () => {
     const [chatHistory, setChatHistory] = useState([]); // New state for full chat history
     const [chatHandoffs, setChatHandoffs] = useState([]);
     const [individualLeads, setIndividualLeads] = useState([]); // New state for individual leads
-    const [currentView, setCurrentView] = useState('listing'); // 'listing' or 'chat-history'
-    const [selectedVisitorId, setSelectedVisitorId] = useState(null); // Selected visitor ID for chat history view
 
     useEffect(() => {
         const fetchListingDetails = async () => {
@@ -112,68 +114,19 @@ const ListingDetailsPage = () => {
         fetchListingDetails();
     }, [id, clientId, navigate]); // Add navigate to dependency array
 
-    const handleOpenChatHistory = (visitorId) => {
-        setSelectedVisitorId(visitorId);
-        setCurrentView('chat-history');
-    };
-
-    const handleBackToListing = () => {
-        setCurrentView('listing');
-        setSelectedVisitorId(null);
-    };
-
     if (!listingData) { // Only check for listingData, allow metrics to be null
         return <div className="text-center py-8">Loading listing details...</div>;
     }
 
-    if (currentView === 'chat-history' && selectedVisitorId) {
-        // Find visitor contact information
-        const visitorData = individualLeads.find(lead => lead.visitor_id === selectedVisitorId);
-        const hasContactInfo = visitorData && (visitorData.email || visitorData.phone);
-
-        return (
-            <div className="space-y-8 w-full">
-                <div className="bg-white p-6 rounded-lg shadow">
-                    <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-2xl font-bold text-gray-800">
-                            Chat History for Visitor: {selectedVisitorId}
-                        </h2>
-                        <button
-                            onClick={handleBackToListing}
-                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 focus:outline-none"
-                        >
-                            Back to Listing Details
-                        </button>
-                    </div>
-                    <div className="mb-4 text-gray-600">
-                        {hasContactInfo ? (
-                            <div>
-                                {visitorData.email && <span>Email: {visitorData.email}</span>}
-                                {visitorData.email && visitorData.phone && <span> • </span>}
-                                {visitorData.phone && <span>Phone: {visitorData.phone}</span>}
-                            </div>
-                        ) : (
-                            <div>No contact information available</div>
-                        )}
-                    </div>
-                    <div className="mb-4 text-gray-600">
-                        Listing: {listingData.name} ({listingData.propId})
-                    </div>
-                    <ChatHistoryPage visitorId={selectedVisitorId} onClose={handleBackToListing} />
-                </div>
-            </div>
-        );
-    }
-
     return (
-        <div className="space-y-8 w-full">
+        <div className="space-y-8">
             <div className="bg-white p-6 rounded-lg shadow">
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-bold text-gray-800">
                         Listing Details: {listingData.name} ({listingData.propId})
                     </h2>
                     <button
-                        onClick={() => navigate('/dashboard/listing-performance')}
+                        onClick={() => navigate('/dashboard-up-investments/desempenho-listagens')}
                         className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 focus:outline-none"
                     >
                         Back to All Listings
@@ -203,22 +156,17 @@ const ListingDetailsPage = () => {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
                     <CommonQuestions questions={commonQuestions} />
-                    <UnansweredQuestions questions={unansweredQuestions} listingId={id} /> {/* Keep UnansweredQuestions */}
+                    <UnansweredQuestions questions={unansweredQuestions} /> {/* Keep UnansweredQuestions */}
                 </div>
 
                 <div className="mt-8"> {/* New div for ChatHistory */}
                     <ChatHistory chatHistory={chatHistory} />
                 </div>
 
-                <div className="mt-8">
-                    <IndividualLeadsTable listingName={listingData.name} leads={individualLeads} onOpenChatHistory={handleOpenChatHistory} />
-                </div>
+                <IndividualLeadsTable listingName={listingData.name} leads={individualLeads} />
 
-                <div className="mt-8">
-                    <ChatHandoffs handoffs={chatHandoffs} />
-                </div>
+                <ChatHandoffs handoffs={chatHandoffs} />
             </div>
-
         </div>
     );
 };

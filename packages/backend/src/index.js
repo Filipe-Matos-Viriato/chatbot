@@ -26,6 +26,8 @@ import supabaseModule from './config/supabase.js';
 import ChatHistoryService from './services/chat-history-service.js';
 import * as developmentService from './services/development-service.js';
 import userService from './services/user-service.js';
+import unansweredQuestionService from './services/unanswered_question_service.js';
+import communicationService from './services/communication_service.js';
 import { extractListingIdFromUrl as parseListingFromUrl, extractListingIdFromQuery as parseListingFromQuery } from './utils/rag-parsing.js';
 console.log('[DEBUG] All imports in index.js completed.');
 const openai = new OpenAI({
@@ -1320,7 +1322,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       ] = await Promise.all([
         supabase.from('listings').select('*').eq('id', id).eq('client_id', req.clientConfig.clientId).single(),
         supabase.from('listing_metrics').select('*').eq('listing_id', id).single(),
-        supabase.from('chat_messages').select('message_text, timestamp, answered_at, answered_by').eq('listing_id', id).eq('is_unanswered', true).eq('sender_role', 'user'),
+        supabase.from('chat_messages').select('message_text, timestamp, answered_at, answered_by').eq('listing_id', id).eq('client_id', req.clientConfig.clientId).eq('is_unanswered', true).eq('sender_role', 'user'),
         supabase.from('handoffs').select('reason').eq('listing_id', id),
         (() => {
           let query = supabase.from('chat_messages').select('message_text, sender_role, timestamp, visitor_id').eq('listing_id', id);
@@ -1352,7 +1354,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         console.error(`[Backend] Error fetching unanswered questions:`, unansweredQuestionsError);
         throw unansweredQuestionsError;
       }
-      console.log(`[Backend] Unanswered questions:`, unansweredQuestions);
+      console.log(`[Backend] Unanswered questions count:`, unansweredQuestions?.length || 0);
 
       if (fullChatHistoryError) {
         console.error(`[Backend] Error fetching full chat history:`, fullChatHistoryError);
@@ -1376,11 +1378,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         count,
       }));
 
+      const processedUnansweredQuestions = unansweredQuestions.filter(q => q.message_text).map(q => ({
+        message_text: q.message_text,
+        timestamp: q.timestamp
+      })) || [];
+
       res.json({
         listing: listing || null,
         metrics: metrics || null,
         commonQuestions: [], // Common questions are now fetched via a separate API
-        unansweredQuestions: unansweredQuestions.map(q => q.question_text) || [],
+        unansweredQuestions: processedUnansweredQuestions,
         chatHandoffs: formattedHandoffs || [],
         fullChatHistory: fullChatHistory.map(entry => ({
           question: entry.message_text,
@@ -1411,6 +1418,135 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error(`Error fetching leads for listing ${req.params.id}:`, error);
       res.status(500).json({ error: 'Failed to fetch leads for listing.' });
+    }
+  });
+
+  // API endpoint to get chatbot resolution rate
+  app.get('/api/metrics/chatbot-resolution-rate', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+
+      // Get total messages and unanswered messages for this client
+      const { data: messages, error } = await supabase
+        .from('chat_messages')
+        .select('is_unanswered')
+        .eq('client_id', clientConfig.clientId)
+        .eq('sender_role', 'user'); // Only count user messages
+
+      if (error) {
+        console.error('Error fetching messages for resolution rate:', error);
+        return res.status(500).json({ error: 'Failed to fetch resolution rate data.' });
+      }
+
+      if (!messages || messages.length === 0) {
+        return res.json({ rate: 0, total: 0, answered: 0 });
+      }
+
+      const total = messages.length;
+      const unanswered = messages.filter(msg => msg.is_unanswered).length;
+      const answered = total - unanswered;
+      const rate = total > 0 ? Math.round((answered / total) * 100) : 0;
+
+      res.json({ rate, total, answered });
+    } catch (error) {
+      console.error('Error calculating chatbot resolution rate:', error);
+      res.status(500).json({ error: 'Failed to calculate resolution rate.' });
+    }
+  });
+
+  // API endpoint to get average chat duration
+  app.get('/api/metrics/average-chat-duration', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+
+      // Get all messages grouped by session_id
+      const { data: messages, error } = await supabase
+        .from('chat_messages')
+        .select('session_id, timestamp')
+        .eq('client_id', clientConfig.clientId)
+        .order('timestamp', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching messages for chat duration:', error);
+        return res.status(500).json({ error: 'Failed to fetch chat duration data.' });
+      }
+
+      if (!messages || messages.length === 0) {
+        return res.json({ averageDuration: 0, totalSessions: 0 });
+      }
+
+      // Group messages by session_id and calculate duration for each session
+      const sessionDurations = {};
+      messages.forEach(msg => {
+        if (!sessionDurations[msg.session_id]) {
+          sessionDurations[msg.session_id] = {
+            start: new Date(msg.timestamp),
+            end: new Date(msg.timestamp)
+          };
+        } else {
+          const msgTime = new Date(msg.timestamp);
+          if (msgTime < sessionDurations[msg.session_id].start) {
+            sessionDurations[msg.session_id].start = msgTime;
+          }
+          if (msgTime > sessionDurations[msg.session_id].end) {
+            sessionDurations[msg.session_id].end = msgTime;
+          }
+        }
+      });
+
+      // Calculate average duration in minutes
+      const durations = Object.values(sessionDurations).map(session => {
+        const durationMs = session.end - session.start;
+        return durationMs / (1000 * 60); // Convert to minutes
+      });
+
+      const totalSessions = durations.length;
+      const averageDuration = totalSessions > 0
+        ? Math.round((durations.reduce((sum, dur) => sum + dur, 0) / totalSessions) * 10) / 10
+        : 0;
+
+      res.json({ averageDuration, totalSessions });
+    } catch (error) {
+      console.error('Error calculating average chat duration:', error);
+      res.status(500).json({ error: 'Failed to calculate average chat duration.' });
+    }
+  });
+
+  // API endpoint to get property viewings booked
+  app.get('/api/metrics/property-viewings-booked', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+
+      // Get events that indicate property viewings booked
+      const { data: events, error } = await supabase
+        .from('events')
+        .select('event_type')
+        .eq('client_id', clientConfig.clientId);
+
+      if (error) {
+        console.error('Error fetching events for property viewings:', error);
+        return res.status(500).json({ error: 'Failed to fetch property viewings data.' });
+      }
+
+      if (!events || events.length === 0) {
+        return res.json({ count: 0 });
+      }
+
+      // Count events that indicate property viewings booked
+      // Look for event types that contain booking/viewing related terms
+      const bookingEvents = events.filter(event =>
+        event.event_type &&
+        (event.event_type.toLowerCase().includes('book') ||
+         event.event_type.toLowerCase().includes('view') ||
+         event.event_type.toLowerCase().includes('visit') ||
+         event.event_type === 'booked_viewing' ||
+         event.event_type === 'property_viewing_booked')
+      );
+
+      res.json({ count: bookingEvents.length });
+    } catch (error) {
+      console.error('Error calculating property viewings booked:', error);
+      res.status(500).json({ error: 'Failed to calculate property viewings booked.' });
     }
   });
 
@@ -1488,6 +1624,185 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error(`Error fetching chat history for visitor ${req.params.visitorId}:`, error);
       res.status(500).json({ error: 'Failed to fetch chat history.' });
+    }
+  });
+
+  // API endpoints for Unanswered Questions Management
+  app.get('/api/unanswered-questions', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig, userContext } = req;
+      const { listingId, dateRange, searchQuery, status, page, pageSize } = req.query;
+
+      // Parse date range if provided
+      let parsedDateRange = null;
+      if (dateRange) {
+        try {
+          parsedDateRange = JSON.parse(dateRange);
+        } catch (e) {
+          console.warn('Invalid dateRange format, ignoring:', dateRange);
+        }
+      }
+
+      const filters = {
+        listingId: listingId || null,
+        dateRange: parsedDateRange,
+        searchQuery: searchQuery || null,
+        status: status || null
+      };
+
+      const pagination = {
+        page: parseInt(page) || 1,
+        pageSize: parseInt(pageSize) || 20
+      };
+
+      const result = await unansweredQuestionService.getUnansweredQuestions(
+        clientConfig.clientId,
+        userContext.userId,
+        filters,
+        pagination
+      );
+
+      res.json(result);
+    } catch (error) {
+      console.error('Error fetching unanswered questions:', error);
+      res.status(500).json({ error: 'Failed to fetch unanswered questions.' });
+    }
+  });
+
+  app.post('/api/unanswered-questions/:id/status', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig, userContext } = req;
+      const { id } = req.params;
+      const { status, notes } = req.body;
+
+      if (!status || !['resolved', 'kb_update_needed'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status. Must be "resolved" or "kb_update_needed".' });
+      }
+
+      const updateData = { status, notes };
+      const result = await unansweredQuestionService.updateQuestionStatus(
+        id,
+        clientConfig.clientId,
+        userContext.userId,
+        updateData
+      );
+
+      res.json({ success: true, question: result });
+    } catch (error) {
+      console.error('Error updating question status:', error);
+      if (error.message.includes('Unauthorized')) {
+        res.status(403).json({ error: error.message });
+      } else {
+        res.status(500).json({ error: 'Failed to update question status.' });
+      }
+    }
+  });
+
+  app.post('/api/unanswered-questions/:id/reply', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig, userContext } = req;
+      const { id } = req.params;
+      const { channel, message } = req.body;
+
+      if (!channel || !['email', 'sms', 'whatsapp'].includes(channel)) {
+        return res.status(400).json({ error: 'Invalid channel. Must be "email", "sms", or "whatsapp".' });
+      }
+
+      if (!message || message.trim().length === 0) {
+        return res.status(400).json({ error: 'Message is required.' });
+      }
+
+      const replyData = { channel, message: message.trim() };
+      const result = await unansweredQuestionService.sendReply(
+        id,
+        clientConfig.clientId,
+        userContext.userId,
+        replyData
+      );
+
+      res.json(result);
+    } catch (error) {
+      console.error('Error sending reply:', error);
+      if (error.message.includes('Unauthorized') || error.message.includes('not found')) {
+        res.status(403).json({ error: error.message });
+      } else {
+        res.status(500).json({ error: 'Failed to send reply.' });
+      }
+    }
+  });
+
+  // AI endpoints for reply assistance
+  app.post('/api/ai/suggest-reply', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { question, chatHistory } = req.body;
+
+      if (!question || question.trim().length === 0) {
+        return res.status(400).json({ error: 'Question is required.' });
+      }
+
+      // Create a prompt for the AI to suggest a reply
+      const systemPrompt = `You are a helpful customer service assistant. Based on the following customer question and chat history, suggest a professional and helpful reply. Keep the reply concise but comprehensive.`;
+      const userPrompt = `Question: ${question}\n\nChat History:\n${chatHistory || 'No previous chat history'}\n\nPlease suggest a reply:`;
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini', // Using a cost-effective model for suggestions
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        max_tokens: 300,
+        temperature: 0.7
+      });
+
+      const suggestedReply = completion.choices[0]?.message?.content?.trim();
+
+      if (!suggestedReply) {
+        return res.status(500).json({ error: 'Failed to generate reply suggestion.' });
+      }
+
+      res.json({ suggestedReply });
+    } catch (error) {
+      console.error('Error generating reply suggestion:', error);
+      res.status(500).json({ error: 'Failed to generate reply suggestion.' });
+    }
+  });
+
+  app.post('/api/ai/improve-reply', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { draftReply, question } = req.body;
+
+      if (!draftReply || draftReply.trim().length === 0) {
+        return res.status(400).json({ error: 'Draft reply is required.' });
+      }
+
+      if (!question || question.trim().length === 0) {
+        return res.status(400).json({ error: 'Question is required.' });
+      }
+
+      // Create a prompt for the AI to improve the draft reply
+      const systemPrompt = `You are a professional customer service assistant. Review and improve the following draft reply to make it more professional, helpful, and engaging while maintaining its core message.`;
+      const userPrompt = `Original Question: ${question}\n\nDraft Reply: ${draftReply}\n\nPlease improve this reply:`;
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        max_tokens: 400,
+        temperature: 0.6
+      });
+
+      const improvedReply = completion.choices[0]?.message?.content?.trim();
+
+      if (!improvedReply) {
+        return res.status(500).json({ error: 'Failed to improve reply.' });
+      }
+
+      res.json({ improvedReply });
+    } catch (error) {
+      console.error('Error improving reply:', error);
+      res.status(500).json({ error: 'Failed to improve reply.' });
     }
   });
 

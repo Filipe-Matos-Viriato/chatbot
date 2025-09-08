@@ -1,8 +1,9 @@
 import React from 'react';
 import { Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
 
-ChartJS.register(ArcElement, Tooltip, Legend);
+ChartJS.register(ArcElement, Tooltip, Legend, ChartDataLabels);
 
 const ChartPlaceholder = ({ title, description, height = "h-40", chartData, chartOptions }) => (
     <div className="bg-white rounded-lg border shadow-sm p-6">

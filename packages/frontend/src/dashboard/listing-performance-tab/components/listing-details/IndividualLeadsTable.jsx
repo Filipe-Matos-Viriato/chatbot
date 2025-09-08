@@ -1,10 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
 
-const IndividualLeadsTable = ({ listingName, leads }) => {
+const IndividualLeadsTable = ({ listingName, leads, onOpenChatHistory }) => {
     const [sortColumn, setSortColumn] = useState(null);
     const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
-    const navigate = useNavigate();
 
     const sortedLeads = useMemo(() => {
         if (!leads) return [];
@@ -53,7 +51,7 @@ const IndividualLeadsTable = ({ listingName, leads }) => {
         return '';
     };
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800 mb-4">Individual Leads Interested in This Listing</h3>
             {leads && leads.length > 0 ? (
                 <div className="overflow-x-auto">
@@ -89,7 +87,7 @@ const IndividualLeadsTable = ({ listingName, leads }) => {
                                 <tr
                                     key={lead.visitor_id}
                                     className="cursor-pointer hover:bg-gray-50"
-                                    onClick={() => navigate(`/chat-history/${lead.visitor_id}`)}
+                                    onClick={() => onOpenChatHistory && onOpenChatHistory(lead.visitor_id)}
                                 >
                                     <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900">
                                         {lead.visitor_id}

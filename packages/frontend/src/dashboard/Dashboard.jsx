@@ -10,6 +10,8 @@ import UserInsightsTab from './user-insights-tab/UserInsightsTab';
 import DashboardHeader from './DashboardHeader';
 import ListingPerformanceTab from './listing-performance-tab/ListingPerformanceTab';
 import ListingDetailsPage from './listing-performance-tab/components/ListingDetailsPage';
+import UnansweredQuestionsPage from './unanswered-questions-tab/UnansweredQuestionsPage';
+import Layout from './components/Layout';
 
 // Main Dashboard Component
 const Dashboard = () => {
@@ -19,6 +21,7 @@ const Dashboard = () => {
     const [visitors, setVisitors] = useState([]);
     const [listings, setListings] = useState([]);
     const [listingMetrics, setListingMetrics] = useState([]);
+    const [clusteredQuestions, setClusteredQuestions] = useState([]);
     const [topInquiredListings, setTopInquiredListings] = useState([]);
 
     // Determine active tab based on URL
@@ -90,6 +93,18 @@ const Dashboard = () => {
                     const sortedListings = combinedListings.sort((a, b) => b.inquiries - a.inquiries);
                     setTopInquiredListings(sortedListings.slice(0, 5));
                 }
+
+                // Fetch clustered questions
+                const { data: clusteredData, error: clusteredError } = await supabase
+                    .from('clustered_questions')
+                    .select('*')
+                    .eq('client_id', selectedClientId);
+                if (clusteredError) {
+                    console.error('Error fetching clustered questions:', clusteredError);
+                } else {
+                    setClusteredQuestions(clusteredData || []);
+                    console.log('Fetched clustered questions:', clusteredData);
+                }
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }
@@ -110,29 +125,34 @@ const Dashboard = () => {
         <div className="min-h-screen flex flex-col bg-gray-50 font-sans text-gray-900">
             <DashboardHeader />
 
-            <div className="flex-grow max-w-7xl mx-auto px-8 md:px-12 py-8">
-                <NavigationTabs activeTab={activeTab} onTabClick={handleTabClick} />
+            <div className="w-full max-w-dashboard mx-auto px-6 py-container-padding grid grid-cols-1">
+                <div className="w-full">
+                    <NavigationTabs activeTab={activeTab} onTabClick={handleTabClick} />
+                </div>
 
-                <Routes>
-                    <Route index element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
-                    <Route path="overview" element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
-                    <Route path="lead-performance" element={<LeadPerformanceTab visitors={visitors} listings={listings} listingMetrics={listingMetrics} />} />
-                    <Route path="chatbot-analytics" element={<ChatbotAnalyticsTab />} />
-                    <Route path="listing-performance" element={<ListingPerformanceTab listings={listings} listingMetrics={listingMetrics} />} />
-                    <Route path="listing/:id" element={<ListingDetailsPage />} />
-                    <Route path="user-insights" element={<UserInsightsTab visitors={visitors} />} />
-                    <Route path="*" element={
-                        <div className="text-center py-12">
-                            <h3 className="text-lg font-medium text-gray-600">
-                                This tab is under development
-                            </h3>
-                            <p className="text-sm text-gray-500 mt-2">
-                                The {activeTab} functionality will be implemented soon.
-                            </p>
-                        </div>
-                    } />
-                </Routes>
-                <Outlet /> {/* This is needed if there are further nested routes, but not for direct tab content */}
+                <main className="w-full mt-8">
+                    <Routes>
+                        <Route index element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
+                        <Route path="overview" element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
+                        <Route path="lead-performance" element={<LeadPerformanceTab visitors={visitors} listings={listings} listingMetrics={listingMetrics} />} />
+                        <Route path="chatbot-analytics" element={<ChatbotAnalyticsTab />} />
+                        <Route path="listing-performance" element={<ListingPerformanceTab listings={listings} listingMetrics={listingMetrics} clusteredQuestions={clusteredQuestions} />} />
+                        <Route path="listing/:id" element={<ListingDetailsPage />} />
+                        <Route path="unanswered-questions" element={<UnansweredQuestionsPage />} />
+                        <Route path="user-insights" element={<UserInsightsTab visitors={visitors} />} />
+                        <Route path="*" element={
+                            <div className="text-center py-12">
+                                <h3 className="text-lg font-medium text-gray-600">
+                                    This tab is under development
+                                </h3>
+                                <p className="text-sm text-gray-500 mt-2">
+                                    The {activeTab} functionality will be implemented soon.
+                                </p>
+                            </div>
+                        } />
+                    </Routes>
+                    <Outlet /> {/* This is needed if there are further nested routes, but not for direct tab content */}
+                </main>
             </div>
 
             {/* Floating Chat Widget */}

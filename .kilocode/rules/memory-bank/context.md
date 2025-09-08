@@ -1,8 +1,9 @@
 # Project Context
 
 ## Current Work Focus
-The primary focus is on ensuring accurate and complete data ingestion into Supabase and Pinecone, enabling robust RAG (Retrieval-Augmented Generation) capabilities for both general and context-specific queries, including aggregative questions. The Supabase integration for persistent visitor data storage has been successfully completed.
+The primary focus has shifted to implementing comprehensive dashboard features for client administrators and agents. The Unanswered Questions Review Page has been successfully implemented as a core MVP feature, providing intelligent question management with RBAC, AI-assisted replies, and smart contact information masking.
 
+- **Unanswered Questions Feature Status:** ✅ **COMPLETED** - Full implementation with backend APIs, frontend UI, and database schema updates.
 - **Common Questions Feature Status:** The "Common Questions about this Listing" feature now leverages pre-calculated and pre-clustered questions for improved performance and accuracy. The in-process K-Means clustering algorithm has been implemented to group semantically similar questions, and a dedicated API endpoint serves these pre-calculated common questions.
 
 ## Recent Changes
@@ -83,8 +84,46 @@ The primary focus is on ensuring accurate and complete data ingestion into Supab
     - Fixed `TypeError: pdf is not a function` by correctly importing and passing the `pdf-parse` function.
     - Updated the embedding model in `ingestion-service.js` from Google's `text-embedding-004` to OpenAI's `text-embedding-3-small` to match the Pinecone index dimension (1536). All knowledge base documents were successfully re-upserted.
 
+- **Unanswered Questions Review Page Implementation:**
+    - **Database Schema Updates:** Added new columns to `chat_messages` table (`requires_kb_update`, `answered_by_user_id`, `resolution_notes`, `follow_up_sent_at`, `follow_up_channel`) and `phone` column to `visitors` table.
+    - **Backend API Development:**
+        - Created `unanswered_question_service.js` with comprehensive RBAC support for admin/promoter role filtering.
+        - Implemented `GET /api/unanswered-questions` with filtering, pagination, and smart visitor data joining.
+        - Added `POST /api/unanswered-questions/:id/status` for resolving questions or marking for KB updates.
+        - Created `communication_service.js` with email/SMS placeholders for direct replies.
+        - Implemented `POST /api/unanswered-questions/:id/reply` with AI assistance integration.
+        - Added AI endpoints `POST /api/ai/suggest-reply` and `POST /api/ai/improve-reply` for reply assistance.
+        - Implemented smart contact masking: full details when user can reply, masked when read-only.
+    - **Frontend Implementation:**
+        - Created complete `unanswered-questions-tab/` folder structure with modular components.
+        - Built `UnansweredQuestionsPage.jsx` with full filtering and pagination.
+        - Created `QuestionTable.jsx` with action buttons and contact display.
+        - Implemented `FilterSidebar.jsx` with date range, search, and status filters.
+        - Built `ReplyModal.jsx` with AI-assisted reply composition.
+        - Added comprehensive state management and API integration.
+    - **Navigation Integration:**
+        - Added `/dashboard/unanswered-questions` route with listing-specific filtering.
+        - Updated listing details page to navigate to unanswered questions.
+        - Made overview metrics clickable to access the unanswered questions page.
+    - **Privacy & UX Features:**
+        - Smart masking: full contact details when actionable, masked when read-only.
+        - RBAC enforcement at backend level for admin/promoter access control.
+        - AI-assisted reply suggestions and improvements.
+        - Comprehensive filtering and search capabilities.
+    
+    - **Dashboard Layout Fixes:**
+        - **Tailwind v4 Migration:** Moved all design tokens from `tailwind.config.js` to `packages/frontend/src/index.css` using the `@theme` directive for proper Tailwind v4 compatibility.
+        - **Consistent Max Width:** Implemented 1600px maximum width across all dashboard components (header, navigation, main content) using `--max-width-dashboard: 1600px`.
+        - **Unified Padding:** Applied consistent 24px horizontal padding (`px-6`) to all dashboard sections for visual consistency.
+        - **Design System Centralization:** All spacing, colors, and sizing values are now centralized in `index.css` with clear organization (Border Radius, Max Widths, Spacing, Colors sections).
+        - **Header Consistency:** Updated `DashboardHeader.jsx` to use the same max-width constraint and padding as the main content area.
+
 ## Next Steps
 - **Test Chatbot Functionality:** Verify that the chatbot can now correctly answer aggregative price queries (e.g., "qual é o preço mais barato?", "qual é o preço mais caro?").
+- **Unanswered Questions Feature:**
+    - **Phase 1 (MVP):** ✅ **COMPLETED** - Core review & action framework with RBAC, AI-assisted replies, and smart masking.
+    - **Phase 2 (Future):** Advanced workflow & automation - bulk actions, real email/SMS services, reply templates.
+    - **Phase 3 (Future):** Analytics & insights - resolution rates, time-to-resolve tracking, theme analysis.
 - **Client Dashboard Implementation:**
     - **Phase 1 (Current Focus):**
         - Connect to Supabase (Frontend - Initial): Directly fetch existing visitor data from Supabase within Dashboard.jsx to replace fake data.

@@ -29,6 +29,8 @@ The backend is a Node.js application using Express.js. Its primary responsibilit
 - **`src/services/development-service.js` (Development Service):** Manages development records in Supabase.
 - **Fallback & Notification Service:** Manages behavior when context validation fails (e.g., an invalid `listing_id`). Triggers admin notifications for critical errors like data sync issues.
 - **`src/services/visitor-service.js` (Visitor Service):** Manages visitor sessions and tracks interactions for lead scoring.
+- **`src/services/unanswered_question_service.js` (Unanswered Questions Service):** Provides comprehensive management of unanswered chatbot questions with RBAC support, including status updates, direct replies, and AI-assisted response generation.
+- **`src/services/communication_service.js` (Communication Service):** Handles email and SMS communication for direct replies to visitors, with placeholder implementations for future integration with email/SMS providers.
 
 ### Lead Scoring & Visitor Tracking System
 This system tracks visitor interactions and assigns a lead score to prioritize high-intent individuals. The lead score is a hybrid score (maximum 100 points) composed of three main components: Engagement Behavior, Question Intent & Quality, and Conversion Actions.
@@ -102,6 +104,14 @@ graph TD
         C -- "Create Visitor" --> H[Visitor Service];
         C -- "Log Event / Update Score" --> H;
         H -- "Stores/Updates" --> I[(Visitors Database <br> Supabase)];
+
+        U[Admin Dashboard] -- "GET /api/unanswered-questions" --> C;
+        U -- "POST /api/unanswered-questions/:id/status" --> C;
+        U -- "POST /api/unanswered-questions/:id/reply" --> C;
+        C -- "Manage Questions" --> UQ[Unanswered Questions Service];
+        C -- "Send Communications" --> CS[Communication Service];
+        UQ -- "RBAC & Filtering" --> CM[(Chat Messages <br> Supabase)];
+        CS -- "Email/SMS Placeholders" --> CM;
 
         subgraph User Management
             U[Admin/Promoter Dashboard] -- "API Calls" --> C;
@@ -210,9 +220,31 @@ The ingestion pipeline is designed to support a multi-tiered approach to automat
 - **Flexible Metadata Extraction:** To handle varied client document structures, the ingestion pipeline now supports flexible metadata extraction for fields like `listings.name` and `listings.baths`. This leverages client-specific configurations (regex patterns) defined in their JSON configuration files (`documentExtraction` section).
 
 ## Frontend Architecture
-The frontend remains a React/Vite SPA, but it will be enhanced to:
+The frontend is a React/Vite SPA using **Tailwind CSS v4** for styling. The design system is fully centralized in `packages/frontend/src/index.css` using the `@theme` directive, with all custom values (max-widths, spacing, colors) defined as CSS custom properties.
+
+### Key Technical Details:
+- **Styling Framework:** Tailwind CSS v4 with CSS-first configuration
+- **Design System:** Centralized in `packages/frontend/src/index.css` using `@theme inline`
+- **Layout System:** Consistent 1600px max-width with 24px side padding across all dashboard components
+- **Component Architecture:** Modular React components with consistent styling patterns
+
+### Dashboard Layout Structure:
+```
+Dashboard (full width)
+├── Header (px-6 padding)
+│   └── Inner Container (max-w-dashboard + px-6 = 24px total padding)
+├── Navigation (max-w-dashboard + px-6)
+└── Main Content (max-w-dashboard + px-6)
+```
+
+The frontend will be enhanced to:
 - Pass a hardcoded or dynamically retrieved `client_id` with every backend request.
 - Potentially receive UI configuration details (colors, logos, welcome messages) from the backend based on the client configuration.
+- **Unanswered Questions Dashboard:** A comprehensive interface for managing unanswered chatbot questions with the following components:
+  - **`unanswered-questions-tab/UnansweredQuestionsPage.jsx`:** Main page component with filtering and pagination.
+  - **`unanswered-questions-tab/components/QuestionTable.jsx`:** Table displaying questions with action buttons and smart contact masking.
+  - **`unanswered-questions-tab/components/FilterSidebar.jsx`:** Sidebar with date range, search, and status filters.
+  - **`unanswered-questions-tab/components/ReplyModal.jsx`:** Modal for composing replies with AI assistance.
 
 ## Admin & Client Dashboards
 

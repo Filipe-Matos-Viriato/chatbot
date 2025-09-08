@@ -2,7 +2,7 @@ import React from 'react';
 
 const UnansweredQuestionsAnalysis = () => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800">Unanswered Questions Analysis</h3>
             <p className="text-sm text-gray-500 mt-1">Bar Chart: Top Unanswered Question Categories</p>
             <p className="text-sm text-gray-500 mt-1">Identify common knowledge gaps in the chatbot.</p>

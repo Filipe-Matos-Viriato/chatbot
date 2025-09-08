@@ -6,7 +6,7 @@ import ChatHandoffsToHumanAgents from './components/ChatHandoffsToHumanAgents';
 
 const ChatbotAnalyticsTab = () => {
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 w-full">
             <h2 className="text-2xl font-bold text-gray-800">Chatbot Analytics</h2>
 
             {/* Chatbot Performance Over Time and Unanswered Questions Analysis */}

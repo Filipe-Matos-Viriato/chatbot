@@ -2,7 +2,7 @@ import React from 'react';
 
 const LeadQualificationMetrics = ({ qualifiedLeads, hotLeads, avgTimeToQualify }) => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800">Lead Qualification Metrics</h3>
             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
                 <div>

@@ -16,9 +16,14 @@
 ## Frontend Technologies
 - **Framework:** React
 - **Build Tool:** Vite
+- **Styling Framework:** Tailwind CSS v4 with CSS-first configuration
+- **Design System:** Centralized in `packages/frontend/src/index.css` using `@theme` directive
 - **Key Dependencies:**
   - `react`: Core library for building the user interface.
   - `react-dom`: For rendering React components in the browser.
+  - `tailwindcss`: ^4.1.11 - CSS-first utility framework
+  - `@tailwindcss/vite`: ^4.1.11 - Vite plugin for Tailwind v4
+  - `@tailwindcss/postcss`: ^4.1.11 - PostCSS plugin for Tailwind v4
 
 ## Development Setup
 - **Monorepo:** The project is structured as a monorepo using npm workspaces, with the root `package.json` defining the workspaces and providing convenience scripts.

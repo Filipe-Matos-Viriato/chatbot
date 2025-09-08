@@ -2,7 +2,7 @@ import React from 'react';
 
 const CommonQuestions = ({ questions }) => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800 mb-4">Common Questions about this Listing</h3>
             {questions && questions.length > 0 ? (
                 <ul className="list-disc list-inside space-y-2 text-gray-600">

@@ -4,10 +4,29 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* Border Radius */
+  --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Max Widths */
+  --max-width-dashboard: 1600px;
+  --max-width-modal-sm: 380px;
+  --max-width-modal-md: 540px;
+  --max-width-modal-lg: 800px;
+
+  /* Spacing */
+  --spacing-sidebar: 280px;
+  --spacing-header: 64px;
+  --spacing-container-padding: 1.5rem;
+  --spacing-container-gap: 1.5rem;
+  --spacing-dashboard-padding-x: 1.5rem;
+
+  /* Card Styles */
+
+  /* Colors */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -114,8 +133,19 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  .card-standard {
+    @apply bg-white rounded-lg border shadow-sm p-6;
   }
 }
 

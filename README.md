@@ -37,7 +37,7 @@ Multi-tenant Retrieval-Augmented Generation (RAG) chatbot for real estate. The s
 ### Technology Stack
 
 - Backend: Node.js, Express, OpenAI API (text-embedding-3-small, gpt-3.5-turbo), Pinecone, Supabase
-- Frontend: React, Vite, Tailwind
+- Frontend: React, Vite, Tailwind (with centralized UI layout constants in tailwind.config.js for consistent design)
 - Widget: Preact, Webpack (UMD loader)
 
 ### Environment Variables (backend)

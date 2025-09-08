@@ -2,7 +2,7 @@ import React from 'react';
 
 const ChatbotPerformanceOverTime = () => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800">Chatbot Performance Over Time</h3>
             <p className="text-sm text-gray-500 mt-1">Line Chart: Total Chats, Resolution Rate, Handoffs</p>
             <p className="text-sm text-gray-500 mt-1">Trends in chatbot engagement and efficiency.</p>

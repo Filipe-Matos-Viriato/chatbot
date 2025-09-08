@@ -4,7 +4,7 @@ import RecentChatHistories from './components/RecentChatHistories';
 
 const UserInsightsTab = ({ visitors }) => {
     return (
-        <div className="space-y-8">
+        <div className="space-y-8 w-full">
             <h2 className="text-2xl font-bold text-gray-800">User Insights</h2>
 
             <NewVsReturningUsers />

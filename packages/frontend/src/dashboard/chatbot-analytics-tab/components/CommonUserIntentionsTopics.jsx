@@ -2,7 +2,7 @@ import React from 'react';
 
 const CommonUserIntentionsTopics = () => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800">Common User Intentions / Topics</h3>
             <p className="text-sm text-gray-500 mt-1">Word Cloud or Bar Chart of Top Topics</p>
             <p className="text-sm text-gray-500 mt-1">Understanding what users are most interested in.</p>

@@ -4,13 +4,10 @@
 // Relevant files: packages/frontend/src/dashboard/listing-performance-tab/components/listing-details/IndividualLeadsTable.jsx, packages/frontend/src/main.jsx, packages/backend/src/services/chat-history-service.js, packages/backend/src/index.js
 
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
 import { apiRequest } from '../../../../config/apiClient';
 import { useClient } from '../../../../context/ClientContext';
 
-const ChatHistoryPage = () => {
-    const { visitorId } = useParams();
-    const navigate = useNavigate();
+const ChatHistoryPage = ({ visitorId, onClose }) => {
     const { selectedClientId } = useClient();
     const [chatHistory, setChatHistory] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -53,17 +50,8 @@ const ChatHistoryPage = () => {
     }
 
     return (
-        <div className="container mx-auto p-6 bg-white shadow-lg rounded-lg mt-8">
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-gray-800">Chat History for Visitor: {visitorId}</h2>
-                <button
-                    onClick={() => navigate(-1)}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 focus:outline-none"
-                >
-                    Back
-                </button>
-            </div>
-            <div className="flex flex-col space-y-4">
+        <div>
+            <div className="flex flex-col space-y-4 max-h-96 overflow-y-auto mt-10">
                 {chatHistory.map((message, index) => (
                     <div
                         key={index}

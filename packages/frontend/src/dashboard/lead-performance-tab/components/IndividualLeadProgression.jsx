@@ -2,7 +2,7 @@ import React from 'react';
 
 const IndividualLeadProgression = ({ visitors }) => {
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-standard">
             <h3 className="text-lg font-semibold text-gray-800 mb-4">Individual Lead Progression</h3>
             <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
