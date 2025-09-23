@@ -1,4 +1,7 @@
 // packages/backend/src/services/visitor-service.js
+// Service for managing visitor data, lead scoring, and interaction tracking in Supabase.
+// To track visitor interactions and calculate lead scores for prioritization.
+// Relevant files: config/supabase.js, services/client-config-service.js, index.js
 import * as clientConfigService from './client-config-service.js';
 import supabase from '../config/supabase.js'; // Import Supabase client
 import OpenAI from 'openai';
@@ -48,9 +51,55 @@ class VisitorService {
     try {
       const clientConfig = await clientConfigService.getClientConfig(clientId);
       if (!clientConfig || !clientConfig.leadScoringRules) {
-        console.warn(`No scoring rules found for client ${clientId}`);
-        return null;
+        console.warn(`No scoring rules found for client ${clientId}, using defaults`);
+        // Return default scoring rules with qualification threshold
+        return {
+          engagementBehavior: {
+            questions_3_5: 5,
+            questions_6_10: 10,
+            questions_10_plus: 15,
+            time_5_10_min: 5,
+            time_10_plus_min: 10,
+            clicked_listing: 5,
+            returned_within_48h: 10
+          },
+          questionIntentQuality: {
+            asked_pricing: 10,
+            asked_location: 10,
+            asked_legal: 10,
+            asked_remote_buying: 10,
+            asked_details: 5,
+            asked_availability: 5
+          },
+          conversionActions: {
+            submitted_contact: 15,
+            booked_viewing: 30,
+            asked_contact_agent: 20,
+            requested_brochure: 10
+          },
+          qualificationThreshold: {
+            minScore: 40,
+            label: "Warm Lead",
+            description: "Minimum score for lead qualification timing"
+          },
+          decay: {
+            enabled: true,
+            decayDays: 7,
+            decayPoints: 5,
+            minScore: 0
+          }
+        };
       }
+
+      // Ensure qualification threshold exists in client config
+      if (!clientConfig.leadScoringRules.qualificationThreshold) {
+        clientConfig.leadScoringRules.qualificationThreshold = {
+          minScore: 40,
+          label: "Warm Lead",
+          description: "Minimum score for lead qualification timing"
+        };
+      }
+
       return clientConfig.leadScoringRules;
     } catch (error) {
       console.error(`Error loading scoring rules for client ${clientId}:`, error);
@@ -116,6 +165,76 @@ class VisitorService {
     return scoreImpact;
   }
 
+  /**
+   * Calculate the time it took for a visitor to qualify (reach threshold score)
+   * @param {string} visitorId - The visitor ID
+   * @param {string} clientId - The client ID
+   * @returns {Promise<number>} Qualification time in hours
+   */
+  async calculateQualificationTime(visitorId, clientId) {
+    try {
+      // Get visitor creation time
+      const { data: visitor, error: visitorError } = await supabase
+        .from('visitors')
+        .select('created_at')
+        .eq('visitor_id', visitorId)
+        .single();
+
+      if (visitorError || !visitor) {
+        console.error('Error fetching visitor creation time:', visitorError);
+        return 0;
+      }
+
+      const startTime = new Date(visitor.created_at);
+
+      // Get all events for this visitor to find qualification timestamp
+      const { data: events, error: eventsError } = await supabase
+        .from('events')
+        .select('timestamp, score_impact')
+        .eq('visitor_id', visitorId)
+        .order('timestamp', { ascending: true });
+
+      if (eventsError) {
+        console.error('Error fetching events for qualification time:', eventsError);
+        return 0;
+      }
+
+      if (!events || events.length === 0) {
+        // No events, use current time as qualification time
+        const qualificationTime = new Date();
+        return (qualificationTime - startTime) / (1000 * 60 * 60); // hours
+      }
+
+      // Reconstruct score progression to find when threshold was reached
+      let currentScore = 0;
+      let qualificationTimestamp = null;
+      const scoringRules = await this.getClientScoringRules(clientId);
+      const threshold = scoringRules?.qualificationThreshold?.minScore || 40;
+
+      for (const event of events) {
+        currentScore += event.score_impact;
+
+        // Check if this event caused qualification (score just crossed threshold)
+        if (currentScore >= threshold && !qualificationTimestamp) {
+          qualificationTimestamp = new Date(event.timestamp);
+          break;
+        }
+      }
+
+      if (!qualificationTimestamp) {
+        // If no qualification found in events, use last event time
+        qualificationTimestamp = new Date(events[events.length - 1].timestamp);
+      }
+
+      const qualificationTime = (qualificationTimestamp - startTime) / (1000 * 60 * 60); // hours
+      return Math.max(0, qualificationTime); // Ensure non-negative
+
+    } catch (error) {
+      console.error('Error calculating qualification time:', error);
+      return 0;
+    }
+  }
+
   async logEvent(visitorId, eventType, clientId, listingId) { // Add listingId
     const { data: visitorData, error: fetchError } = await supabase
       .from('visitors')
@@ -130,6 +249,7 @@ class VisitorService {
 
     const scoreImpact = await this.calculateScoreImpact(eventType, visitorData, clientId);
 
+    const previousScore = visitorData.lead_score;
     const newLeadScore = visitorData.lead_score + scoreImpact;
 
     const { data: eventInsertData, error: eventInsertError } = await supabase
@@ -291,7 +411,11 @@ class VisitorService {
 
     const { data: updateData, error: updateError } = await supabase
       .from('visitors')
-      .update({ lead_score: newLeadScore, updated_at: new Date().toISOString() })
+      .update({
+        lead_score: newLeadScore,
+        previous_lead_score: previousScore,
+        updated_at: new Date().toISOString()
+      })
       .eq('visitor_id', visitorId)
       .select();
 
@@ -301,6 +425,53 @@ class VisitorService {
     }
 
     console.log(`Event logged for ${visitorId}: ${eventType}, score impact: ${scoreImpact}, new score: ${newLeadScore}`);
+
+    // Check for qualification and update client qualification metrics
+    const scoringRules = await this.getClientScoringRules(clientId);
+    const qualificationThreshold = scoringRules?.qualificationThreshold?.minScore || 40;
+
+    if (previousScore < qualificationThreshold && newLeadScore >= qualificationThreshold) {
+      // Visitor just qualified - calculate and update metrics
+      try {
+        const qualificationTime = await this.calculateQualificationTime(visitorId, clientId);
+
+        // Update client qualification metrics
+        const { data: currentMetrics, error: fetchMetricsError } = await supabase
+          .from('client_qualification_metrics')
+          .select('qualified_visitors_count, total_qualification_time_hours')
+          .eq('client_id', clientId)
+          .single();
+
+        let newCount = 1;
+        let newTotalTime = qualificationTime;
+
+        if (!fetchMetricsError && currentMetrics) {
+          newCount = currentMetrics.qualified_visitors_count + 1;
+          newTotalTime = currentMetrics.total_qualification_time_hours + qualificationTime;
+        }
+
+        const newAverage = newTotalTime / newCount;
+
+        const { error: updateMetricsError } = await supabase
+          .from('client_qualification_metrics')
+          .upsert({
+            client_id: clientId,
+            qualification_threshold: qualificationThreshold,
+            qualified_visitors_count: newCount,
+            total_qualification_time_hours: newTotalTime,
+            avg_qualification_time_hours: newAverage,
+            last_updated: new Date().toISOString()
+          });
+
+        if (updateMetricsError) {
+          console.error('Error updating client qualification metrics:', updateMetricsError);
+        } else {
+          console.log(`Updated qualification metrics for client ${clientId}: ${newCount} qualified visitors, avg ${newAverage.toFixed(2)} hours`);
+        }
+      } catch (error) {
+        console.error('Error updating qualification metrics:', error);
+      }
+    }
 
     // Increment hot_leads if the visitor becomes a hot lead and listingId is provided
     if (listingId && newLeadScore >= 70 && visitorData.lead_score < 70) { // Check if they just crossed the threshold
@@ -418,6 +589,42 @@ class VisitorService {
     return data;
   }
 
+  /**
+   * Update visitor contact information
+   * @param {string} visitorId - Visitor ID
+   * @param {string} clientId - Client ID
+   * @param {Object} contactInfo - Contact information {email, phone}
+   * @returns {Promise<Object>} - Updated visitor
+   */
+  async updateVisitorContact(visitorId, clientId, contactInfo) {
+    const updateData = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (contactInfo.email) {
+      updateData.email = contactInfo.email;
+    }
+
+    if (contactInfo.phone) {
+      updateData.phone = contactInfo.phone;
+    }
+
+    const { data, error } = await supabase
+      .from('visitors')
+      .update(updateData)
+      .eq('visitor_id', visitorId)
+      .eq('client_id', clientId)
+      .select();
+
+    if (error) {
+      console.error('Error updating visitor contact info:', error);
+      throw new Error('Failed to update visitor contact information');
+    }
+
+    console.log(`Updated contact info for visitor ${visitorId}`);
+    return data[0];
+  }
+
   async getLeadsByListingId(listingId, clientId) {
     // Fetch unique visitor_ids from the events table that are associated with the given listingId and clientId
     const { data: eventData, error: eventError } = await supabase
@@ -442,7 +649,7 @@ class VisitorService {
     // Fetch the actual visitor data for these unique visitor_ids
     const { data: visitors, error: visitorError } = await supabase
       .from('visitors')
-      .select('visitor_id, lead_score, created_at, updated_at') // Select relevant fields
+      .select('visitor_id, lead_score, previous_lead_score, created_at, updated_at') // Include previous_lead_score
       .in('visitor_id', visitorIds);
 
     if (visitorError) {
@@ -453,10 +660,134 @@ class VisitorService {
     return visitors;
   }
 
+  /**
+   * Get score history for a visitor by reconstructing from events
+   * Returns array of {timestamp, score} points for sparkline visualization
+   */
+  async getVisitorScoreHistory(visitorId, maxPoints = 15) {
+    try {
+      // Fetch all events for this visitor ordered by timestamp
+      const { data: events, error } = await supabase
+        .from('events')
+        .select('timestamp, score_impact')
+        .eq('visitor_id', visitorId)
+        .order('timestamp', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching events for score history:', error);
+        return [];
+      }
+
+      if (!events || events.length === 0) {
+        return [];
+      }
+
+      // Reconstruct score history by cumulatively adding score impacts
+      let currentScore = 0;
+      const scoreHistory = [];
+
+      // Add initial point at visitor creation (score = 0)
+      const { data: visitor, error: visitorError } = await supabase
+        .from('visitors')
+        .select('created_at')
+        .eq('visitor_id', visitorId)
+        .single();
+
+      if (!visitorError && visitor) {
+        scoreHistory.push({
+          timestamp: visitor.created_at,
+          score: 0
+        });
+      }
+
+      // Add score changes from events
+      for (const event of events) {
+        currentScore += event.score_impact;
+        scoreHistory.push({
+          timestamp: event.timestamp,
+          score: Math.max(0, currentScore) // Ensure score doesn't go below 0
+        });
+      }
+
+      // Return last N points for sparkline (most recent history)
+      return scoreHistory.slice(-maxPoints);
+    } catch (error) {
+      console.error('Error reconstructing visitor score history:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Apply score decay to stagnant visitors for a specific client
+   */
+  async applyScoreDecay(clientId) {
+    try {
+      // Get client-specific decay configuration
+      const clientConfig = await clientConfigService.getClientConfig(clientId);
+      const decayConfig = clientConfig?.leadScoringRules?.decay || {
+        enabled: true,
+        decayDays: 7,
+        decayPoints: 5,
+        minScore: 0
+      };
+
+      if (!decayConfig.enabled) {
+        console.log(`Score decay disabled for client ${clientId}`);
+        return;
+      }
+
+      // Calculate cutoff date
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - decayConfig.decayDays);
+
+      // Find stagnant visitors
+      const { data: stagnantVisitors, error: fetchError } = await supabase
+        .from('visitors')
+        .select('visitor_id, lead_score')
+        .eq('client_id', clientId)
+        .lt('updated_at', cutoffDate.toISOString())
+        .gt('lead_score', decayConfig.minScore);
+
+      if (fetchError) {
+        console.error('Error fetching stagnant visitors:', fetchError);
+        return;
+      }
+
+      if (!stagnantVisitors || stagnantVisitors.length === 0) {
+        console.log(`No stagnant visitors found for client ${clientId}`);
+        return;
+      }
+
+      // Apply decay to each visitor
+      for (const visitor of stagnantVisitors) {
+        const newScore = Math.max(visitor.lead_score - decayConfig.decayPoints, decayConfig.minScore);
+
+        const { error: updateError } = await supabase
+          .from('visitors')
+          .update({
+            lead_score: newScore,
+            previous_lead_score: visitor.lead_score,
+            updated_at: new Date().toISOString()
+          })
+          .eq('visitor_id', visitor.visitor_id);
+
+        if (updateError) {
+          console.error(`Error applying decay to visitor ${visitor.visitor_id}:`, updateError);
+        } else {
+          console.log(`Applied decay to visitor ${visitor.visitor_id}: ${visitor.lead_score} → ${newScore}`);
+        }
+      }
+
+      console.log(`Applied score decay to ${stagnantVisitors.length} visitors for client ${clientId}`);
+    } catch (error) {
+      console.error(`Error in applyScoreDecay for client ${clientId}:`, error);
+    }
+  }
+
   async acknowledgeLeads(visitorIds) {
     const { error } = await supabase
       .from('visitors')
-      .update({ is_acknowledged: true, updated_at: new Date().toISOString() })
+      .update({ is_acknowledged: true })
       .in('visitor_id', visitorIds);
 
     if (error) {
@@ -616,6 +947,7 @@ class VisitorService {
 
     const newScore = this.computeLeadScoreFromOnboarding(onboardingPayload, onboardingRules);
     const mergedOnboarding = { ...(existing.onboarding_questions || {}), ...onboardingPayload };
+    const previousScore = existing.lead_score;
 
     const { data: updated, error: updateError } = await supabase
       .from('visitors')
@@ -624,6 +956,7 @@ class VisitorService {
         onboarding_completed: true,
         // Use the higher of the two to avoid double-counting with events
         lead_score: Math.max(existing.lead_score || 0, newScore),
+        previous_lead_score: previousScore,
         updated_at: new Date().toISOString(),
       })
       .eq('visitor_id', visitorId)

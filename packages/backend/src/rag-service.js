@@ -1,16 +1,22 @@
+// packages/backend/src/rag-service.js
+// Core service implementing the RAG pipeline for generating contextual chatbot responses using vector search and LLM.
+// To provide intelligent, context-aware responses by retrieving relevant knowledge from vector database and generating natural language answers.
+// Relevant files: index.js, config/openai.js, config/pinecone.js, services/listing-service.js, services/user-service.js, utils/rag-parsing.js, utils/context.js, utils/prompt.js
 import OpenAI from 'openai';
 import { Pinecone } from '@pinecone-database/pinecone';
 import { encode } from 'gpt-3-encoder';
 import * as userService from './services/user-service.js';
 import listingService from './services/listing-service.js';
 import * as developmentService from './services/development-service.js';
+import visitorService from './services/visitor-service.js';
 import { withTimeout } from './utils/async-timeout.js';
 import { reRankMatches } from './utils/rerank.js';
 import { buildContext, pickText } from './utils/context.js';
 import { renderTemplate } from './utils/prompt.js';
 import { createLogger } from './utils/structured-logger.js';
-import { extractListingIdFromUrl, extractListingIdFromQuery, extractQueryFilters, isAggregativePriceQuery } from './utils/rag-parsing.js';
+import { extractListingIdFromUrl, extractListingIdFromQuery, extractQueryFilters, isAggregativePriceQuery, QUERY_SCOPE } from './utils/rag-parsing.js';
 import { removeRedundantClosingCTA } from './utils/postprocess.js';
+import supabase from './config/supabase.js';
 
 // Initialize clients
 const openai = new OpenAI({
@@ -223,32 +229,37 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     }
   }
 
-  // Cross-namespace fallback: if still no matches, try querying the base index without namespace
-  if (matches.length === 0) {
-    try {
-      console.log(`[${clientConfig.clientName}] ⚠️ No matches in namespace. Trying cross-namespace broad search (with client filter)...`);
-      const cross = await clientPineconeIndex.query({
-        vector: searchVector,
-        topK: 50,
-        includeMetadata: true,
-        filter: baseFilter,
-      });
-      matches = cross?.matches || [];
-      console.log(`[${clientConfig.clientName}] Cross-namespace broad search found ${matches.length} matches`);
-    } catch (e) {
-      console.error(`[${clientConfig.clientName}] Cross-namespace broad search failed:`, e);
-    }
-  }
+  // Removed cross-namespace fallback to prevent data leakage between clients
+  // All queries must use client-specific namespace for security
 
   if (matches.length > 0) {
-    const reRankQueryFilters = extractQueryFilters(originalQuery, currentListingPrice);
+    const reRankQueryFilters = extractQueryFilters(originalQuery, currentListingPrice, clientConfig);
+
+    // Determine queryScope based on externalContext and filters
+    let queryScope = QUERY_SCOPE.GENERAL_UNFILTERED;
+    const hasSignificantFilters = reRankQueryFilters.generated_tags || reRankQueryFilters.num_bedrooms || reRankQueryFilters.price_eur || reRankQueryFilters.typology || reRankQueryFilters.num_bathrooms || reRankQueryFilters.total_area_sqm;
+    const hasListingIdFromQuery = reRankQueryFilters.listing_id;
+    const hasExternalContext = externalContext && (externalContext.value || externalContext.developmentId);
+
+    if (hasExternalContext && !hasSignificantFilters) {
+      queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
+    } else if (hasSignificantFilters && !hasListingIdFromQuery) {
+      queryScope = QUERY_SCOPE.GENERAL_FILTERED;
+    }
+
+    console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Determined queryScope: ${queryScope} (hasExternalContext: ${hasExternalContext}, hasSignificantFilters: ${hasSignificantFilters}, hasListingIdFromQuery: ${hasListingIdFromQuery})`);
+
+    // Dynamically adjust topN based on queryScope to ensure broader results for general queries
+    const topN = queryScope === QUERY_SCOPE.GENERAL_FILTERED ? 50 : 20;
+
     matches = reRankMatches({
       matches,
       contextListingId,
       contextDevelopmentId,
       originalQuery,
       queryFilters: reRankQueryFilters,
-      topN: 20,
+      queryScope,
+      topN,
     });
   }
 
@@ -257,7 +268,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
 // parsing helpers now imported from ./utils/rag-parsing.js
 
-async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false) {
+async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false, visitorId = null) {
   let aggregativeContext = '';
   let pageContext = '';
 
@@ -329,12 +340,47 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     }
   }
 
-  const queryFilters = extractQueryFilters(query);
-  
+  const queryFilters = extractQueryFilters(query, null, clientConfig);
+
+  // Determine queryScope for system prompt instructions
+  let queryScope = QUERY_SCOPE.GENERAL_UNFILTERED;
+  const hasSignificantFilters = queryFilters.generated_tags || queryFilters.num_bedrooms || queryFilters.price_eur || queryFilters.typology || queryFilters.num_bathrooms || queryFilters.total_area_sqm;
+  const hasListingIdFromQuery = queryFilters.listing_id;
+  const hasExternalContext = externalContext && (externalContext.value || externalContext.developmentId);
+
+  if (hasExternalContext && !hasSignificantFilters) {
+    queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
+  } else if (hasSignificantFilters && !hasListingIdFromQuery) {
+    queryScope = QUERY_SCOPE.GENERAL_FILTERED;
+  }
+
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Determined queryScope for system prompt: ${queryScope} (hasExternalContext: ${hasExternalContext}, hasSignificantFilters: ${hasSignificantFilters}, hasListingIdFromQuery: ${hasListingIdFromQuery})`);
+
+  // Detect lead-collecting intent
+  const lowerQuery = String(query || '').toLowerCase();
+  const leadCollectingIntent = lowerQuery.includes('sim') || lowerQuery.includes('envia') || lowerQuery.includes('brochura') || lowerQuery.includes('envia-me') || lowerQuery.includes('manda') || lowerQuery.includes('receber');
+
+  // Fetch visitor contact information if lead-collecting intent is detected
+  let visitorContactInfo = { hasEmail: false, hasPhone: false };
+  if (leadCollectingIntent && visitorId) {
+    try {
+      const visitor = await visitorService.getVisitor(visitorId);
+      if (visitor) {
+        visitorContactInfo.hasEmail = Boolean(visitor.email);
+        visitorContactInfo.hasPhone = Boolean(visitor.phone);
+        console.log(`[${clientConfig.clientName}] Visitor contact info: email=${visitorContactInfo.hasEmail}, phone=${visitorContactInfo.hasPhone}`);
+      }
+    } catch (error) {
+      console.error(`[${clientConfig.clientName}] Error fetching visitor contact info:`, error);
+    }
+  }
+
   // Add debugging for filters
   console.log(`[${clientConfig.clientName}] 🔍 DEBUGGING - Filters Applied:`);
   console.log(`  Query filters: ${JSON.stringify(queryFilters, null, 2)}`);
   console.log(`  Original query: "${query}"`);
+  console.log(`  Lead collecting intent: ${leadCollectingIntent}`);
+  console.log(`  Visitor contact info: ${JSON.stringify(visitorContactInfo)}`);
 
   let queryResponse = { matches: [] };
   try {
@@ -379,9 +425,9 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
 
   let context = buildContext({ pageContext, matches: queryResponse.matches });
-  
-  // Prepend targeted listing text to the context if found and not already at the very beginning
-  if (targetedListingText && !context.startsWith(targetedListingText)) {
+
+  // Prepend targeted listing text to the context if found and not already at the very beginning, but not for GENERAL_FILTERED
+  if (targetedListingText && !context.startsWith(targetedListingText) && queryScope !== QUERY_SCOPE.GENERAL_FILTERED) {
     context = targetedListingText + "\n\n---\n\n" + context;
   }
 
@@ -441,14 +487,53 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   } catch (_) {}
   let remainingTokens = CONTEXT_TOKEN_BUDGET;
   
-  // Handle empty search results. If we have page context, KEEP IT and do not override.
+  // Handle empty search results with enhanced no-matches scenario
   if (queryResponse.matches.length === 0) {
+    console.log(`[${clientConfig.clientName}] ⚠️ No matches found - implementing no-matches scenario`);
+
+    // Check if visitor has contact information
+    let hasContactInfo = false;
+    if (visitorId) {
+      try {
+        const { data: visitor, error } = await supabase
+          .from('visitors')
+          .select('email, phone')
+          .eq('visitor_id', visitorId)
+          .eq('client_id', clientConfig.clientId)
+          .single();
+
+        if (!error && visitor && (visitor.email || visitor.phone)) {
+          hasContactInfo = true;
+          console.log(`[${clientConfig.clientName}] Visitor ${visitorId} has contact info - will mark as unanswered`);
+        } else {
+          console.log(`[${clientConfig.clientName}] Visitor ${visitorId} has no contact info - will ask for contact details`);
+        }
+      } catch (error) {
+        console.error(`[${clientConfig.clientName}] Error checking visitor contact info:`, error);
+      }
+    }
+
+    // Build response based on whether we have contact info
     if (!pageContext) {
-      context = "IMPORTANTE: Não foram encontradas propriedades na base de dados que correspondam aos critérios especificados. NÃO INVENTE ou CRIE informações sobre apartamentos que não existem nos documentos. Informe o utilizador que não há propriedades disponíveis que correspondam aos critérios. Apenas mencione propriedades específicas da Up Investments (client_id: e6f484a3-c3cb-4e01-b8ce-a276f4b7355c) e não de outros clientes.";
-      console.log(`[${clientConfig.clientName}] 📝 Using empty context warning to prevent hallucination (no page context)`);
+      // Use configurable fallback responses from client config
+      const fallbackWithContact = clientConfig.prompts?.fallbackResponseWithContact ||
+        "Desculpe, não encontrei informações específicas na nossa base de dados que respondam completamente à sua pergunta. Os nossos especialistas irão analisar a sua questão e entrarão em contacto consigo em breve para fornecer uma resposta personalizada.";
+
+      const fallbackWithoutContact = clientConfig.prompts?.fallbackResponseWithoutContact ||
+        "Desculpe, não encontrei informações específicas na nossa base de dados que respondam à sua pergunta. Para que possamos ajudá-lo melhor, poderia fornecer o seu email ou número de telefone? Entraremos em contacto consigo com uma resposta personalizada.";
+
+      if (hasContactInfo) {
+        context = fallbackWithContact;
+      } else {
+        context = fallbackWithoutContact;
+      }
+      console.log(`[${clientConfig.clientName}] 📝 Using configurable no-matches response with ${hasContactInfo ? 'contact follow-up' : 'contact request'}`);
     } else {
       console.log(`[${clientConfig.clientName}] ✅ Using page context only (no Pinecone matches).`);
     }
+
+    // Mark question as unanswered (will be done in index.js after response)
+    console.log(`[${clientConfig.clientName}] Question will be marked as unanswered`);
   }
   
   // Add client filter reminder to prevent incorrect listings
@@ -511,10 +596,26 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     chatHistory: truncatedChatHistory,
     context: context + (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
     question: query,
-    pageUrl: pageUrl || 'Não disponível'
+    pageUrl: pageUrl || 'Não disponível',
+    queryFilters: queryFilters,
+    visitorContactInfo: visitorContactInfo
   };
   let systemPrompt = renderTemplate(systemPromptTemplate, templateVariables);
-  
+
+  // CRITICAL ANTI-HALLUCINATION INSTRUCTIONS - MUST BE FOLLOWED
+  systemPrompt += `\n\n*** ABSOLUTELY CRITICAL: NEVER HALLUCINATE OR INVENT INFORMATION ***\n`;
+  systemPrompt += `When asked about specific details like kitchen equipment, appliances, or any features not explicitly listed in the 'Conteúdo Relevante', you MUST respond: "Infelizmente, não temos a especificação exata dos [detalhes] na nossa base de dados." and then offer to send a brochure.\n`;
+  systemPrompt += `DO NOT list any possible, example, or assumed items. ONLY use information that is VERBATIM in the provided context.\n`;
+
+  // Add conditional lead collection instructions based on visitor contact info
+  if (leadCollectingIntent) {
+    if (visitorContactInfo.hasEmail || visitorContactInfo.hasPhone) {
+      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O utilizador está a confirmar interesse em receber uma brochura ou informações. Como já temos informações de contacto do utilizador (email ou telefone), confirme que a brochura será enviada em breve e que entraremos em contacto se necessário. NÃO peça mais informações de contacto.`;
+    } else {
+      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O utilizador está a confirmar interesse em receber uma brochura ou informações. Como NÃO temos informações de contacto do utilizador, peça explicitamente o email ou número de telefone para poder enviar a brochura.`;
+    }
+  }
+
   // If context shifted, add a strong instruction to prioritize new context
   if (contextShifted && externalContext && externalContext.type === 'listing' && externalContext.value) {
     systemPrompt += `\n\nAtenção: O utilizador mudou o foco para um novo imóvel (ID: ${externalContext.value}). Priorize as informações sobre este novo imóvel e desconsidere detalhes conflitantes de conversas anteriores sobre outros imóveis.`;
@@ -525,12 +626,37 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     // or offer multiple options, rather than focusing on a single listing from broad search results.
     // This instruction is made stronger to override potential biases from general system instructions.
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Não há um imóvel ou empreendimento específico selecionado. A sua resposta DEVE ser GERAL e abranger MÚLTIPLAS opções/exemplos, se aplicável. É PROIBIDO focar-se num único imóvel ou empreendimento, a menos que o utilizador o solicite explicitamente na pergunta. Se o contexto relevante contiver detalhes de vários imóveis, resuma-os ou apresente-os como exemplos de forma não específica.`;
+  } else if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
+    // For general filtered queries within a listing context, instruct the LLM to list all relevant properties
+    // that match the filters, including the contextual listing if applicable, and not to focus solely on it.
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: A pergunta é GERAL e inclui filtros específicos (como características ou tipos de imóvel). DEVE listar TODAS as propriedades relevantes do contexto que correspondam aos filtros, incluindo o imóvel atual se aplicável. NÃO se concentre apenas no imóvel atual - apresente múltiplas opções que atendam aos critérios da pergunta.`;
+  } else if (queryScope === QUERY_SCOPE.LISTING_SPECIFIC) {
+    // For listing-specific queries, instruct the LLM to list all features and characteristics mentioned in the context
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Quando descrever as características de um imóvel específico, liste TODAS as características e comodidades mencionadas no contexto fornecido, incluindo terraços, garagens, etc. Não omita nenhuma característica presente na informação disponível.`;
   }
 
   // Gentle nudge: if we have a targeted listing/development in externalContext, instruct model to include the link
   if (externalContext && (externalContext.type === 'listing' || externalContext.type === 'development')) {
     // Removed: systemPrompt += "\n\nNota: Se houver um URL correspondente no contexto para o imóvel referido, inclui-o explicitamente na resposta.";
   }
+
+  // CRITICAL INSTRUCTION: Never negate features mentioned in context
+  systemPrompt += `\n\n*** INSTRUÇÃO ABSOLUTA E PRIORITÁRIA: SE O CONTEXTO MENCIONAR UMA CARACTERÍSTICA (como terraço, piscina, etc.), NUNCA NEGUE A SUA EXISTÊNCIA. CONFIRME SEMPRE A PRESENÇA SE ESTIVER MENCIONADA. ***`;
+
+  // Intent-based instructions for extracting specific numerical details
+  if (queryFilters?.intent_query_bedroom_area) {
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área do quarto. DEVE procurar no contexto fornecido informações sobre a área do quarto (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
+  }
+  if (queryFilters?.intent_query_terrace_area) {
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área do terraço. DEVE procurar no contexto fornecido informações sobre a área do terraço (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
+  }
+  if (queryFilters?.intent_query_bathroom_area) {
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área da casa de banho. DEVE procurar no contexto fornecido informações sobre a área da casa de banho (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
+  }
+  if (queryFilters?.intent_query_living_kitchen_area) {
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área da sala/cozinha. DEVE procurar no contexto fornecido informações sobre a área da sala ou cozinha (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
+  }
+
   // Removed: systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
   console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt. Final token estimate: ${MAX_TOTAL_TOKENS - remainingTokens}`);
@@ -564,7 +690,8 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
         response: processedResponse,
         debug: {
           openaiPayload: messages
-        }
+        },
+        isUnanswered: queryResponse.matches.length === 0 // Flag to indicate if this was an unanswered question
       };
     } catch (error) {
       if (error.status === 503 && retries > 1) {

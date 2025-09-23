@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 const PromptsEditor = ({ value, onChange }) => {
   const [systemInstruction, setSystemInstruction] = useState('');
   const [fallbackResponse, setFallbackResponse] = useState('');
+  const [fallbackResponseWithContact, setFallbackResponseWithContact] = useState('');
+  const [fallbackResponseWithoutContact, setFallbackResponseWithoutContact] = useState('');
   const [showJson, setShowJson] = useState(false);
   const [jsonValue, setJsonValue] = useState('');
 
@@ -13,6 +15,8 @@ const PromptsEditor = ({ value, onChange }) => {
         const parsed = typeof value === 'string' ? JSON.parse(value) : value;
         setSystemInstruction(parsed.systemInstruction || '');
         setFallbackResponse(parsed.fallbackResponse || '');
+        setFallbackResponseWithContact(parsed.fallbackResponseWithContact || '');
+        setFallbackResponseWithoutContact(parsed.fallbackResponseWithoutContact || '');
         setJsonValue(JSON.stringify(parsed, null, 2));
       } catch (error) {
         console.error('Error parsing prompts JSON:', error);
@@ -21,20 +25,24 @@ const PromptsEditor = ({ value, onChange }) => {
     } else {
       setSystemInstruction('');
       setFallbackResponse('');
+      setFallbackResponseWithContact('');
+      setFallbackResponseWithoutContact('');
       setJsonValue('');
     }
   }, [value]);
 
   // Update parent component when fields change
-  const updateParent = (newSystemInstruction, newFallbackResponse) => {
+  const updateParent = (newSystemInstruction, newFallbackResponse, newFallbackResponseWithContact, newFallbackResponseWithoutContact) => {
     const promptsObject = {
       systemInstruction: newSystemInstruction,
-      fallbackResponse: newFallbackResponse
+      fallbackResponse: newFallbackResponse,
+      fallbackResponseWithContact: newFallbackResponseWithContact,
+      fallbackResponseWithoutContact: newFallbackResponseWithoutContact
     };
-    
+
     const jsonString = JSON.stringify(promptsObject, null, 2);
     setJsonValue(jsonString);
-    
+
     // Create synthetic event to match expected onChange format
     const syntheticEvent = {
       target: {
@@ -48,13 +56,25 @@ const PromptsEditor = ({ value, onChange }) => {
   const handleSystemInstructionChange = (e) => {
     const newValue = e.target.value;
     setSystemInstruction(newValue);
-    updateParent(newValue, fallbackResponse);
+    updateParent(newValue, fallbackResponse, fallbackResponseWithContact, fallbackResponseWithoutContact);
   };
 
   const handleFallbackResponseChange = (e) => {
     const newValue = e.target.value;
     setFallbackResponse(newValue);
-    updateParent(systemInstruction, newValue);
+    updateParent(systemInstruction, newValue, fallbackResponseWithContact, fallbackResponseWithoutContact);
+  };
+
+  const handleFallbackResponseWithContactChange = (e) => {
+    const newValue = e.target.value;
+    setFallbackResponseWithContact(newValue);
+    updateParent(systemInstruction, fallbackResponse, newValue, fallbackResponseWithoutContact);
+  };
+
+  const handleFallbackResponseWithoutContactChange = (e) => {
+    const newValue = e.target.value;
+    setFallbackResponseWithoutContact(newValue);
+    updateParent(systemInstruction, fallbackResponse, fallbackResponseWithContact, newValue);
   };
 
   const handleJsonChange = (e) => {
@@ -66,6 +86,8 @@ const PromptsEditor = ({ value, onChange }) => {
       const parsed = JSON.parse(newValue);
       setSystemInstruction(parsed.systemInstruction || '');
       setFallbackResponse(parsed.fallbackResponse || '');
+      setFallbackResponseWithContact(parsed.fallbackResponseWithContact || '');
+      setFallbackResponseWithoutContact(parsed.fallbackResponseWithoutContact || '');
     } catch (error) {
       // Invalid JSON, but keep the raw value
     }
@@ -131,7 +153,7 @@ Always reference specific information from {context}:
 Respond naturally and contextually, demonstrating thorough knowledge of the available property information while maintaining professional real estate expertise.`;
 
     setSystemInstruction(template);
-    updateParent(template, fallbackResponse);
+    updateParent(template, fallbackResponse, fallbackResponseWithContact, fallbackResponseWithoutContact);
   };
 
   return (
@@ -190,6 +212,38 @@ Respond naturally and contextually, demonstrating thorough knowledge of the avai
               className="w-full border border-gray-300 rounded-md shadow-sm p-3 font-mono text-sm"
               rows="3"
               placeholder="Enter fallback message..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Fallback Response When Visitor Has Contact Info
+              <span className="text-xs text-gray-500 ml-2">
+                (Message shown when no relevant information is found but visitor has provided contact details)
+              </span>
+            </label>
+            <textarea
+              value={fallbackResponseWithContact}
+              onChange={handleFallbackResponseWithContactChange}
+              className="w-full border border-gray-300 rounded-md shadow-sm p-3 font-mono text-sm"
+              rows="3"
+              placeholder="Enter fallback message for visitors with contact info..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Fallback Response When Visitor Has No Contact Info
+              <span className="text-xs text-gray-500 ml-2">
+                (Message shown when no relevant information is found and visitor needs to provide contact details)
+              </span>
+            </label>
+            <textarea
+              value={fallbackResponseWithoutContact}
+              onChange={handleFallbackResponseWithoutContactChange}
+              className="w-full border border-gray-300 rounded-md shadow-sm p-3 font-mono text-sm"
+              rows="3"
+              placeholder="Enter fallback message asking for contact info..."
             />
           </div>
         </div>

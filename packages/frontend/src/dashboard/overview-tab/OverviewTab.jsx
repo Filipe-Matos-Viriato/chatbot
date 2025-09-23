@@ -141,7 +141,7 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings, hiddenMetrics = [] }
         <div className="space-y-6 w-full">
             <h2 className="text-xl font-semibold text-gray-800">Dashboard Overview</h2>
 
-            <HotLeadsAlert newHotLeadsCount={newHotLeadsCount} onAcknowledgeLeads={handleAcknowledgeHotLeads} />
+            <HotLeadsAlert newHotLeadsCount={newHotLeadsCount} onViewHotLeads={() => onViewHotLeads('new-hot')} />
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
                 <TotalLeadsGeneratedMetric />

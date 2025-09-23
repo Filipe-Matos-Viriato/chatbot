@@ -1,6 +1,6 @@
 import React from 'react';
 
-const HotLeadsAlert = ({ newHotLeadsCount, onAcknowledgeLeads }) => (
+const HotLeadsAlert = ({ newHotLeadsCount, onViewHotLeads }) => (
     <div className="bg-red-50 border border-red-200 rounded-lg p-4">
         <div className="flex items-center justify-between">
             <div>
@@ -10,7 +10,7 @@ const HotLeadsAlert = ({ newHotLeadsCount, onAcknowledgeLeads }) => (
                 </p>
             </div>
             <button
-                onClick={onAcknowledgeLeads}
+                onClick={onViewHotLeads}
                 className="bg-red-600 text-white px-4 py-2 rounded text-sm hover:bg-red-700 transition-colors"
             >
                 View Hot Leads

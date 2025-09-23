@@ -1,4 +1,10 @@
+// packages/backend/src/utils/rerank.js
+// Utility for re-ranking vector search results based on query relevance and filters.
+// To improve search result quality by applying heuristic scoring and filtering.
+// Relevant files: rag-service.js
 // Heuristic re-ranking with a simple scoring function and pluggable interface
+
+import { QUERY_SCOPE } from './rag-parsing.js';
 
 export function reRankMatches({
   matches,
@@ -6,6 +12,7 @@ export function reRankMatches({
   contextDevelopmentId,
   originalQuery,
   queryFilters,
+  queryScope,
   topN = 20,
 }) {
   if (!Array.isArray(matches) || matches.length === 0) return [];
@@ -16,17 +23,38 @@ export function reRankMatches({
   const isLookingForStudio = qLower.includes('estúdio') || qLower.includes('studio');
 
   const debugBoostLogs = [];
-  const reRanked = matches.map((match, idx) => {
+  let reRanked = matches.map((match, idx) => {
     let score = match.score;
     const meta = match.metadata || {};
-    if (contextListingId && meta.listing_id === contextListingId) score += 1.0;
+
+    // Initialize filterMatchCount
+    let filterMatchCount = 0; // re-applied fix
+
+    // Dynamic boosting for contextListingId based on queryScope
+    if (contextListingId && meta.listing_id === contextListingId) {
+      if (queryScope === QUERY_SCOPE.LISTING_SPECIFIC) {
+        // Strong boost for listing-specific queries
+        score += 1.0;
+      } else if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
+        // Moderate boost for general filtered queries, only if the contextual listing matches the filters
+        const filterTags = queryFilters.generated_tags?.$all || [];
+        const hasMatchingTags = Array.isArray(meta.generated_tags) && filterTags.every(tag => meta.generated_tags.some(metaTag => metaTag.includes(tag)));
+        if (hasMatchingTags) {
+          score += 0.2;
+        }
+        // No boost if the contextual listing doesn't match the general filters
+      } else if (queryScope === QUERY_SCOPE.GENERAL_UNFILTERED) {
+        // No boost for general unfiltered queries
+        score += 0.0;
+      }
+    }
+
     if (contextDevelopmentId && meta.development_id === contextDevelopmentId) score += 0.8;
 
     const queryListingId = queryFilters?.listing_id || null;
     if (queryListingId && meta.listing_id === queryListingId) score += 1.5;
 
     if (queryFilters && Object.keys(queryFilters).length > 0) {
-      let filterMatchCount = 0;
       for (const key in queryFilters) {
         if (key === 'total_area_sqm' || key === 'price_eur' || key === 'num_bedrooms') {
           const filter = queryFilters[key];
@@ -35,6 +63,17 @@ export function reRankMatches({
           else if (meta[key] === filter) filterMatchCount++;
         } else if (key === 'typology') {
           if (meta.typology === queryFilters.typology || meta.type === queryFilters.typology) filterMatchCount++;
+        } else if (key === 'generated_tags') {
+          // Handle dynamic tag filtering
+          const filterTags = queryFilters[key]?.$all || [];
+          console.log(`[rerank] DEBUG: Checking generated_tags filter: ${JSON.stringify(filterTags)}`);
+          console.log(`[rerank] DEBUG: Chunk metadata generated_tags: ${JSON.stringify(meta.generated_tags)}`);
+          if (Array.isArray(meta.generated_tags) && filterTags.every(tag => meta.generated_tags.some(metaTag => metaTag.includes(tag)))) {
+            filterMatchCount++;
+            console.log(`[rerank] DEBUG: generated_tags filter matched for chunk ${meta.listing_id || meta.development_id || match.id}`);
+          } else {
+            console.log(`[rerank] DEBUG: generated_tags filter did NOT match for chunk ${meta.listing_id || meta.development_id || match.id}`);
+          }
         } else if (meta[key] === queryFilters[key]) {
           filterMatchCount++;
         }
@@ -59,10 +98,56 @@ export function reRankMatches({
         score += 0.2;
         if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'studio' });
       }
+
+      // Intent-based boosting for specific numerical measurements
+      if (queryFilters?.intent_query_bedroom_area && (text.includes('quarto') || text.includes('dormitório')) && (text.includes('m²') || text.includes('metros') || text.includes('área'))) {
+        score += 2.0;
+        if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'bedroom_area' });
+      }
+      if (queryFilters?.intent_query_terrace_area && (text.includes('terraço') || text.includes('terraco')) && (text.includes('m²') || text.includes('metros') || text.includes('área'))) {
+        score += 2.0;
+        if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'terrace_area' });
+      }
+      if (queryFilters?.intent_query_bathroom_area && (text.includes('casa de banho') || text.includes('banheiro')) && (text.includes('m²') || text.includes('metros') || text.includes('área'))) {
+        score += 2.0;
+        if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'bathroom_area' });
+      }
+      if (queryFilters?.intent_query_living_kitchen_area && (text.includes('sala') || text.includes('cozinha')) && (text.includes('m²') || text.includes('metros') || text.includes('área'))) {
+        score += 2.0;
+        if (idx < 8) debugBoostLogs.push({ id: meta.listing_id || meta.development_id || match.id, hint: 'living_kitchen_area' });
+      }
     }
 
-    return { ...match, score };
+    return { ...match, score, filterMatchCount };
   });
+
+  // Post-processing for GENERAL_FILTERED queries to ensure diversity of listings
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && contextListingId) {
+    const contextualMatches = reRanked.filter(m => m.metadata?.listing_id === contextListingId && m.filterMatchCount > 0);
+    const otherMatches = reRanked.filter(m => m.metadata?.listing_id !== contextListingId && m.filterMatchCount > 0);
+
+    let finalRanked = [];
+    if (contextualMatches.length > 0) {
+      // Take the top 1-2 best contextual matches that satisfy the filters
+      contextualMatches.sort((a, b) => b.score - a.score);
+      finalRanked.push(...contextualMatches.slice(0, 2)); // Take top 2 contextual matches
+    }
+
+    // Add other matching listings, ensuring diversity
+    // Sort other matches by score and add them
+    otherMatches.sort((a, b) => b.score - a.score);
+    finalRanked.push(...otherMatches);
+
+    // Remove duplicates by ID, keeping the higher score if duplicates exist
+    const uniqueMatches = new Map();
+    for (const match of finalRanked) {
+      const id = match.metadata?.listing_id || match.metadata?.development_id || match.id;
+      if (!uniqueMatches.has(id) || uniqueMatches.get(id).score < match.score) {
+        uniqueMatches.set(id, match);
+      }
+    }
+    reRanked = Array.from(uniqueMatches.values());
+  }
 
   const ranked = reRanked.sort((a, b) => b.score - a.score).slice(0, topN);
   try {

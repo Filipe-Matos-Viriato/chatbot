@@ -1,3 +1,7 @@
+// packages/backend/src/services/chat-history-service.js
+// Service for managing chat message history using vector embeddings in Pinecone for RAG context.
+// To store and retrieve chat conversations for providing contextual responses and maintaining conversation continuity.
+// Relevant files: rag-service.js, config/pinecone.js, config/openai.js
 import { Pinecone } from '@pinecone-database/pinecone';
 import OpenAI from 'openai';
 import { config } from 'dotenv';

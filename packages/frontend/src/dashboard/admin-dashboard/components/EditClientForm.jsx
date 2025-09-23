@@ -9,6 +9,8 @@ import UrlPatternEditor from './UrlPatternEditor';
 import PromptsEditor from './PromptsEditor';
 import ChatHistoryTaggingRulesEditor from './ChatHistoryTaggingRulesEditor';
 import LeadScoringRulesEditor from './LeadScoringRulesEditor';
+import ListingTaggingPromptEditor from './ListingTaggingPromptEditor';
+import DevelopmentTaggingPromptEditor from './DevelopmentTaggingPromptEditor';
 import EmbedScriptGenerator from './EmbedScriptGenerator';
 
 const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditingClient, fetchClients, setError }) => {
@@ -28,12 +30,16 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
       for (const field of jsonFields) {
         if (dataToSend[field]) {
           // The other fields are stringified JSON from their respective editors.
-          try {
-            dataToSend[field] = JSON.parse(dataToSend[field]);
-          } catch (jsonError) {
-            setError(new Error(`Invalid JSON for ${field.replace(/([A-Z])/g, ' $1').trim()}. Please correct it.`));
-            return;
+          // Check if it's already an object (from initial load) or needs parsing
+          if (typeof dataToSend[field] === 'string') {
+            try {
+              dataToSend[field] = JSON.parse(dataToSend[field]);
+            } catch (jsonError) {
+              setError(new Error(`Invalid JSON for ${field.replace(/([A-Z])/g, ' $1').trim()}. Please correct it.`));
+              return;
+            }
           }
+          // If it's already an object, keep it as is
         } else {
           dataToSend[field] = null;
         }
@@ -55,12 +61,12 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
         <button
           type="button"
           onClick={() => navigate(`/admin/document-upload/${editingClient.client_id}`)}
-          className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
+          className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 active:bg-green-700"
         >
           Upload Documents
         </button>
       </div>
-      <form onSubmit={handleUpdateClient} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <form onSubmit={handleUpdateClient} className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div>
           <label htmlFor="edit_client_name" className="block text-sm font-medium text-gray-700">Client Name</label>
           <input
@@ -97,8 +103,8 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
             disabled
           />
         </div>
-        <DocumentExtractionEditor
-          value={editFormData.document_extraction}
+        <UrlPatternEditor
+          value={editFormData.url_pattern}
           onChange={handleEditFormChange}
         />
         <ChunkingRulesEditor
@@ -109,8 +115,16 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
           value={editFormData.tagging_rules}
           onChange={handleEditFormChange}
         />
-        <UrlPatternEditor
-          value={editFormData.url_pattern}
+        <DocumentExtractionEditor
+          value={editFormData.document_extraction}
+          onChange={handleEditFormChange}
+        />
+        <ListingTaggingPromptEditor
+          value={editFormData.listing_tagging_prompt}
+          onChange={handleEditFormChange}
+        />
+        <DevelopmentTaggingPromptEditor
+          value={editFormData.development_tagging_prompt}
           onChange={handleEditFormChange}
         />
         <PromptsEditor
@@ -133,13 +147,13 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
           <button
             type="button"
             onClick={() => setEditingClient(null)}
-            className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 mr-2"
+            className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 active:bg-gray-700 mr-2"
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600"
+            className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 active:bg-blue-700"
           >
             Update Client
           </button>

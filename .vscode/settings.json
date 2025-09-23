@@ -1,0 +1,12 @@
+{
+  "css.validate.unknownAtRules": "ignore",
+  "tailwindCSS.includeLanguages": {
+    "plaintext": "html"
+  },
+  "editor.quickSuggestions": {
+    "strings": true
+  },
+  "files.associations": {
+    "*.css": "tailwindcss"
+  }
+}

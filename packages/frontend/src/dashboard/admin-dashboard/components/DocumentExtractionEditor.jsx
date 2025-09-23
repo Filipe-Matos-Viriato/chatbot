@@ -4,6 +4,9 @@ const DocumentExtractionEditor = ({ value, onChange }) => {
   return (
     <div className="md:col-span-3">
       <label htmlFor="edit_document_extraction" className="block text-sm font-medium text-gray-700">Document Extraction (JSON)</label>
+      <p className="mt-1 text-xs text-gray-500">
+        Defines regex patterns for extracting structured data from property documents.
+      </p>
       <textarea
         name="document_extraction"
         id="edit_document_extraction"

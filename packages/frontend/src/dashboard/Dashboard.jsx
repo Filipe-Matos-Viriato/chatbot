@@ -1,3 +1,8 @@
+// packages/frontend/src/dashboard/Dashboard.jsx
+// Defines the main dashboard component that orchestrates all dashboard tabs and data fetching from Supabase.
+// This file exists to provide the central hub for client dashboard functionality, managing state and routing.
+// packages/frontend/src/main.jsx, packages/frontend/src/App.jsx, packages/frontend/src/context/ClientContext.jsx, packages/frontend/src/config/supabaseClient.js
+
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../config/supabaseClient';
 import { Routes, Route, useLocation, useNavigate, Outlet } from 'react-router-dom';
@@ -10,6 +15,7 @@ import UserInsightsTab from './user-insights-tab/UserInsightsTab';
 import DashboardHeader from './DashboardHeader';
 import ListingPerformanceTab from './listing-performance-tab/ListingPerformanceTab';
 import ListingDetailsPage from './listing-performance-tab/components/ListingDetailsPage';
+import CompleteChatHistoryPage from './listing-performance-tab/components/listing-details/CompleteChatHistoryPage';
 import UnansweredQuestionsPage from './unanswered-questions-tab/UnansweredQuestionsPage';
 import Layout from './components/Layout';
 
@@ -23,6 +29,15 @@ const Dashboard = () => {
     const [listingMetrics, setListingMetrics] = useState([]);
     const [clusteredQuestions, setClusteredQuestions] = useState([]);
     const [topInquiredListings, setTopInquiredListings] = useState([]);
+    const [clientConfig, setClientConfig] = useState(null);
+    const [customCriteria, setCustomCriteria] = useState(() => {
+        // Try to load from localStorage first
+        const saved = localStorage.getItem('customLeadCriteria');
+        return saved ? JSON.parse(saved) : {
+            minimalLeadScore: 40,
+            selectedConversionActions: []
+        };
+    });
 
     // Determine active tab based on URL
     const getActiveTabFromPath = (pathname) => {
@@ -45,13 +60,69 @@ const Dashboard = () => {
                 // Fetch visitors
                 const { data: visitorsData, error: visitorsError } = await supabase
                     .from('visitors')
-                    .select('*')
+                    .select('*, previous_lead_score')
                     .eq('client_id', selectedClientId);
                 if (visitorsError) {
                     console.error('Error fetching visitors:', visitorsError);
                 } else {
-                    setVisitors(visitorsData || []);
-                    console.log('Fetched visitors:', visitorsData);
+                    // Fetch events for these visitors
+                    const visitorIds = visitorsData.map(v => v.visitor_id);
+                    if (visitorIds.length > 0) {
+                        const { data: eventsData, error: eventsError } = await supabase
+                            .from('events')
+                            .select('visitor_id, event_type, timestamp, score_impact')
+                            .in('visitor_id', visitorIds)
+                            .order('timestamp', { ascending: false });
+
+                        if (eventsError) {
+                            console.error('Error fetching events:', eventsError);
+                        } else {
+                            // Group events by visitor_id
+                            const eventsByVisitor = eventsData.reduce((acc, event) => {
+                                if (!acc[event.visitor_id]) {
+                                    acc[event.visitor_id] = [];
+                                }
+                                acc[event.visitor_id].push(event);
+                                return acc;
+                            }, {});
+
+                            // Combine visitors with their events
+                            const visitorsWithEvents = visitorsData.map(visitor => ({
+                                ...visitor,
+                                events: eventsByVisitor[visitor.visitor_id] || []
+                            }));
+
+                            // Fetch score history for each visitor
+                            const visitorsWithScoreHistory = await Promise.all(
+                                visitorsWithEvents.map(async (visitor) => {
+                                    try {
+                                        // Use the correct API base URL for backend calls
+                                        const apiBaseUrl = import.meta.env.DEV ? 'http://localhost:3007' : `${window.location.origin}/api`;
+                                        const response = await fetch(`${apiBaseUrl}/v1/visitors/${visitor.visitor_id}/score-history?maxPoints=15`, {
+                                            headers: {
+                                                'x-client-id': selectedClientId,
+                                                'Content-Type': 'application/json'
+                                            }
+                                        });
+                                        if (response.ok) {
+                                            const { scoreHistory } = await response.json();
+                                            return { ...visitor, scoreHistory };
+                                        }
+                                        return visitor;
+                                    } catch (error) {
+                                        console.error(`Error fetching score history for visitor ${visitor.visitor_id}:`, error);
+                                        return visitor;
+                                    }
+                                })
+                            );
+
+                            setVisitors(visitorsWithScoreHistory);
+                            console.log('Fetched visitors with events and score history:', visitorsWithScoreHistory);
+                        }
+                    } else {
+                        setVisitors(visitorsData || []);
+                        console.log('Fetched visitors:', visitorsData);
+                    }
                 }
 
                 // Fetch listings
@@ -105,6 +176,19 @@ const Dashboard = () => {
                     setClusteredQuestions(clusteredData || []);
                     console.log('Fetched clustered questions:', clusteredData);
                 }
+
+                // Fetch client config
+                const { data: configData, error: configError } = await supabase
+                    .from('clients')
+                    .select('lead_scoring_rules')
+                    .eq('client_id', selectedClientId)
+                    .single();
+                if (configError) {
+                    console.error('Error fetching client config:', configError);
+                } else {
+                    setClientConfig(configData?.lead_scoring_rules || null);
+                    console.log('Fetched client config:', configData);
+                }
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }
@@ -113,12 +197,22 @@ const Dashboard = () => {
         fetchData();
     }, [selectedClientId]);
 
+    // Save custom criteria to localStorage whenever it changes
+    useEffect(() => {
+        localStorage.setItem('customLeadCriteria', JSON.stringify(customCriteria));
+    }, [customCriteria]);
+
     const handleTabClick = (tabId) => {
         navigate(`/dashboard/${tabId}`);
     };
 
-    const handleViewHotLeads = () => {
-        navigate('/dashboard/lead-performance');
+    const handleViewHotLeads = (filter = 'all') => {
+        navigate(`/dashboard/lead-performance?filter=${filter}`);
+    };
+
+    const handleOpenChatHistory = (visitorId) => {
+        // Navigate to complete chat history page for the visitor
+        navigate(`/dashboard/chat-history/${visitorId}`);
     };
 
     return (
@@ -134,12 +228,13 @@ const Dashboard = () => {
                     <Routes>
                         <Route index element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
                         <Route path="overview" element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
-                        <Route path="lead-performance" element={<LeadPerformanceTab visitors={visitors} listings={listings} listingMetrics={listingMetrics} />} />
+                        <Route path="lead-performance" element={<LeadPerformanceTab visitors={visitors} listings={listings} listingMetrics={listingMetrics} clientConfig={clientConfig} onOpenChatHistory={handleOpenChatHistory} customCriteria={customCriteria} setCustomCriteria={setCustomCriteria} />} />
                         <Route path="chatbot-analytics" element={<ChatbotAnalyticsTab />} />
                         <Route path="listing-performance" element={<ListingPerformanceTab listings={listings} listingMetrics={listingMetrics} clusteredQuestions={clusteredQuestions} />} />
                         <Route path="listing/:id" element={<ListingDetailsPage />} />
+                        <Route path="chat-history/:visitorId" element={<CompleteChatHistoryPage />} />
                         <Route path="unanswered-questions" element={<UnansweredQuestionsPage />} />
-                        <Route path="user-insights" element={<UserInsightsTab visitors={visitors} />} />
+                        <Route path="user-insights" element={<UserInsightsTab visitors={visitors} onOpenChatHistory={handleOpenChatHistory} />} />
                         <Route path="*" element={
                             <div className="text-center py-12">
                                 <h3 className="text-lg font-medium text-gray-600">

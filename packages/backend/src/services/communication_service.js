@@ -1,7 +1,7 @@
 // packages/backend/src/services/communication_service.js
-// Service for handling communication channels like email, SMS, and WhatsApp for unanswered question replies
-// Provides placeholder implementations for MVP that will be replaced with real service integrations
-// relevant files: unanswered_question_service.js, index.js, visitor-service.js
+// Service providing placeholder implementations for email, SMS, and WhatsApp communication channels.
+// To enable direct replies to visitors for unanswered questions, with extensible architecture for future service integrations.
+// Relevant files: services/unanswered_question_service.js, index.js
 class CommunicationService {
   /**
    * Send an email to a recipient

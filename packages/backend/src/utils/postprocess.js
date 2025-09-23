@@ -1,3 +1,7 @@
+// packages/backend/src/utils/postprocess.js
+// Utility for post-processing LLM responses to remove redundant call-to-action phrases.
+// To improve response quality by eliminating repetitive closing questions.
+// Relevant files: rag-service.js
 // Compact regex construction to avoid multiline literal issues on some runners
 const CTA_PATTERNS = [
   '(?:como\\s+posso\\s+(?:ajudar|auxiliar)(?:\\s+mais)?)\\?',

@@ -4,6 +4,9 @@ const TaggingRulesEditor = ({ value, onChange }) => {
   return (
     <div className="md:col-span-3">
       <label htmlFor="edit_tagging_rules" className="block text-sm font-medium text-gray-700">Tagging Rules (JSON)</label>
+      <p className="mt-1 text-xs text-gray-500">
+        Defines rules for normalizing and standardizing tags across different property types.
+      </p>
       <textarea
         name="tagging_rules"
         id="edit_tagging_rules"

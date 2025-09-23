@@ -1,3 +1,7 @@
+// packages/backend/src/services/user-service.js
+// Service for managing user accounts and agent-listing assignments in Supabase.
+// To handle user management for multi-tenant system with role-based access to listings.
+// Relevant files: config/supabase.js, services/listing-service.js, index.js
 import supabase from '../config/supabase.js';
 import listingService from './listing-service.js'; // Import listingService
 

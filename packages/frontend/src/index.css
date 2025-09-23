@@ -1,3 +1,8 @@
+/* packages/frontend/src/index.css */
+/* Defines the global CSS styles and Tailwind CSS configuration for the React application, including theme variables and component styles. */
+/* This file exists to centralize styling and design tokens for consistent UI across the app. */
+/* packages/frontend/src/App.jsx, packages/frontend/src/main.jsx, packages/frontend/src/dashboard/Dashboard.jsx, packages/frontend/src/lib/utils.js */
+
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -132,6 +137,9 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+  html {
+    font-size: 80%;
   }
   html,
   body,

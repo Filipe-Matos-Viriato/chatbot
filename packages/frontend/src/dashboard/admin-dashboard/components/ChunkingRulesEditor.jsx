@@ -4,6 +4,9 @@ const ChunkingRulesEditor = ({ value, onChange }) => {
   return (
     <div className="md:col-span-3">
       <label htmlFor="edit_chunking_rules" className="block text-sm font-medium text-gray-700">Chunking Rules (JSON)</label>
+      <p className="mt-1 text-xs text-gray-500">
+        Defines how text content is split into smaller chunks for embedding and retrieval.
+      </p>
       <textarea
         name="chunking_rules"
         id="edit_chunking_rules"

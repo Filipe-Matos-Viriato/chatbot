@@ -35,6 +35,21 @@ export async function getLeadDistributionMetrics(clientId) {
     return { hot: 0, warm: 0, cold: 0, total: 0 };
 }
 
+export async function getLeadScoresForHistogram(clientId) {
+    const { data, error } = await supabase
+        .from('visitors')
+        .select('lead_score')
+        .eq('client_id', clientId)
+        .not('lead_score', 'is', null); // Exclude null lead_scores
+
+    if (error) {
+        console.error('Error fetching lead scores for histogram:', error);
+        return [];
+    }
+
+    return data.map(item => item.lead_score);
+}
+
 export async function getListingLeadDistributionMetrics(listingId, clientId) {
     const { data, error } = await supabase
         .from('listing_metrics')

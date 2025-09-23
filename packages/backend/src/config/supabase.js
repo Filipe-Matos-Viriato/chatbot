@@ -1,3 +1,7 @@
+// packages/backend/src/config/supabase.js
+// Configuration module for Supabase database client, handling connection and environment setup.
+// To provide a centralized database connection for storing and retrieving application data like listings, visitors, and chat messages.
+// Relevant files: index.js, services/listing-service.js, services/visitor-service.js, services/user-service.js
 import { createClient } from '@supabase/supabase-js';
 // Add dotenv config to load environment variables in scripts
 import path from 'path';

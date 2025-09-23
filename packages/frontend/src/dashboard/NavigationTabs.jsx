@@ -6,10 +6,10 @@ const NavigationTabs = ({ activeTab, onTabClick, tabs: propTabs }) => {
     const defaultTabs = [
         { id: 'overview', label: 'Overview' },
         { id: 'lead-performance', label: 'Lead Performance' },
-        { id: 'chatbot-analytics', label: 'Chatbot Analytics' },
         { id: 'listing-performance', label: 'Listing Performance' },
         { id: 'unanswered-questions', label: 'Unanswered Questions' },
-        { id: 'user-insights', label: 'User Insights' }
+        { id: 'user-insights', label: 'User Insights' },
+        { id: 'chatbot-analytics', label: 'Chatbot Analytics' }
     ];
     const tabs = propTabs || defaultTabs;
 

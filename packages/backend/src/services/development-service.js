@@ -1,3 +1,7 @@
+// packages/backend/src/services/development-service.js
+// Service for managing development records in Supabase database.
+// To provide CRUD operations for development entities that group related listings.
+// Relevant files: index.js, config/supabase.js
 import supabase from '../config/supabase.js';
 
 async function createDevelopment(developmentData) {

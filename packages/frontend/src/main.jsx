@@ -1,3 +1,8 @@
+// packages/frontend/src/main.jsx
+// Defines the entry point for the React application, setting up routing and rendering the app to the DOM.
+// This file exists to initialize the React app with necessary providers and route configuration.
+// packages/frontend/src/App.jsx, packages/frontend/src/index.html, packages/frontend/src/dashboard/Dashboard.jsx, packages/frontend/src/context/ClientContext.jsx
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';

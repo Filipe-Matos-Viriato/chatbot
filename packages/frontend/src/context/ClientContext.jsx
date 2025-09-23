@@ -1,3 +1,8 @@
+// packages/frontend/src/context/ClientContext.jsx
+// Defines the React context for managing client state across the application, including fetching clients and managing selected client.
+// This file exists to provide global state management for client-related data and selections.
+// packages/frontend/src/main.jsx, packages/frontend/src/App.jsx, packages/frontend/src/dashboard/Dashboard.jsx, packages/frontend/src/config/apiClient.js
+
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { API_BASE_URL } from '../config/apiClient';
 

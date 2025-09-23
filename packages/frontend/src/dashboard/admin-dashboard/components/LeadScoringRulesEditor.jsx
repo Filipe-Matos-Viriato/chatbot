@@ -4,6 +4,9 @@ const LeadScoringRulesEditor = ({ value, onChange }) => {
   return (
     <div className="md:col-span-3">
       <label htmlFor="edit_lead_scoring_rules" className="block text-sm font-medium text-gray-700">Lead Scoring Rules (JSON)</label>
+      <p className="mt-1 text-xs text-gray-500">
+        Defines criteria and weights for automatically scoring visitor leads based on their interactions.
+      </p>
       <textarea
         name="lead_scoring_rules"
         id="edit_lead_scoring_rules"

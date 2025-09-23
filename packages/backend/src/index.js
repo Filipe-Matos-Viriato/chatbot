@@ -1,3 +1,7 @@
+// packages/backend/src/index.js
+// Main entry point for the Node.js backend server, setting up Express app with routes for chat, document ingestion, visitor management, and API endpoints.
+// To serve as the central API gateway for the RAG chatbot system, handling requests, middleware, and routing to appropriate services.
+// Relevant files: rag-service.js, client-config-service.js, listing-service.js, visitor-service.js, user-service.js, unanswered_question_service.js, communication_service.js
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -29,6 +33,32 @@ import userService from './services/user-service.js';
 import unansweredQuestionService from './services/unanswered_question_service.js';
 import communicationService from './services/communication_service.js';
 import { extractListingIdFromUrl as parseListingFromUrl, extractListingIdFromQuery as parseListingFromQuery } from './utils/rag-parsing.js';
+import scoreDecayScheduler from './schedulers/score-decay-scheduler.js';
+
+/**
+ * Extract contact information from user message
+ * @param {string} message - User message
+ * @returns {Object} - Extracted contact info {email, phone}
+ */
+function extractContactInfo(message) {
+  const contactInfo = { email: null, phone: null };
+
+  // Email regex
+  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+  const emailMatch = message.match(emailRegex);
+  if (emailMatch) {
+    contactInfo.email = emailMatch[0];
+  }
+
+  // Phone regex (Portuguese format)
+  const phoneRegex = /(\+351\s?)?[9|2|3]\d{1,2}(\s|\.)?\d{3}(\s|\.)?\d{3}/g;
+  const phoneMatch = message.match(phoneRegex);
+  if (phoneMatch) {
+    contactInfo.phone = phoneMatch[0].replace(/[\s\.]/g, ''); // Clean up formatting
+  }
+
+  return contactInfo;
+}
 console.log('[DEBUG] All imports in index.js completed.');
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -43,7 +73,8 @@ console.log(`[DEBUG] process.env.PORT is: ${process.env.PORT}`);
 
 // Middleware to load client configuration and attach it to the request, along with a placeholder user context
 const clientConfigMiddleware = (clientConfigService) => async (req, res, next) => {
-  const clientId = req.body.clientId || req.headers['x-client-id'] || req.query.clientId;
+  const clientId = req.body.clientId || req.headers['x-client-id'] || req.query.clientId || req.params.id || req.params.clientId;
+
   // Placeholder for user authentication. In a real scenario, this would come from an auth system.
   // For now, we'll assume a default admin user for testing purposes if no user ID is provided.
   const userId = req.headers['x-user-id'] || 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'; // Example UUID for a placeholder user
@@ -358,59 +389,18 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       chatHistory = chatHistoryService.formatChatHistoryForPrompt(recentMessages);
       console.log(`[${clientConfig.clientName || clientConfig.clientId}] Formatted Chat History:\n---\n${chatHistory}\n---`);
 
-      // Store user message in chat_messages table
+      // Check for contact information in user message and update visitor record
       try {
-        const userMessageData = {
-          visitor_id: visitor_id,
-          session_id: sessionId,
-          client_id: clientConfig.clientId,
-          message_text: query,
-          sender_role: 'user',
-          timestamp: timestamp,
-          listing_id: effectiveListingId,
-          development_id: effectiveDevelopmentId,
-        };
-        console.log('Attempting to insert user message into chat_messages:', userMessageData);
-        const { data: insertedChatMessage, error: chatMessageError } = await supabase
-          .from('chat_messages')
-          .insert([userMessageData])
-          .select('id'); // Select the ID of the inserted message
+        const contactInfo = extractContactInfo(query);
+        if (contactInfo.email || contactInfo.phone) {
+          console.log(`[${clientConfig.clientName}] Detected contact info in user message:`, contactInfo);
+          await visitorService.updateVisitorContact(visitor_id, clientConfig.clientId, contactInfo);
 
-        if (chatMessageError) {
-          console.error('Error inserting user message into chat_messages:', chatMessageError);
-        } else if (insertedChatMessage && insertedChatMessage.length > 0) {
-          console.log('User message inserted successfully:', insertedChatMessage[0]);
-          const chatMessageId = insertedChatMessage[0].id;
-
-          // Generate embedding for the user's question and insert into question_embeddings
-          try {
-            const embeddingResult = await openai.embeddings.create({
-              model: embeddingModel,
-              input: query,
-            });
-
-            const embeddingData = {
-              question_id: chatMessageId, // Link to the chat_messages ID
-              embedding: embeddingResult.data[0].embedding,
-              client_id: clientConfig.clientId, // Add client_id here
-              ...(context?.listingId && { listing_id: context.listingId }),
-            };
-            console.log('Attempting to insert question embedding:', embeddingData);
-            const { error: insertEmbeddingError } = await supabase
-              .from('question_embeddings')
-              .insert([embeddingData]);
-
-            if (insertEmbeddingError) {
-              console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
-            } else {
-              console.log('Question embedding inserted successfully.');
-            }
-          } catch (embeddingError) {
-            console.error('Error generating or inserting question embedding:', embeddingError);
-          }
+          // Log contact submission as an event for lead scoring
+          await visitorService.logEvent(visitor_id, 'SUBMITTED_CONTACT', clientConfig.clientId, effectiveListingId);
         }
-      } catch (logError) {
-        console.error('Error logging user message to chat_messages:', logError);
+      } catch (contactError) {
+        console.error('Error processing contact information:', contactError);
       }
 
       // Upsert user message to Pinecone (for RAG context)
@@ -493,7 +483,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       console.log(`[${clientConfig.clientName}] External context passed to RAG: ${JSON.stringify(externalCtx)}`);
 
-      const { response: responseText, debug: debugPayload } = await generateResponse(
+      const { response: responseText, debug: debugPayload, isUnanswered } = await generateResponse(
         query,
         clientConfig,
         embeddingVector,
@@ -501,16 +491,95 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         userContext,
         chatHistory,
         pageUrl,
-        contextShifted // Pass the contextShifted flag
+        contextShifted, // Pass the contextShifted flag
+        visitor_id // Pass visitor_id for unanswered question handling
       );
+
+      // Store user message in chat_messages table (moved here to access isUnanswered)
+      try {
+        // Fetch visitor name
+        const { data: visitorData, error: visitorError } = await supabase
+          .from('visitors')
+          .select('name')
+          .eq('visitor_id', visitor_id)
+          .eq('client_id', clientConfig.clientId)
+          .single();
+
+        const visitorName = visitorData?.name || null;
+
+        const userMessageData = {
+          visitor_id: visitor_id,
+          session_id: sessionId,
+          client_id: clientConfig.clientId,
+          message_text: query,
+          name: visitorName,
+          sender_role: 'user',
+          timestamp: timestamp,
+          listing_id: effectiveListingId,
+          development_id: effectiveDevelopmentId,
+          is_unanswered: isUnanswered || false, // Mark as unanswered if no matches found
+        };
+        console.log('Attempting to insert user message into chat_messages:', userMessageData);
+        const { data: insertedChatMessage, error: chatMessageError } = await supabase
+          .from('chat_messages')
+          .insert([userMessageData])
+          .select('id'); // Select the ID of the inserted message
+
+        if (chatMessageError) {
+          console.error('Error inserting user message into chat_messages:', chatMessageError);
+        } else if (insertedChatMessage && insertedChatMessage.length > 0) {
+          console.log('User message inserted successfully:', insertedChatMessage[0]);
+          const chatMessageId = insertedChatMessage[0].id;
+
+          // Generate embedding for the user's question and insert into question_embeddings
+          try {
+            const embeddingResult = await openai.embeddings.create({
+              model: embeddingModel,
+              input: query,
+            });
+
+            const embeddingData = {
+              question_id: chatMessageId, // Link to the chat_messages ID
+              embedding: embeddingResult.data[0].embedding,
+              client_id: clientConfig.clientId, // Add client_id here
+              ...(context?.listingId && { listing_id: context.listingId }),
+            };
+            console.log('Attempting to insert question embedding:', embeddingData);
+            const { error: insertEmbeddingError } = await supabase
+              .from('question_embeddings')
+              .insert([embeddingData]);
+
+            if (insertEmbeddingError) {
+              console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
+            } else {
+              console.log('Question embedding inserted successfully.');
+            }
+          } catch (embeddingError) {
+            console.error('Error generating or inserting question embedding:', embeddingError);
+          }
+        }
+      } catch (logError) {
+        console.error('Error logging user message to chat_messages:', logError);
+      }
 
       // Store assistant response in chat_messages table
       try {
+        // Fetch visitor name (reuse from earlier if possible, but for consistency fetch again)
+        const { data: visitorData, error: visitorError } = await supabase
+          .from('visitors')
+          .select('name')
+          .eq('visitor_id', visitor_id)
+          .eq('client_id', clientConfig.clientId)
+          .single();
+
+        const visitorName = visitorData?.name || null;
+
         const assistantMessageData = {
           visitor_id: visitor_id,
           session_id: sessionId,
           client_id: clientConfig.clientId,
-          message_text: responseText, // Still log the string response
+          message_text: responseText || 'Desculpe, ocorreu um erro ao processar a sua pergunta.', // Still log the string response
+          name: visitorName,
           sender_role: 'assistant',
           timestamp: new Date().toISOString(),
           listing_id: effectiveListingId,
@@ -532,7 +601,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       // Upsert assistant response to Pinecone (for RAG context)
       try {
         await chatHistoryService.upsertMessage({
-          text: responseText,
+          text: responseText || 'Desculpe, ocorreu um erro ao processar a sua pergunta.',
           role: 'assistant',
           client_id: clientConfig.clientId,
           visitor_id: visitor_id, // Use visitor_id
@@ -743,6 +812,35 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to get visitor score history for sparklines
+  app.get('/v1/visitors/:visitorId/score-history', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { clientConfig } = req;
+      const { maxPoints } = req.query;
+
+      if (!visitorId) {
+        return res.status(400).json({ error: 'Visitor ID is required' });
+      }
+
+      // Verify visitor belongs to this client
+      const visitor = await visitorService.getVisitor(visitorId);
+      if (!visitor || visitor.client_id !== clientConfig.clientId) {
+        return res.status(404).json({ error: 'Visitor not found or unauthorized' });
+      }
+
+      const scoreHistory = await visitorService.getVisitorScoreHistory(
+        visitorId,
+        maxPoints ? parseInt(maxPoints) : 15
+      );
+
+      res.json({ scoreHistory });
+    } catch (error) {
+      console.error('Error getting visitor score history:', error);
+      res.status(500).json({ error: 'Failed to get visitor score history.' });
+    }
+  });
+
   // API endpoint to save onboarding answers for a visitor
   app.post('/v1/visitors/:visitorId/onboarding', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
@@ -807,6 +905,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
       try {
+        // Fetch visitor name
+        const { data: visitorData, error: visitorError } = await supabase
+          .from('visitors')
+          .select('name')
+          .eq('visitor_id', visitorId)
+          .eq('client_id', clientConfig.clientId)
+          .single();
+
+        const visitorName = visitorData?.name || null;
+
         await supabase
           .from('chat_messages')
           .insert([
@@ -815,6 +923,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
               session_id: `onboarding_${visitorId}`,
               client_id: clientConfig.clientId,
               message_text: assistantText,
+              name: visitorName,
               sender_role: 'assistant',
               timestamp: now,
               listing_id: null,
@@ -1323,7 +1432,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         supabase.from('listings').select('*').eq('id', id).eq('client_id', req.clientConfig.clientId).single(),
         supabase.from('listing_metrics').select('*').eq('listing_id', id).single(),
         supabase.from('chat_messages').select('message_text, timestamp, answered_at, answered_by').eq('listing_id', id).eq('client_id', req.clientConfig.clientId).eq('is_unanswered', true).eq('sender_role', 'user'),
-        supabase.from('handoffs').select('reason').eq('listing_id', id),
+        (() => {
+          // Get listing_uuid first, then query handoffs
+          const listingQuery = supabase.from('listings').select('listing_uuid').eq('id', id).eq('client_id', req.clientConfig.clientId).single();
+          return listingQuery.then(({ data: listingData }) => {
+            if (listingData?.listing_uuid) {
+              return supabase.from('handoffs').select('reason').eq('listing_uuid', listingData.listing_uuid).eq('client_id', req.clientConfig.clientId);
+            }
+            return { data: [], error: null }; // Return empty array if no listing found
+          });
+        })(),
         (() => {
           let query = supabase.from('chat_messages').select('message_text, sender_role, timestamp, visitor_id').eq('listing_id', id);
           if (session_id) {
@@ -1550,6 +1668,129 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to get client qualification metrics
+  app.get('/api/metrics/client-qualification', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+
+      const { data: metrics, error } = await supabase
+        .from('client_qualification_metrics')
+        .select('*')
+        .eq('client_id', clientConfig.clientId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching client qualification metrics:', error);
+        return res.status(500).json({ error: 'Failed to fetch qualification metrics.' });
+      }
+
+      if (!metrics) {
+        // Return default values if no metrics exist yet
+        return res.json({
+          avgQualificationTimeHours: 0,
+          qualifiedVisitorsCount: 0,
+          totalQualificationTimeHours: 0,
+          qualificationThreshold: 40
+        });
+      }
+
+      res.json({
+        avgQualificationTimeHours: metrics.avg_qualification_time_hours || 0,
+        qualifiedVisitorsCount: metrics.qualified_visitors_count || 0,
+        totalQualificationTimeHours: metrics.total_qualification_time_hours || 0,
+        qualificationThreshold: metrics.qualification_threshold || 40
+      });
+    } catch (error) {
+      console.error('Error in /api/metrics/client-qualification endpoint:', error);
+      res.status(500).json({ error: 'Failed to fetch client qualification metrics.' });
+    }
+  });
+
+  // API endpoint to get conversion rate by lead score threshold
+  app.get('/api/metrics/conversion-rate-by-score-threshold', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+      const { conversionMetric } = req.query;
+
+      if (!conversionMetric) {
+        return res.status(400).json({ error: 'Conversion metric is required.' });
+      }
+
+      // Define score ranges in groups of 10 (0-10, 11-20, 21-30, etc.)
+      const scoreRanges = [
+        { min: 0, max: 10, label: '0-10' },
+        { min: 11, max: 20, label: '11-20' },
+        { min: 21, max: 30, label: '21-30' },
+        { min: 31, max: 40, label: '31-40' },
+        { min: 41, max: 50, label: '41-50' },
+        { min: 51, max: 60, label: '51-60' },
+        { min: 61, max: 70, label: '61-70' },
+        { min: 71, max: 80, label: '71-80' },
+        { min: 81, max: 90, label: '81-90' },
+        { min: 91, max: 100, label: '91-100' }
+      ];
+
+      const results = [];
+
+      for (const range of scoreRanges) {
+        // Get total visitors in this score range
+        const { data: totalVisitors, error: totalError } = await supabase
+          .from('visitors')
+          .select('visitor_id')
+          .eq('client_id', clientConfig.clientId)
+          .gte('lead_score', range.min)
+          .lte('lead_score', range.max);
+
+        if (totalError) {
+          console.error('Error fetching total visitors:', totalError);
+          return res.status(500).json({ error: 'Failed to fetch visitor data.' });
+        }
+
+        const totalCount = totalVisitors ? totalVisitors.length : 0;
+
+        // Get visitors who have the specific conversion event
+        const { data: convertedVisitors, error: convertedError } = await supabase
+          .from('events')
+          .select('visitor_id')
+          .eq('client_id', clientConfig.clientId)
+          .eq('event_type', conversionMetric);
+
+        if (convertedError) {
+          console.error('Error fetching converted visitors:', convertedError);
+          return res.status(500).json({ error: 'Failed to fetch conversion data.' });
+        }
+
+        // Get unique visitor IDs who have the conversion event
+        const convertedVisitorIds = new Set(convertedVisitors ? convertedVisitors.map(e => e.visitor_id) : []);
+
+        // Count how many visitors in this score range have converted
+        let convertedCount = 0;
+        if (totalVisitors) {
+          for (const visitor of totalVisitors) {
+            if (convertedVisitorIds.has(visitor.visitor_id)) {
+              convertedCount++;
+            }
+          }
+        }
+
+        // Calculate conversion rate
+        const conversionRate = totalCount > 0 ? Math.round((convertedCount / totalCount) * 100) : 0;
+
+        results.push({
+          scoreRange: range.label,
+          totalLeads: totalCount,
+          convertedLeads: convertedCount,
+          conversionRate: conversionRate
+        });
+      }
+
+      res.json({ data: results });
+    } catch (error) {
+      console.error('Error calculating conversion rate by score threshold:', error);
+      res.status(500).json({ error: 'Failed to calculate conversion rate by score threshold.' });
+    }
+  });
+
   // API endpoint to get a summary of unanswered questions per listing
   app.get('/api/unanswered-questions-summary', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
@@ -1587,6 +1828,67 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       res.json({ summary });
     } catch (error) {
       console.error('Error in /api/unanswered-questions-summary endpoint:', error);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
+  // API endpoint to get new vs returning users data
+  app.get('/api/metrics/new-vs-returning-users', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+      const { startDate, endDate } = req.query;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: 'startDate and endDate are required.' });
+      }
+
+      // Query to get session counts per visitor
+      const { data: sessionData, error } = await supabase
+        .from('chat_messages')
+        .select('visitor_id, session_id')
+        .eq('client_id', clientConfig.clientId)
+        .gte('timestamp', startDate)
+        .lte('timestamp', endDate);
+
+      if (error) {
+        console.error('Error fetching chat messages for new vs returning users:', error);
+        return res.status(500).json({ error: 'Failed to fetch data.' });
+      }
+
+      // Group by visitor_id and count distinct session_id
+      const visitorSessionCounts = {};
+      sessionData.forEach(row => {
+        if (!visitorSessionCounts[row.visitor_id]) {
+          visitorSessionCounts[row.visitor_id] = new Set();
+        }
+        visitorSessionCounts[row.visitor_id].add(row.session_id);
+      });
+
+      let newUsers = 0;
+      let returningUsers = 0;
+
+      Object.values(visitorSessionCounts).forEach(sessionSet => {
+        const count = sessionSet.size;
+        if (count === 1) {
+          newUsers++;
+        } else if (count > 1) {
+          returningUsers++;
+        }
+      });
+
+      const totalUsers = newUsers + returningUsers;
+      const newPercentage = totalUsers > 0 ? Math.round((newUsers / totalUsers) * 100) : 0;
+      const returningPercentage = totalUsers > 0 ? Math.round((returningUsers / totalUsers) * 100) : 0;
+
+      res.json({
+        newUsers,
+        returningUsers,
+        newPercentage,
+        returningPercentage,
+        totalUsers
+      });
+    } catch (error) {
+      console.error('Error in /api/metrics/new-vs-returning-users endpoint:', error);
       res.status(500).json({ error: 'Internal server error.' });
     }
   });
@@ -1828,6 +2130,9 @@ if (import.meta.url.startsWith('file:') && path.resolve(process.argv[1]) === __f
   console.log(`Attempting to start backend server on port: ${port}`);
   appInstance.listen(port, () => {
     console.log(`Backend server successfully listening at http://localhost:${port}`);
+
+    // Start the score decay scheduler
+    scoreDecayScheduler.start();
   }).on('error', (err) => {
     console.error(`Failed to start backend server on port ${port}:`, err);
     process.exit(1); // Exit with an error code

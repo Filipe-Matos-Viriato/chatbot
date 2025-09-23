@@ -136,7 +136,7 @@ const ListingDetailsPage = () => {
                 <div className="bg-white p-6 rounded-lg shadow">
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-2xl font-bold text-gray-800">
-                            Chat History for Visitor: {selectedVisitorId}
+                            Chat History for Visitor: {visitorData?.name || selectedVisitorId}
                         </h2>
                         <button
                             onClick={handleBackToListing}

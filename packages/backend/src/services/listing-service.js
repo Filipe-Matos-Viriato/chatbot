@@ -1,3 +1,7 @@
+// packages/backend/src/services/listing-service.js
+// Service for managing listing records in Supabase with advanced query capabilities.
+// To provide database operations for property listings, including price aggregations and recommendation logic.
+// Relevant files: config/supabase.js, rag-service.js, index.js
 import supabase from '../config/supabase.js';
 
 const ListingService = {

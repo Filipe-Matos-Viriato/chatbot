@@ -5,14 +5,16 @@ create table public.visitors (
   lead_score smallint null default '0'::smallint,
   created_at timestamp with time zone not null default now(),
   updated_at timestamp with time zone null default now(),
-  chat_history text null,
   is_acknowledged boolean null default false,
-  onboarding_questions jsonb null,
-  onboarding_completed boolean null default false,
+  name text null,
+  email text null,
+  budget numeric null,
+  tipologia text null,
+  development_preference text null,
+  phone text null,
+  previous_lead_score smallint null default 0,
   constraint visitors_pkey primary key (id),
   constraint visitors_visitor_id_key unique (visitor_id)
 ) TABLESPACE pg_default;
 
-create index IF not exists idx_visitors_onboarding_completed on public.visitors using btree (onboarding_completed) TABLESPACE pg_default;
-
-create index IF not exists idx_visitors_client_onboarding on public.visitors using btree (client_id, onboarding_completed) TABLESPACE pg_default;
+create index IF not exists idx_visitors_development_pref on public.visitors using btree (development_preference) TABLESPACE pg_default;

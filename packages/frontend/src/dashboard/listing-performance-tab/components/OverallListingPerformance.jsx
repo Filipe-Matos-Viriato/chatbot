@@ -71,9 +71,9 @@ const OverallListingPerformance = ({ listings, listingMetrics, searchTerm, hideC
 
     const getSortIndicator = (column) => {
         if (sortColumn === column) {
-            return sortDirection === 'asc' ? ' ▲' : ' ▼';
+            return sortDirection === 'asc' ? ' ↑' : ' ↓';
         }
-        return '';
+        return ' ⇅';
     };
 
     return (

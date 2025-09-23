@@ -1,3 +1,7 @@
+// packages/backend/src/services/client-config-service.js
+// Service for managing client-specific configurations stored in Supabase with caching.
+// To provide dynamic, database-driven configuration management for multi-tenant chatbot system.
+// Relevant files: index.js, config/supabase.js
 import supabase from '../config/supabase.js';
 import NodeCache from 'node-cache';
 
@@ -49,6 +53,8 @@ async function getClientConfig(clientId) {
     chatHistoryTaggingRules: data.chat_history_tagging_rules,
     chunking_rules: data.chunking_rules,
     tagging_rules: data.tagging_rules,
+    listing_tagging_prompt: data.listing_tagging_prompt,
+    development_tagging_prompt: data.development_tagging_prompt,
     defaultOnboardingQuestions: data.default_onboarding_questions, // Add onboarding questions field
     // Use widget_settings from the database, with a fallback to the old structure
     widgetSettings: data.widget_settings || {
@@ -131,9 +137,28 @@ async function deleteClientConfig(clientId) {
   console.log(`[Cache] Deleted for client: ${clientId}`);
 }
 
+/**
+ * Gets all client IDs from the database.
+ * @returns {Promise<Array>} A promise that resolves to an array of client objects with client_id.
+ */
+async function getAllClients() {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('client_id, client_name')
+    .order('client_id');
+
+  if (error) {
+    console.error('Error fetching all clients:', error);
+    throw new Error('Failed to fetch clients.');
+  }
+
+  return data || [];
+}
+
 export {
   getClientConfig,
   createClientConfig,
   updateClientConfig,
   deleteClientConfig,
+  getAllClients,
 };

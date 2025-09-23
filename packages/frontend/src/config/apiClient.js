@@ -1,4 +1,8 @@
-// API client configuration for frontend dashboard
+// packages/frontend/src/config/apiClient.js
+// Defines the API client configuration and helper functions for making requests to the backend.
+// This file exists to centralize API communication logic and handle environment-specific base URLs.
+// packages/frontend/src/chatbot/ChatInterface.jsx, packages/frontend/src/dashboard/Dashboard.jsx, packages/frontend/src/context/ClientContext.jsx, packages/frontend/src/main.jsx
+
 const getApiBaseUrl = () => {
   // Check if we're in development mode
   if (import.meta.env.DEV) {

@@ -7,7 +7,7 @@ The primary focus has shifted to implementing comprehensive dashboard features f
 - **Common Questions Feature Status:** The "Common Questions about this Listing" feature now leverages pre-calculated and pre-clustered questions for improved performance and accuracy. The in-process K-Means clustering algorithm has been implemented to group semantically similar questions, and a dedicated API endpoint serves these pre-calculated common questions.
 
 ## Recent Changes
-- **Ingestion Service Enhancements (`packages/backend/src/services/ingestion-service.js`):**
+- **Ingestion Service Enhancements (`packages/backend/src/services/ingestion-service_V2.js`):**
     - Prioritized JSON extraction for `num_bathrooms` and `price_eur`, ensuring values from JSON are not overwritten by text-based regex fallbacks.
     - Added `console.log` statements for debugging `price_eur` extraction.
     - Fixed `TypeError: Cannot read properties of undefined (reading 'id')` during listing creation.
@@ -35,10 +35,10 @@ The primary focus has shifted to implementing comprehensive dashboard features f
 - **Developments Feature Implemented:**
    - **Database Schema:** Created the `developments` table in Supabase and added a nullable `development_id` column to the `listings` table, referencing `developments`.
    - **Backend API:** Implemented API endpoints for managing developments (e.g., `POST /v1/developments`, `GET /v1/developments`).
-   - **Ingestion Pipeline:** Modified `ingestion-service.js` to accept `development_id` as metadata, upsert development content to Pinecone with `development_id` and `client_id`, and ensure `development_id` is included in Pinecone entries for associated listings.
+   - **Ingestion Pipeline:** Modified `ingestion-service_V2.js` to accept `development_id` as metadata, upsert development content to Pinecone with `development_id` and `client_id`, and ensure `development_id` is included in Pinecone entries for associated listings.
    - **RAG Service:** Updated `rag-service.js` to consider `development_id` during retrieval, performing targeted searches for developments and combining results with listing-specific and broad searches, with adjusted re-ranking.
-- **Flexible, Client-Configurable Metadata Extraction Implemented:** `ingestion-service.js` now uses client-defined regex patterns from `client-abc.json` to accurately extract `listings.name` and `listings.baths` from document content during ingestion.
-- **Structured Metadata Extraction Implemented:** `ingestion-service.js` extracts and stores structured metadata (e.g., `num_bedrooms`, `total_area_sqm`, `price_eur`, boolean features) from documents during ingestion.
+- **Flexible, Client-Configurable Metadata Extraction Implemented:** `ingestion-service_V2.js` now uses client-defined regex patterns from the `clients` table to accurately extract `listings.name` and `listings.baths` from document content during ingestion.
+- **Structured Metadata Extraction Implemented:** `ingestion-service_V2.js` extracts and stores structured metadata (e.g., `num_bedrooms`, `total_area_sqm`, `price_eur`, boolean features) from documents during ingestion.
 - **Chatbot System Instruction Refined:** `client-abc.json`'s `systemInstruction` was updated for more direct and professional chatbot responses.
 - **Context Passing Mechanism Updated:** The HTML snippet for iframe context injection was updated with a `setTimeout` to improve reliability.
 - **Supabase Integration for Visitor Data:** Replaced in-memory visitor data storage with persistent storage in Supabase. This involved:
@@ -82,7 +82,36 @@ The primary focus has shifted to implementing comprehensive dashboard features f
 - **Knowledge Base Re-upsert & Embedding Model Update:**
     - Resolved `ENOENT` error by clarifying the location of `05-versions-space.pdf` (manual placement by user).
     - Fixed `TypeError: pdf is not a function` by correctly importing and passing the `pdf-parse` function.
-    - Updated the embedding model in `ingestion-service.js` from Google's `text-embedding-004` to OpenAI's `text-embedding-3-small` to match the Pinecone index dimension (1536). All knowledge base documents were successfully re-upserted.
+    - Updated the embedding model in `ingestion-service_V2.js` from Google's `text-embedding-004` to OpenAI's `text-embedding-3-small` to match the Pinecone index dimension (1536). All knowledge base documents were successfully re-upserted.
+
+- **Critical Security Enhancement: Removed Cross-Namespace Fallback**
+    - **Issue:** Cross-namespace fallback in RAG service could potentially return data from other clients, creating a security vulnerability.
+    - **Solution:** Completely removed the cross-namespace fallback mechanism from `rag-service.js`.
+    - **Impact:** Ensures all queries are strictly contained within the client's Pinecone namespace, preventing any cross-client data leakage.
+    - **Files Modified:** `packages/backend/src/rag-service.js`
+
+- **Enhanced No-Matches Scenario Handling**
+    - **New Feature:** When no relevant information is found in the knowledge base, the system now:
+        - Provides clear, user-friendly responses explaining the limitation
+        - Checks if visitor has contact information stored
+        - If contact info exists: Promises follow-up by specialists
+        - If no contact info: Asks visitor to provide email/phone for personalized assistance
+    - **Integration:** Automatically marks unanswered questions as `is_unanswered = true` in chat_messages table
+    - **Lead Generation:** Triggers contact collection workflow for better lead qualification
+    - **Files Modified:** `packages/backend/src/rag-service.js`, `packages/backend/src/index.js`
+
+- **Smart Contact Information Collection**
+    - **Automatic Extraction:** Added regex-based contact information extraction from user messages
+    - **Supported Formats:** Email addresses and Portuguese phone numbers
+    - **Storage:** Automatically updates visitor records with extracted contact information
+    - **Lead Scoring:** Logs contact submission as conversion event for lead scoring
+    - **Files Modified:** `packages/backend/src/index.js`
+
+- **Visitor Service Enhancement**
+    - **New Method:** Added `updateVisitorContact()` method for secure contact information updates
+    - **Client Isolation:** Maintains strict client-based access control for contact updates
+    - **Integration:** Seamlessly integrates with existing lead scoring and visitor management systems
+    - **Files Modified:** `packages/backend/src/services/visitor-service.js`
 
 - **Unanswered Questions Review Page Implementation:**
     - **Database Schema Updates:** Added new columns to `chat_messages` table (`requires_kb_update`, `answered_by_user_id`, `resolution_notes`, `follow_up_sent_at`, `follow_up_channel`) and `phone` column to `visitors` table.

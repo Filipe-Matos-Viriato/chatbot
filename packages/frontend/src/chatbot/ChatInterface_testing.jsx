@@ -4,6 +4,7 @@
 // Relevant files: packages/frontend/src/chatbot/ChatInterface.jsx, packages/frontend/src/main.jsx, packages/backend/src/index.js, packages/backend/src/rag-service.js
 
 import { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL } from '../config/apiClient';
 
 const generateUUID = () => {
@@ -151,7 +152,9 @@ const ChatInterfaceTesting = () => {
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#d1d5db', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#4b5563', fontWeight: 'bold' }}>CB</div>
               )}
               <div style={{ borderRadius: '8px', padding: '8px 12px', backgroundColor: message.from === 'user' ? '#3b82f6' : '#e5e7eb', color: message.from === 'user' ? '#ffffff' : '#1f2937' }}>
-                <p style={{ fontSize: '0.875rem' }}>{message.text}</p>
+                <div style={{ fontSize: '0.875rem' }}>
+                  <ReactMarkdown>{message.text}</ReactMarkdown>
+                </div>
               </div>
               {message.from === 'user' && (
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#9ca3af', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#ffffff', fontWeight: 'bold' }}>YOU</div>

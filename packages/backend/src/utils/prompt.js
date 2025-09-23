@@ -1,3 +1,7 @@
+// packages/backend/src/utils/prompt.js
+// Utility for template rendering with variable substitution.
+// To safely render prompt templates with dynamic variables for LLM interactions.
+// Relevant files: rag-service.js
 // Simple prompt templating with brace-escaping safety
 
 export function renderTemplate(template, variables) {

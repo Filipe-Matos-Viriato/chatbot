@@ -4,6 +4,9 @@ const UrlPatternEditor = ({ value, onChange }) => {
   return (
     <div className="md:col-span-3">
       <label htmlFor="edit_url_pattern" className="block text-sm font-medium text-gray-700">URL Pattern</label>
+      <p className="mt-1 text-xs text-gray-500">
+        Defines the URL pattern for extracting listing IDs from property pages.
+      </p>
       <input
         type="text"
         name="url_pattern"

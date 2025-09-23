@@ -1,3 +1,8 @@
+// packages/frontend/src/dashboard/admin-dashboard/components/ClientListTable.jsx
+// Defines a table component for displaying and managing client data in the admin dashboard, with sorting and delete functionality.
+// This file exists to provide a tabular view of clients with actions for editing and deleting.
+// packages/frontend/src/dashboard/admin-dashboard/ClientManagementTab.jsx, packages/frontend/src/dashboard/admin-dashboard/components/ClientSearch.jsx, packages/frontend/src/context/ClientContext.jsx, packages/frontend/src/config/apiClient.js
+
 import React, { useState, useMemo } from 'react';
 import { FaCog, FaTrash } from 'react-icons/fa';
 

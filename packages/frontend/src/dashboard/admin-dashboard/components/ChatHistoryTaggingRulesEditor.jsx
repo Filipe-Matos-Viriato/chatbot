@@ -4,6 +4,9 @@ const ChatHistoryTaggingRulesEditor = ({ value, onChange }) => {
   return (
     <div className="md:col-span-3">
       <label htmlFor="edit_chat_history_tagging_rules" className="block text-sm font-medium text-gray-700">Chat History Tagging Rules (JSON)</label>
+      <p className="mt-1 text-xs text-gray-500">
+        Defines rules for automatically tagging and categorizing chat conversations.
+      </p>
       <textarea
         name="chat_history_tagging_rules"
         id="edit_chat_history_tagging_rules"

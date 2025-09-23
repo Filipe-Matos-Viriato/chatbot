@@ -18,9 +18,11 @@ The backend is a Node.js application using Express.js. Its primary responsibilit
 ### Core Components:
 - **`src/index.js` (API Gateway):** The main entry point. It validates `client_id` on all incoming requests and routes them to the appropriate services.
 - **Client Configuration Service (`src/services/client-config-service.js`):** Loads and serves client-specific configurations from the **Supabase `clients` table**. This governs everything from URL pattern matching for context extraction to fallback behavior.
-- **`src/rag-service.js` (RAG Service):** Executes the RAG pipeline.
--   **Context-Filtered Retrieval:** It performs a **Hybrid Search** that is strictly filtered by `client_id` and, when available, `listing_id`, `development_id`, or **user-specific assigned listings** (for agents). It also now directly queries the Supabase `listings` table for aggregative data (e.g., min/max prices) when relevant queries are detected.
--   **Dynamic Prompt Construction:** Creates a detailed prompt using instructions and templates defined in the client's configuration, now also incorporating aggregated structured data from Supabase when applicable.
+- **`src/rag-service.js` (RAG Service):** Executes the RAG pipeline with enhanced security and user experience.
+-   **Secure Multi-Tenant Retrieval:** Performs **Hybrid Search** with strict client isolation - all queries are namespace-contained within the client's Pinecone index, preventing cross-client data leakage. Removed dangerous cross-namespace fallback mechanisms.
+-   **Context-Filtered Retrieval:** Strictly filtered by `client_id` and, when available, `listing_id`, `development_id`, or **user-specific assigned listings** (for agents). Directly queries Supabase `listings` table for aggregative data (e.g., min/max prices).
+-   **Enhanced No-Matches Handling:** When no relevant information is found, provides clear responses and automatically collects visitor contact information for follow-up, marking questions as unanswered for admin review.
+-   **Dynamic Prompt Construction:** Creates detailed prompts with client-specific instructions, incorporating aggregated structured data from Supabase.
 - **`src/services/user-service.js` (User Management Service):** Manages user accounts (admins and promoters) in the **Supabase `users` table** and their assigned listings in the **Supabase `agent_listings` table**. Provides CRUD operations and methods for fetching user-specific data.
 - **Chat History for RAG:** Chat history turns are now stored in Pinecone for RAG context via `src/services/chat-history-service.js`. Each message embedding includes `visitor_id`, `client_id`, and `session_id` as metadata. Full text of chat history is referenced in Supabase, specifically in the `chat_messages` table.
 - **Asynchronous Document Ingestion Pipeline:** A separate, configurable service responsible for:
@@ -28,7 +30,7 @@ The backend is a Node.js application using Express.js. Its primary responsibilit
   - **Embedding & Upserting:** Generating vector embeddings and writing the data to the data to the vector database with rich metadata (`client_id`, `listing_id`, `development_id`, etc.).
 - **`src/services/development-service.js` (Development Service):** Manages development records in Supabase.
 - **Fallback & Notification Service:** Manages behavior when context validation fails (e.g., an invalid `listing_id`). Triggers admin notifications for critical errors like data sync issues.
-- **`src/services/visitor-service.js` (Visitor Service):** Manages visitor sessions and tracks interactions for lead scoring.
+- **`src/services/visitor-service.js` (Visitor Service):** Manages visitor sessions, tracks interactions for lead scoring, and handles contact information collection and updates.
 - **`src/services/unanswered_question_service.js` (Unanswered Questions Service):** Provides comprehensive management of unanswered chatbot questions with RBAC support, including status updates, direct replies, and AI-assisted response generation.
 - **`src/services/communication_service.js` (Communication Service):** Handles email and SMS communication for direct replies to visitors, with placeholder implementations for future integration with email/SMS providers.
 
@@ -157,10 +159,10 @@ Clients can upload two types of documents:
 The frontend UI includes confirmation dialogues to prevent miscategorization. On the backend, an asynchronous worker processes these submissions, chunks and tags the content based on client rules, and **simultaneously updates the Supabase `listings` table with extracted structured metadata and upserts the vectors into Pinecone** with the appropriate `{ client_id, listing_id, development_id }` metadata.
 
 #### Retrieval Logic
-The RAG service uses a refined retrieval strategy to ensure comprehensive and context-aware responses. When a query is received:
+The RAG service uses a **secure, multi-tenant retrieval strategy** to ensure comprehensive and context-aware responses while maintaining strict client isolation. When a query is received:
 
 -   **If a `listing_id` is present in the external context:**
-    1.  A **targeted search** is performed to retrieve chunks specifically matching that `listing_id`.
+    1.  A **targeted search** is performed to retrieve chunks specifically matching that `listing_id` within the client's namespace.
     2.  If an associated `development_id` is also present, an additional **targeted search** is performed for documents matching that `development_id`.
     3.  A **broad search** is also performed to retrieve general documents (where `listing_id` and `development_id` are `null`) and other relevant documents that match query filters (e.g., for comparative queries).
     4.  Results from all targeted and broad searches are combined and re-ranked to form the context for the generative model. This ensures that specific listing details are prioritized, followed by development details, while still allowing for broader comparisons and general information retrieval.
@@ -172,6 +174,8 @@ The RAG service uses a refined retrieval strategy to ensure comprehensive and co
 
 -   **If no `listing_id` or `development_id` is present (e.g., on the homepage):**
     1.  A **broad search** is performed to retrieve relevant documents based on the query and any extracted filters.
+
+-   **Security Enhancement:** All searches are **strictly contained within the client's Pinecone namespace**, preventing any cross-client data leakage. Dangerous cross-namespace fallback mechanisms have been removed.
 
 ```mermaid
 graph TD
@@ -197,8 +201,11 @@ graph TD
         K --> N[Combine Results];
         L --> N;
         M --> N;
-        N --> O[Re-rank & Generate Response];
-        O --> P((Chatbot Response));
+        N --> O{Re-rank & Generate Response};
+        O --> Q{No Matches?};
+        Q -- "Yes" --> R[Mark as Unanswered<br>Request Contact Info];
+        Q -- "No" --> P((Chatbot Response));
+        R --> P;
     end
 
     style A fill:#f9f,stroke:#333,stroke-width:2px
@@ -209,7 +216,12 @@ end
 ```
 
 #### Automated Tagging Strategies
-The ingestion pipeline is designed to support a multi-tiered approach to automated tagging, allowing for flexibility and future expansion.
+The ingestion pipeline implements a sophisticated **hybrid tagging approach** that combines LLM-based semantic analysis with programmatic structured data tagging for optimal retrieval performance.
+
+- **Hybrid Tag Generation Process:**
+    1.  **LLM-based Semantic Tagging:** The LLM analyzes the listing's free-text `description` to extract contextual and semantic tags (e.g., `location:near_beach`, `feature:natural_light`).
+    2.  **Programmatic Tagging:** The service programmatically converts key structured fields from the listing (e.g., `price`, `beds`, `baths`, `duplex`, `listing_status`) into standardized `key:value` tags.
+    -   This hybrid approach ensures that all critical structured data is consistently tagged while leveraging the LLM for nuanced understanding of the unstructured text, and prevents data duplication.
 
 - **Standard Tagging (Default):** At a minimum, every document chunk is automatically tagged with its essential context: `client_id`, `listing_id` (which is `null` for general or development documents), and `development_id` (which is `null` for general or listing documents). This forms the foundation for context-aware retrieval.
 

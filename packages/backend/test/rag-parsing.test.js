@@ -15,10 +15,29 @@ describe('rag-parsing utils', () => {
     expect(isAggregativePriceQuery('ola')).to.equal(false);
   });
   it('extracts query filters', () => {
-    const filters = extractQueryFilters('menos de 300.000€ e 2 quartos com varanda');
+    const filters = extractQueryFilters('menos de 300.000€ e 2 quartos com varanda', null, null);
     expect(filters.price_eur).to.be.an('object');
     expect(filters.num_bedrooms === 2 || (filters.num_bedrooms && filters.num_bedrooms.$eq === 2)).to.be.true;
-    expect(filters.has_balcony).to.equal(true);
+    // Note: has_balcony is no longer supported without clientConfig - dynamic tagging_rules required
+  });
+  it('detects intent for bedroom area', () => {
+    const filters = extractQueryFilters('qual o tamanho do quarto?', null, null);
+    expect(filters.intent_query_bedroom_area).to.equal(true);
+    expect(filters.intent_query_bathroom_area).to.be.undefined;
+  });
+  it('detects intent for bathroom area with casa de banho', () => {
+    const filters = extractQueryFilters('qual o tamanho da casa de banho?', null, null);
+    expect(filters.intent_query_bathroom_area).to.equal(true);
+    expect(filters.intent_query_bedroom_area).to.be.undefined;
+  });
+  it('detects intent for bathroom area with quarto de banho', () => {
+    const filters = extractQueryFilters('qual o tamanho do quarto de banho?', null, null);
+    expect(filters.intent_query_bathroom_area).to.equal(true);
+    expect(filters.intent_query_bedroom_area).to.be.undefined;
+  });
+  it('does not misclassify quarto de banho as bedroom', () => {
+    const filters = extractQueryFilters('qual o tamanho do quarto de banho?', null, null);
+    expect(filters.intent_query_bedroom_area).to.be.undefined;
   });
 });
 

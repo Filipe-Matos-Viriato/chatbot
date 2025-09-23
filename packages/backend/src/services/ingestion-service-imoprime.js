@@ -1,8 +1,7 @@
-/**
- * @fileoverview Service for ingesting documents into Pinecone.
- * @filelocation packages/backend/src/services/ingestion-service-imoprime.js
- * @description Handles document processing, chunking, and embedding for the ImoPrime project.
- */
+// packages/backend/src/services/ingestion-service-imoprime.js
+// Service for processing and ingesting documents into Pinecone vector database for the ImoPrime client.
+// To enable document ingestion pipeline that converts text documents into searchable vector embeddings.
+// Relevant files: config/openai.js, config/pinecone.js, rag-service.js
 
 import { getEmbedding } from '../config/openai.js';
 import pinecone from '../config/pinecone.js';

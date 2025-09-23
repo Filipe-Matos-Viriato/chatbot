@@ -1,3 +1,7 @@
+// packages/backend/src/services/nlp-extraction-service.js
+// Service for extracting structured real estate data from text using regex and LLM.
+// To parse unstructured text into structured metadata for better search and filtering.
+// Relevant files: config/openai.js, services/ingestion-service-pdf.js
 import OpenAI from 'openai';
 import path from 'path';
 import { fileURLToPath } from 'url';

@@ -15,9 +15,20 @@ create table public.listings (
   client_name text null,
   user_id uuid null,
   listing_uuid uuid not null default gen_random_uuid (),
+  total_area numeric null,
+  private_area numeric null,
+  duplex boolean null default false,
   constraint listings_listing_uuid_pkey primary key (listing_uuid),
-  constraint fk_user foreign KEY (user_id) references users (id) on delete set null,
   constraint listings_development_id_fkey foreign KEY (development_id) references developments (id) on delete CASCADE,
+  constraint fk_user foreign KEY (user_id) references users (id) on delete set null,
+  constraint listings_total_area_check check ((total_area > (0)::numeric)),
+  constraint listings_listing_status_check check (
+    (
+      listing_status = any (
+        array['available'::text, 'reserved'::text, 'sold'::text]
+      )
+    )
+  ),
   constraint listings_current_state_check check (
     (
       current_state = any (
@@ -29,13 +40,7 @@ create table public.listings (
       )
     )
   ),
-  constraint listings_listing_status_check check (
-    (
-      listing_status = any (
-        array['available'::text, 'reserved'::text, 'sold'::text]
-      )
-    )
-  )
+  constraint listings_private_area_check check ((private_area > (0)::numeric))
 ) TABLESPACE pg_default;
 
 

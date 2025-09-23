@@ -1,3 +1,7 @@
+// packages/backend/src/utils/structured-logger.js
+// Utility for creating structured JSON loggers with timing capabilities.
+// To provide consistent, parseable logging across the application.
+// Relevant files: rag-service.js
 export function createLogger(scope) {
   const base = { scope };
   return {

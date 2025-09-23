@@ -78,6 +78,6 @@ The lead score is a hybrid score (maximum 100 points) composed of three main com
 **Details:** After fixing the `TypeError: Cannot stub non-existent property extractText`, new assertion errors appeared, indicating issues with test setup or logic regarding `extractText` and Pinecone upsert calls. The `extractText` stub's `calledOnce` property is not behaving as expected across test runs, and the `upsert` is being called in the unsupported file type test when it shouldn't be.
 **Files to investigate:**
 - `packages/backend/test/unit/ingestion.test.js`
-- `packages/backend/src/services/ingestion-service.js`
+- `packages/backend/src/services/ingestion-service_V2.js`
 
 ## f the widget is embedded on a page that doesn't explicitly set data-client-id to a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 (Imoprime), it will default to the Up Investments ID, causing it to query for Up Investments data even when the user expects Imoprime data

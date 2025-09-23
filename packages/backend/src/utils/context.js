@@ -1,7 +1,11 @@
+// packages/backend/src/utils/context.js
+// Utility functions for building and managing context from vector search results.
+// To prepare contextual information for LLM prompts in the RAG system.
+// Relevant files: rag-service.js
 import { encode } from 'gpt-3-encoder';
 
 export function pickText(meta) {
-  return (meta?.text || meta?.chunk || meta?.content || meta?.body || meta?.page_text || '').toString();
+  return (meta?.chunk_text || meta?.text || meta?.chunk || meta?.content || meta?.body || meta?.page_text || '').toString();
 }
 
 export function buildContext({ pageContext = '', matches = [] }) {

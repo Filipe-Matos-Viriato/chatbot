@@ -1,8 +1,7 @@
-/**
- * @fileoverview Configuration for OpenAI API.
- * @filelocation packages/backend/src/config/openai.js
- * @description Provides functions to interact with OpenAI's API, particularly for embeddings.
- */
+// packages/backend/src/config/openai.js
+// Configuration module for OpenAI API integration, providing embedding generation functionality.
+// To centralize OpenAI API setup and provide reusable functions for text embeddings used in the RAG pipeline.
+// Relevant files: rag-service.js, config/pinecone.js
 
 import OpenAI from 'openai';
 // Ensure environment variables are loaded when running standalone scripts

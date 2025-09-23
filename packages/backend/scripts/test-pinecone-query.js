@@ -141,19 +141,65 @@ async function listNamespaces() {
 }
 
 /**
+ * Test specific queries that are failing in the chatbot
+ */
+async function testSpecificQueries() {
+  console.log('\n🔍 TESTING SPECIFIC FAILING QUERIES FOR LISTING 4270');
+
+  const index = pinecone.index(PINECONE_INDEX_NAME);
+  const queries = [
+    "tem terraço?",
+    "qual é a area do quarto?"
+  ];
+
+  for (const query of queries) {
+    console.log(`\n--- Testing query: "${query}" ---`);
+
+    const embedding = await getEmbedding(query);
+
+    try {
+      // Query in client namespace with listing_id filter
+      const queryResponse = await index.namespace(CLIENT_ID).query({
+        vector: embedding,
+        topK: 10,
+        includeMetadata: true,
+        filter: {
+          listing_id: "4270"
+        }
+      });
+
+      console.log(`✅ Found ${queryResponse.matches.length} matches for "${query}"`);
+      if (queryResponse.matches.length > 0) {
+        console.log('Top matches:');
+        queryResponse.matches.slice(0, 3).forEach((match, i) => {
+          console.log(`  ${i+1}. Score: ${match.score.toFixed(4)}`);
+          console.log(`     Chunk: "${match.metadata.chunk_text?.substring(0, 100)}..."`);
+          console.log(`     Tags: ${JSON.stringify(match.metadata.generated_tags?.slice(0, 5))}`);
+        });
+      } else {
+        console.log('❌ No matches found!');
+      }
+    } catch (error) {
+      console.error(`❌ Error testing "${query}":`, error);
+    }
+  }
+}
+
+/**
  * Main function
  */
 async function main() {
   console.log('🚀 PINECONE TEST QUERY SCRIPT');
   console.log(`📊 Index: ${PINECONE_INDEX_NAME}`);
   console.log(`👤 Client ID: ${CLIENT_ID}`);
-  
+
   try {
     await listNamespaces();
     await testQueryAll();
     await testQueryWithClientFilter();
     await testQueryInClientNamespace();
-    
+    await testSpecificQueries();
+
     console.log('\n✅ TEST COMPLETE');
   } catch (error) {
     console.error('\n❌ TEST FAILED:', error);

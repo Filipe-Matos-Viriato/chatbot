@@ -4,6 +4,7 @@ create table public.chat_messages (
   session_id text null,
   client_id uuid not null,
   message_text text null,
+  name text null,
   sender_role text null,
   timestamp timestamp with time zone not null default now(),
   listing_id text null,

@@ -1,3 +1,8 @@
+// packages/frontend/src/dashboard/admin-dashboard/components/ClientSearch.jsx
+// Defines a search component for filtering clients by name in the admin dashboard.
+// This file exists to provide search functionality for the client management interface.
+// packages/frontend/src/dashboard/admin-dashboard/ClientManagementTab.jsx, packages/frontend/src/dashboard/admin-dashboard/components/ClientListTable.jsx, packages/frontend/src/context/ClientContext.jsx, packages/frontend/src/config/apiClient.js
+
 import React, { useState } from 'react';
 
 const ClientSearch = ({ onSearch }) => {

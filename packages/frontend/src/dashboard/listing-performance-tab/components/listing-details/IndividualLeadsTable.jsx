@@ -42,11 +42,11 @@ const IndividualLeadsTable = ({ listingName, leads, onOpenChatHistory }) => {
 
     const getSortIcon = (column) => {
         if (sortColumn === column) {
-            return sortDirection === 'asc' ? ' ▲' : ' ▼';
+            return sortDirection === 'asc' ? ' ↑' : ' ↓';
         }
         // Show double arrow for sortable columns when not currently sorted
         if (column === 'lead_score' || column === 'created_at') {
-            return ' ▲▼';
+            return ' ⇅';
         }
         return '';
     };
