@@ -24,6 +24,7 @@ const ChatInterfaceTesting = () => {
   const [visitorId, setVisitorId] = useState(null); // Initialize as null, will be fetched dynamically
   const [listings, setListings] = useState([]); // New state for listings
   const [selectedListingId, setSelectedListingId] = useState(''); // New state for selected listing ID
+  const [suggestedQuestions, setSuggestedQuestions] = useState([]); // New state for suggested questions
   const messagesEndRef = useRef(null);
 
   // Hardcode client ID for testing purposes as requested by the user
@@ -83,11 +84,55 @@ const ChatInterfaceTesting = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async () => {
-    if (input.trim()) {
-      const userMessage = { from: 'user', text: input };
+  const fetchSuggestedQuestions = async () => {
+    console.log("[FRONTEND] fetchSuggestedQuestions called");
+    try {
+      const context = selectedListingId !== '' ? { type: 'listing', value: selectedListingId } : null;
+      const chatHistory = messages.slice(1); // Exclude the initial bot greeting
+
+      console.log("[FRONTEND] Context:", context);
+      console.log("[FRONTEND] Chat history length:", chatHistory.length);
+      console.log("[FRONTEND] Chat history:", chatHistory);
+
+      const response = await fetch(`${API_BASE_URL}/api/suggested-questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-client-id': TEST_CLIENT_ID,
+        },
+        body: JSON.stringify({
+          context,
+          chatHistory,
+          clientId: TEST_CLIENT_ID
+        }),
+      });
+
+      console.log("[FRONTEND] Response status:", response.status);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log("[FRONTEND] Response data:", data);
+        setSuggestedQuestions(data.questions || []);
+        console.log("[FRONTEND] Set suggested questions:", data.questions || []);
+      } else {
+        console.error("[FRONTEND] Failed to fetch suggested questions:", response.status);
+        const errorText = await response.text();
+        console.error("[FRONTEND] Error response:", errorText);
+        setSuggestedQuestions([]);
+      }
+    } catch (error) {
+      console.error("[FRONTEND] Error fetching suggested questions:", error);
+      setSuggestedQuestions([]);
+    }
+  };
+
+  const handleSend = async (messageText = null) => {
+    const textToSend = messageText || input.trim();
+    if (textToSend) {
+      const userMessage = { from: 'user', text: textToSend };
       setMessages(prev => [...prev, userMessage]);
       setInput('');
+      setSuggestedQuestions([]); // Clear previous suggested questions
       setIsLoading(true);
 
       try {
@@ -98,7 +143,7 @@ const ChatInterfaceTesting = () => {
             'x-client-id': TEST_CLIENT_ID, // Use hardcoded client ID
           },
           body: JSON.stringify({
-            query: input,
+            query: textToSend,
             context: selectedListingId !== '' ? { listingId: selectedListingId } : null,
             session_id: sessionId,
             visitor_id: visitorId,
@@ -113,6 +158,9 @@ const ChatInterfaceTesting = () => {
         }
         const botMessage = { from: 'bot', text: data.response };
         setMessages(prev => [...prev, botMessage]);
+
+        // Fetch new suggested questions after the bot has responded
+        fetchSuggestedQuestions();
       } catch (error) {
         console.error("Failed to send message:", error);
         const errorMessage = { from: 'bot', text: 'Sorry, I am having trouble connecting.' };
@@ -121,6 +169,10 @@ const ChatInterfaceTesting = () => {
         setIsLoading(false);
       }
     }
+  };
+
+  const handleSuggestedQuestionClick = (question) => {
+    handleSend(question);
   };
 
   return (
@@ -171,23 +223,51 @@ const ChatInterfaceTesting = () => {
           )}
           <div ref={messagesEndRef} />
         </div>
-        <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#f9fafb' }}>
-          <input
-            type="text"
-            placeholder="Type your message..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            disabled={isLoading || !visitorId} // Disable if loading or visitorId is not set
-            style={{ flexGrow: 1, padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={isLoading || !visitorId} // Disable if loading or visitorId is not set
-            style={{ padding: '8px 16px', backgroundColor: '#3b82f6', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', opacity: (isLoading || !visitorId) ? 0.7 : 1 }}
-          >
-            Send
-          </button>
+        <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+          {suggestedQuestions.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '8px' }}>Suggested Questions:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {suggestedQuestions.map((question, index) => (
+                  <button
+                    key={index}
+                    onClick={() => handleSuggestedQuestionClick(question)}
+                    disabled={isLoading || !visitorId}
+                    style={{
+                      padding: '6px 12px',
+                      backgroundColor: '#e5e7eb',
+                      color: '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '16px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      opacity: (isLoading || !visitorId) ? 0.7 : 1
+                    }}
+                  >
+                    {question}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="text"
+              placeholder="Type your message..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+              disabled={isLoading || !visitorId} // Disable if loading or visitorId is not set
+              style={{ flexGrow: 1, padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }}
+            />
+            <button
+              onClick={() => handleSend()}
+              disabled={isLoading || !visitorId} // Disable if loading or visitorId is not set
+              style={{ padding: '8px 16px', backgroundColor: '#3b82f6', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', opacity: (isLoading || !visitorId) ? 0.7 : 1 }}
+            >
+              Send
+            </button>
+          </div>
         </div>
       </div>
     </div>

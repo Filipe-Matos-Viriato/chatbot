@@ -630,12 +630,16 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       const { context, chatHistory } = req.body;
       const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
 
-      console.log(`[${clientConfig.clientName || clientConfig.clientId}] Generating suggested questions.`);
+      console.log(`[BACKEND] /api/suggested-questions called for client: ${clientConfig.clientName || clientConfig.clientId}`);
+      console.log(`[BACKEND] Context received:`, context);
+      console.log(`[BACKEND] Chat history length:`, chatHistory ? chatHistory.length : 0);
+      console.log(`[BACKEND] Chat history:`, chatHistory);
 
       const questions = await generateSuggestedQuestions(clientConfig, context, chatHistory, userContext);
+      console.log(`[BACKEND] Generated questions:`, questions);
       res.json({ questions });
     } catch (error) {
-      console.error('Error generating suggested questions:', error);
+      console.error('[BACKEND] Error generating suggested questions:', error);
       res.status(500).json({ error: 'Failed to generate suggested questions.' });
     }
   });

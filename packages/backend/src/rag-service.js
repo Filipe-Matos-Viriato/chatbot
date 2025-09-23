@@ -11,7 +11,7 @@ import * as developmentService from './services/development-service.js';
 import visitorService from './services/visitor-service.js';
 import { withTimeout } from './utils/async-timeout.js';
 import { reRankMatches } from './utils/rerank.js';
-import { buildContext, pickText } from './utils/context.js';
+import { buildContext, pickText, buildContextFromMatches } from './utils/context.js';
 import { renderTemplate } from './utils/prompt.js';
 import { createLogger } from './utils/structured-logger.js';
 import { extractListingIdFromUrl, extractListingIdFromQuery, extractQueryFilters, isAggregativePriceQuery, QUERY_SCOPE } from './utils/rag-parsing.js';
@@ -270,46 +270,12 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
 async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false, visitorId = null) {
   let aggregativeContext = '';
-  let pageContext = '';
 
-  // 1. Prefer targeted listing context over page URL, to avoid mixing contexts
+  // 1. Determine context IDs
   const listingIdFromUrl = extractListingIdFromUrl(pageUrl);
   const targetedListingId = externalContext?.value;
   const preferredListingId = targetedListingId || listingIdFromUrl || null;
-  if (preferredListingId) {
-    try {
-      const listing = await listingService.getListingById(preferredListingId);
-      let developmentName = null;
-      if (listing && listing.development_id) {
-        try {
-          const development = await developmentService.getDevelopmentById(listing.development_id);
-          if (development) {
-            developmentName = development.name;
-            console.log(`[${clientConfig.clientName}] Fetched development name: ${developmentName} for listing ${preferredListingId}`);
-          }
-        } catch (error) {
-          console.warn(`[${clientConfig.clientName}] Failed to fetch development details for ID ${listing.development_id}:`, error.message);
-        }
-      }
-
-      if (listing) {
-        pageContext = `O utilizador está interessado no seguinte imóvel:
- - **Nome:** ${listing.name}
- - **ID:** ${listing.id}
- - **Preço:** €${Number(listing.price).toLocaleString('pt-PT')}
- - **Tipo:** ${listing.type}
- - **Quartos:** ${listing.beds}
- - **Casas de Banho:** ${listing.baths}
- - **Comodidades:** ${listing.amenities ? listing.amenities.join(', ') : 'N/A'}
- ${developmentName ? `- **Empreendimento:** ${developmentName}` : ''}
- ---
-`;
-        console.log(`[${clientConfig.clientName}]  enriched context with data for listing ID: ${preferredListingId} (preferred)`);
-      }
-    } catch (error) {
-      console.error(`[${clientConfig.clientName}] failed to fetch listing data for ID ${preferredListingId}:`, error);
-    }
-  }
+  const contextDevelopmentId = externalContext?.developmentId || (externalContext?.type === 'development' ? externalContext.value : clientConfig.defaultDevelopmentId);
 
   if (isAggregativePriceQuery(query)) {
     try {
@@ -409,27 +375,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
-  // Prioritize targeted listing's text in the context
-  let targetedListingText = '';
-  if (targetedListingId && queryResponse.matches.length > 0) {
-    const targetedMatch = queryResponse.matches.find(m =>
-      (m.metadata?.listing_id === targetedListingId) ||
-      (m.metadata?.development_id === targetedListingId) // Also check for development ID if it's a targeted development
-    );
-    if (targetedMatch) {
-      targetedListingText = pickText(targetedMatch.metadata);
-      if (targetedListingText) {
-        console.log(`[${clientConfig.clientName}] Prioritizing text from targeted listing ID: ${targetedListingId}`);
-      }
-    }
-  }
-
-  let context = buildContext({ pageContext, matches: queryResponse.matches });
-
-  // Prepend targeted listing text to the context if found and not already at the very beginning, but not for GENERAL_FILTERED
-  if (targetedListingText && !context.startsWith(targetedListingText) && queryScope !== QUERY_SCOPE.GENERAL_FILTERED) {
-    context = targetedListingText + "\n\n---\n\n" + context;
-  }
+  let context = buildContextFromMatches(queryResponse.matches, preferredListingId, contextDevelopmentId);
 
   try {
     const citations = queryResponse.matches.slice(0, 5).map(m => {
@@ -513,24 +459,19 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       }
     }
 
-    // Build response based on whether we have contact info
-    if (!pageContext) {
-      // Use configurable fallback responses from client config
-      const fallbackWithContact = clientConfig.prompts?.fallbackResponseWithContact ||
-        "Desculpe, não encontrei informações específicas na nossa base de dados que respondam completamente à sua pergunta. Os nossos especialistas irão analisar a sua questão e entrarão em contacto consigo em breve para fornecer uma resposta personalizada.";
-
-      const fallbackWithoutContact = clientConfig.prompts?.fallbackResponseWithoutContact ||
-        "Desculpe, não encontrei informações específicas na nossa base de dados que respondam à sua pergunta. Para que possamos ajudá-lo melhor, poderia fornecer o seu email ou número de telefone? Entraremos em contacto consigo com uma resposta personalizada.";
-
-      if (hasContactInfo) {
-        context = fallbackWithContact;
-      } else {
-        context = fallbackWithoutContact;
-      }
-      console.log(`[${clientConfig.clientName}] 📝 Using configurable no-matches response with ${hasContactInfo ? 'contact follow-up' : 'contact request'}`);
+    // Use configurable fallback responses from client config
+    const fallbackWithContact = clientConfig.prompts?.fallbackResponseWithContact ||
+      "Desculpe, não encontrei informações específicas na nossa base de dados que respondam completamente à sua pergunta. Os nossos especialistas irão analisar a sua questão e entrarão em contacto consigo em breve para fornecer uma resposta personalizada.";
+  
+    const fallbackWithoutContact = clientConfig.prompts?.fallbackResponseWithoutContact ||
+      "Desculpe, não encontrei informações específicas na nossa base de dados que respondam à sua pergunta. Para que possamos ajudá-lo melhor, poderia fornecer o seu email ou número de telefone? Entraremos em contacto consigo com uma resposta personalizada.";
+  
+    if (hasContactInfo) {
+      context = fallbackWithContact;
     } else {
-      console.log(`[${clientConfig.clientName}] ✅ Using page context only (no Pinecone matches).`);
+      context = fallbackWithoutContact;
     }
+    console.log(`[${clientConfig.clientName}] 📝 Using configurable no-matches response with ${hasContactInfo ? 'contact follow-up' : 'contact request'}`);
 
     // Mark question as unanswered (will be done in index.js after response)
     console.log(`[${clientConfig.clientName}] Question will be marked as unanswered`);
@@ -643,6 +584,9 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   // CRITICAL INSTRUCTION: Never negate features mentioned in context
   systemPrompt += `\n\n*** INSTRUÇÃO ABSOLUTA E PRIORITÁRIA: SE O CONTEXTO MENCIONAR UMA CARACTERÍSTICA (como terraço, piscina, etc.), NUNCA NEGUE A SUA EXISTÊNCIA. CONFIRME SEMPRE A PRESENÇA SE ESTIVER MENCIONADA. ***`;
 
+  // CRITICAL INSTRUCTION: Context structure
+  systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O contexto é dividido em seções. Para o imóvel principal, há 'Ficha Técnica' (dados estruturados) e 'Descrição Adicional' (texto descritivo). Sintetize informações de AMBAS as seções do imóvel principal para criar uma resposta completa e conversacional. Use a seção 'Outros Imóveis Relevantes' APENAS se o usuário pedir explicitamente uma comparação. Mantenha um tom fluido e amigável, como um corretor de imóveis experiente.`;
+
   // Intent-based instructions for extracting specific numerical details
   if (queryFilters?.intent_query_bedroom_area) {
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área do quarto. DEVE procurar no contexto fornecido informações sobre a área do quarto (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
@@ -711,12 +655,20 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 }
 
 async function generateSuggestedQuestions(clientConfig, externalContext = null, chatHistory = [], userContext = null) {
+  console.log(`[RAG-SERVICE] generateSuggestedQuestions called for client: ${clientConfig.clientName || clientConfig.clientId}`);
+  console.log(`[RAG-SERVICE] External context:`, externalContext);
+  console.log(`[RAG-SERVICE] Chat history length:`, chatHistory ? chatHistory.length : 0);
+
   let searchQuery = "general information";
   if (externalContext && externalContext.type === 'listing' && externalContext.value) {
-    searchQuery = `information about ${externalContext.value}`;
+    searchQuery = `questions about real estate listing ${externalContext.value}`;
+  } else if (externalContext && externalContext.type === 'development' && externalContext.value) {
+    searchQuery = `questions about real estate development ${externalContext.value}`;
   } else if (chatHistory.length > 0) {
     searchQuery = chatHistory.map(m => m.text).join(' ');
   }
+
+  console.log(`[RAG-SERVICE] Generated search query: "${searchQuery}"`);
 
   let queryEmbedding;
   try {
@@ -724,6 +676,7 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
       model: embeddingModel,
       input: searchQuery,
     });
+    console.log(`[RAG-SERVICE] Embedding generated successfully, dimensions: ${queryEmbedding.data[0].embedding.length}`);
   } catch (error) {
     console.error(`[${clientConfig.clientName}] Error generating embedding for suggested questions:`, error);
     return [];
@@ -738,27 +691,48 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
   let queryResponse;
   try {
     queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, searchQuery, userContext);
+    console.log(`[RAG-SERVICE] performHybridSearch returned ${queryResponse.matches.length} matches`);
   } catch (error) {
     console.error(`[${clientConfig.clientName}] Error in performHybridSearch for suggested questions:`, error);
     return [];
   }
 
   if (!queryResponse || queryResponse.matches.length === 0) {
+    console.log(`[RAG-SERVICE] No matches found, returning empty array`);
     return [];
   }
 
+  // Log metadata for debugging
+  console.log(`[RAG-SERVICE] Inspecting match metadata:`);
+  queryResponse.matches.slice(0, 3).forEach((match, index) => {
+    console.log(`[RAG-SERVICE] Match ${index + 1} metadata keys:`, Object.keys(match.metadata || {}));
+    console.log(`[RAG-SERVICE] Match ${index + 1} metadata.text:`, match.metadata?.text ? match.metadata.text.substring(0, 100) + '...' : 'undefined');
+  });
+
   const context = queryResponse.matches
-    .map(match => match.metadata.text)
+    .map(match => pickText(match.metadata))
+    .filter(text => text && text.trim().length > 0)
     .join('\n\n---\n\n');
 
+  console.log(`[RAG-SERVICE] Built context for LLM, length: ${context.length} characters`);
+  console.log(`[RAG-SERVICE] Context content:`, context);
+
   const prompt = `
-    Based on the following context, generate exactly three distinct, relevant, and concise questions a user might ask.
-    Format the output as a JSON array of strings. For example: ["Question 1", "Question 2", "Question 3"].
-    If you cannot generate three relevant questions from the context, return an empty array [].
+    You are a real estate chatbot assistant. Based on the following context about a real estate listing or development, generate exactly three distinct, relevant, and concise questions that a potential buyer or tenant might ask about this property.
+
+    IMPORTANT: All questions must be specifically related to real estate, property features, pricing, location, or buying/renting process. Do not generate questions about unrelated topics like technology, healthcare, or general knowledge.
+
+    CRITICAL: Each question must be answerable using the information provided in the context below. Only generate questions that can be answered based on the available knowledge base content. If the context doesn't contain enough information to generate three answerable questions, return fewer questions or an empty array.
+
+    Format the output as a JSON object with a "questions" key containing an array of strings.
+    For example: {"questions": ["What is the price of this property?", "Does it have a garage?", "What is the neighborhood like?"]}.
+    If you cannot generate three relevant real estate questions from the context, return {"questions": []}.
 
     Context:
     ${context}
   `;
+
+  console.log(`[RAG-SERVICE] Sending prompt to LLM`);
 
   try {
     const completion = await openai.chat.completions.create({
@@ -767,11 +741,22 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
         response_format: { type: "json_object" },
       });
     const responseText = completion.choices[0].message.content;
+    console.log(`[RAG-SERVICE] LLM response:`, responseText);
+
+    // Check if responseText is empty or null
+    if (!responseText || responseText.trim() === '') {
+      console.error(`[RAG-SERVICE] LLM returned empty response`);
+      return [];
+    }
+
     // Basic validation to ensure the response is a parsable JSON array.
     const parsed = JSON.parse(responseText);
-    return Array.isArray(parsed) ? parsed : (parsed.questions && Array.isArray(parsed.questions) ? parsed.questions : []);
+    const questions = Array.isArray(parsed) ? parsed : (parsed.questions && Array.isArray(parsed.questions) ? parsed.questions : []);
+    console.log(`[RAG-SERVICE] Parsed questions:`, questions);
+    return questions;
   } catch (error) {
-    console.error("Failed to generate or parse suggested questions:", error);
+    console.error("[RAG-SERVICE] Failed to generate or parse suggested questions:", error);
+    console.error("[RAG-SERVICE] Error details:", error.message);
     return [];
   }
 }

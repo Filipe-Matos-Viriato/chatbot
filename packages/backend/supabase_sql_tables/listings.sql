@@ -18,6 +18,7 @@ create table public.listings (
   total_area numeric null,
   private_area numeric null,
   duplex boolean null default false,
+  description text null,
   constraint listings_listing_uuid_pkey primary key (listing_uuid),
   constraint listings_development_id_fkey foreign KEY (development_id) references developments (id) on delete CASCADE,
   constraint fk_user foreign KEY (user_id) references users (id) on delete set null,
