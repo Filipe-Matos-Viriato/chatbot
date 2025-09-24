@@ -3,7 +3,7 @@
 // It allows specifying client ID, optional development ID, and batch size to process listings.
 // Relevant files: packages/backend/src/services/ingestion-service_V2.js, packages/backend/src/services/client-config-service.js
 
-require('dotenv').config({ path: './packages/backend/.env' });
+require('dotenv').config({ path: './.env' });
 
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');

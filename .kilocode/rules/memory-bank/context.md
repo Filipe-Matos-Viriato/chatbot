@@ -7,6 +7,12 @@ The primary focus has shifted to implementing comprehensive dashboard features f
 - **Common Questions Feature Status:** The "Common Questions about this Listing" feature now leverages pre-calculated and pre-clustered questions for improved performance and accuracy. The in-process K-Means clustering algorithm has been implemented to group semantically similar questions, and a dedicated API endpoint serves these pre-calculated common questions.
 
 ## Recent Changes
+- **Dynamic Intent Recognition Implementation:** ✅ **COMPLETED** - Successfully refactored the intent recognition system to be fully database-driven and configurable per client.
+    - **Database Configuration:** Updated the `tagging_rules` column in the `clients` table with a unified structure supporting both features (simple keyword arrays) and intents (objects with keywords and prompt instructions).
+    - **Query Processing Refactor:** Modified `extractQueryFilters` in `packages/backend/src/utils/rag-parsing.js` to dynamically process both feature filtering and intent detection from the database configuration, eliminating all hardcoded logic.
+    - **Prompt Injection Update:** Updated `rag-service.js` to dynamically inject matched intent instructions into the LLM system prompt, replacing hardcoded conditional blocks.
+    - **Benefits:** The system is now fully configurable per client without code changes, supports internationalization, and correctly differentiates between general feature mentions (e.g., "wc") and specific intent queries (e.g., "área do wc").
+    - **Testing:** Comprehensive testing confirmed correct behavior for feature-only queries, intent queries, and non-matching queries.
 - **Ingestion Service Enhancements (`packages/backend/src/services/ingestion-service_V2.js`):**
     - Prioritized JSON extraction for `num_bathrooms` and `price_eur`, ensuring values from JSON are not overwritten by text-based regex fallbacks.
     - Added `console.log` statements for debugging `price_eur` extraction.

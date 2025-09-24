@@ -161,6 +161,73 @@ async function getPropositionalChunks(description, clientConfig) {
 }
 
 /**
+ * Generates programmatic feature tags based on structured listing data and tagging rules.
+ * @param {object} listing - The listing object.
+ * @param {object} taggingRules - The client's tagging rules from the database.
+ * @returns {array} Array of feature tag strings.
+ */
+function generateProgrammaticFeatureTags(listing, taggingRules) {
+  const featureTags = [];
+
+  // Hardcoded mapping from feature tags to listing fields
+  // This maps the tag patterns from tagging_rules to the actual fields in the listing object
+  const featureToFieldMap = {
+    'feature:bathroom': 'baths',
+    'feature:suite': 'amenities', // Check if 'suite' is in the amenities string
+    'comodidade:garagem': 'amenities', // Check if 'garagem' is in the amenities string
+    'comodidade:arrumos': 'amenities', // Check if 'arrumos' is in the amenities string
+    'comodidade:cozinha equipada': 'amenities', // Check if 'cozinha equipada' is in the amenities string
+    'comodidade:vidros duplos': 'amenities', // Check if 'vidros duplos' is in the amenities string
+    'comodidade:luz natural': 'amenities', // Check if 'luz natural' is in the amenities string
+    'comodidade:terraco': 'amenities', // Check if 'terraco' is in the amenities string
+    'comodidade:elevador': 'amenities', // Check if 'elevador' is in the amenities string
+    'tipo:apartamento': 'type', // Check if type contains 'apartamento'
+    'tipo:moradia': 'type', // Check if type contains 'moradia'
+    'tipo:imovel_de_luxo': 'type', // Check if type contains 'luxo'
+    'estilo:contemporaneo': 'type', // Check if type contains 'contemporaneo'
+    'estilo:mediterranico': 'type', // Check if type contains 'mediterranico'
+    'desc:pronto_a_habitar': 'current_state', // Check if current_state is 'finished'
+    'desc:condominio_fechado': 'amenities', // Check if amenities contain 'condominio'
+  };
+
+  // Iterate through the featureToFieldMap
+  for (const [tag, field] of Object.entries(featureToFieldMap)) {
+    if (!listing[field]) continue; // Skip if field doesn't exist or is null/undefined
+
+    if (field === 'baths' && listing[field] > 0) {
+      // For bathrooms, check if baths > 0
+      featureTags.push(tag);
+    } else if (field === 'duplex' && listing[field]) {
+      // For boolean fields like duplex
+      featureTags.push(tag);
+    } else if (field === 'amenities' && typeof listing[field] === 'string') {
+      // For amenities string, check if keywords are present
+      const keywords = taggingRules[tag];
+      if (keywords && Array.isArray(keywords) && keywords.some(kw => listing[field].toLowerCase().includes(kw.toLowerCase()))) {
+        featureTags.push(tag);
+      }
+    } else if (field === 'type' && typeof listing[field] === 'string') {
+      // For type field, check if it matches certain patterns
+      const keywords = taggingRules[tag];
+      if (keywords && Array.isArray(keywords) && keywords.some(kw => listing[field].toLowerCase().includes(kw.toLowerCase()))) {
+        featureTags.push(tag);
+      }
+    } else if (field === 'current_state' && listing[field] === 'finished') {
+      // For current_state, check if it's 'finished' for 'pronto_a_habitar'
+      featureTags.push(tag);
+    }
+  }
+
+  return featureTags;
+}
+
+/**
+ * Generates enriched tags using dynamic prompt construction and unified NLP call.
+ * @param {object} listing - The listing object.
+ * @param {object} clientConfig - The client configuration object.
+ * @returns {array} Array of generated tag strings.
+ */
+/**
  * Generates enriched tags using dynamic prompt construction and unified NLP call.
  * @param {object} listing - The listing object.
  * @param {object} clientConfig - The client configuration object.
@@ -249,10 +316,14 @@ Return only a JSON object with a single key "generated_tags" containing an array
     }
   }
 
-  // Combine LLM-generated tags with programmatically created tags, ensuring no duplicates
+  // Generate programmatic feature tags based on tagging rules
+  const featureTags = generateProgrammaticFeatureTags(listing, clientConfig.tagging_rules);
+
+  // Combine LLM-generated tags with programmatically created tags and feature tags, ensuring no duplicates
   console.log(`LLM tags (${result.generated_tags.length}):`, result.generated_tags);
   console.log(`Programmatic tags (${programmaticTags.length}):`, programmaticTags);
-  const rawCombined = [...result.generated_tags, ...programmaticTags];
+  console.log(`Feature tags (${featureTags.length}):`, featureTags);
+  const rawCombined = [...result.generated_tags, ...programmaticTags, ...featureTags];
   console.log(`Raw combined tags before deduplication (${rawCombined.length}):`, rawCombined);
   const combinedTags = [...new Set(rawCombined)];
   console.log(`Combined tags after deduplication (${combinedTags.length}):`, combinedTags);

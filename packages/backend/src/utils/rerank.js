@@ -72,7 +72,9 @@ export function reRankMatches({
             filterMatchCount++;
             console.log(`[rerank] DEBUG: generated_tags filter matched for chunk ${meta.listing_id || meta.development_id || match.id}`);
           } else {
-            console.log(`[rerank] DEBUG: generated_tags filter did NOT match for chunk ${meta.listing_id || meta.development_id || match.id}`);
+            console.log(`[rerank] DEBUG: generated_tags filter did NOT match for chunk ${meta.listing_id || meta.development_id || match.id} - EXCLUDING from results`);
+            // HARD FILTER: Return null to exclude this match entirely
+            return null;
           }
         } else if (meta[key] === queryFilters[key]) {
           filterMatchCount++;
@@ -120,6 +122,9 @@ export function reRankMatches({
 
     return { ...match, score, filterMatchCount };
   });
+
+  // Filter out null results (excluded by hard filters)
+  reRanked = reRanked.filter(match => match !== null);
 
   // Post-processing for GENERAL_FILTERED queries to ensure diversity of listings
   if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && contextListingId) {

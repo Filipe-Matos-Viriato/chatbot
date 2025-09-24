@@ -587,19 +587,23 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   // CRITICAL INSTRUCTION: Context structure
   systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O contexto é dividido em seções. Para o imóvel principal, há 'Ficha Técnica' (dados estruturados) e 'Descrição Adicional' (texto descritivo). Sintetize informações de AMBAS as seções do imóvel principal para criar uma resposta completa e conversacional. Use a seção 'Outros Imóveis Relevantes' APENAS se o usuário pedir explicitamente uma comparação. Mantenha um tom fluido e amigável, como um corretor de imóveis experiente.`;
 
-  // Intent-based instructions for extracting specific numerical details
-  if (queryFilters?.intent_query_bedroom_area) {
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área do quarto. DEVE procurar no contexto fornecido informações sobre a área do quarto (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
+  // Dynamic intent-based instructions from database configuration
+  if (queryFilters.intents && queryFilters.intents.length > 0) {
+    systemPrompt += `\n\n${queryFilters.intents.join('\n\n')}`;
   }
-  if (queryFilters?.intent_query_terrace_area) {
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área do terraço. DEVE procurar no contexto fornecido informações sobre a área do terraço (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
-  }
-  if (queryFilters?.intent_query_bathroom_area) {
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área da casa de banho. DEVE procurar no contexto fornecido informações sobre a área da casa de banho (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
-  }
-  if (queryFilters?.intent_query_living_kitchen_area) {
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: O utilizador está perguntando especificamente sobre o tamanho/área da sala/cozinha. DEVE procurar no contexto fornecido informações sobre a área da sala ou cozinha (normalmente em m² ou metros quadrados) e INCLUIR EXPLICITAMENTE essas medidas na sua resposta. Se encontrar múltiplas referências, apresente TODAS as informações relevantes. NÃO diga que a informação não está disponível se ela estiver presente no contexto.`;
-  }
+
+  // CRITICAL INSTRUCTION: Always generate suggested questions (overrides all other instructions)
+  systemPrompt += `\n\n*** INSTRUÇÃO CRÍTICA E OBRIGATÓRIA PARA PERGUNTAS SUGERIDAS ***
+APÓS a resposta principal, DEVE gerar exatamente 2-3 perguntas concretas e relevantes ainda nao respondidas, que antecipem as necessidades do visitante.
+AS PERGUNTAS DEVEM SER ESPECÍFICAS ao contexto do imóvel ou consulta, NÃO GENÉRICAS.
+NÃO use frases como "Como posso ajudá-lo mais?" ou "Se desejar mais detalhes...".
+FORMATO OBRIGATÓRIO: Apresente as perguntas em formato JSON no final da resposta, usando esta estrutura exata:
+{"suggested_questions": ["Pergunta 1?", "Pergunta 2?", "Pergunta 3?"]}
+Exemplos de perguntas concretas:
+- Para imóvel específico: "Quer saber mais detalhes sobre o terraço?", "Interessa-lhe conhecer as opções de financiamento?"
+- Para consultas gerais: "Pretende ver imóveis noutra faixa de preço?", "Tem preferências por imóveis com certas características?"
+A resposta principal deve terminar normalmente, e o JSON das perguntas sugeridas deve vir APÓS a resposta, separado por uma linha em branco.
+ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES DE PERGUNTAS - DEVE SER SEGUIDA SEMPRE.`;
 
   // Removed: systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
@@ -626,12 +630,35 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       );
       timer.end({ model: generativeModel, maxTokens: MAX_RESPONSE_TOKENS });
       const raw = completion.choices[0].message.content;
-      const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';
-      const processedResponse = removeRedundantClosingCTA(raw, previousAssistantText);
 
-      // Return both the response and the debug payload
+      // Parse suggested questions from JSON format at the end of response
+      let suggestedQuestions = [];
+      let cleanedResponse = raw;
+
+      try {
+        // Look for JSON at the end of the response
+        const jsonMatch = raw.match(/\{\s*"suggested_questions"\s*:\s*\[.*\]\s*\}\s*$/s);
+        if (jsonMatch) {
+          const jsonPart = jsonMatch[0];
+          const parsed = JSON.parse(jsonPart);
+          if (parsed.suggested_questions && Array.isArray(parsed.suggested_questions)) {
+            suggestedQuestions = parsed.suggested_questions;
+            // Remove the JSON part from the main response
+            cleanedResponse = raw.replace(jsonPart, '').trim();
+          }
+        }
+      } catch (error) {
+        console.warn(`[${clientConfig.clientName}] Failed to parse suggested questions JSON:`, error);
+        // If parsing fails, keep the original response as-is
+      }
+
+      const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';
+      const processedResponse = removeRedundantClosingCTA(cleanedResponse, previousAssistantText);
+
+      // Return response, suggested questions, and debug payload
       return {
         response: processedResponse,
+        suggestedQuestions: suggestedQuestions,
         debug: {
           openaiPayload: messages
         },

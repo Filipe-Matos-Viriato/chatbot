@@ -483,7 +483,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
       console.log(`[${clientConfig.clientName}] External context passed to RAG: ${JSON.stringify(externalCtx)}`);
 
-      const { response: responseText, debug: debugPayload, isUnanswered } = await generateResponse(
+      const { response: responseText, suggestedQuestions, debug: debugPayload, isUnanswered } = await generateResponse(
         query,
         clientConfig,
         embeddingVector,
@@ -614,7 +614,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
 
 
-      res.json({ response: responseText, debug: debugPayload });
+      res.json({ response: responseText, suggestedQuestions: suggestedQuestions || [], debug: debugPayload });
     } catch (error) {
       console.error('Error processing chat request:', error);
       const errorMessage = error.status === 503

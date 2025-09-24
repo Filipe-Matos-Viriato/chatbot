@@ -103,7 +103,7 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
   match = lowerCaseQuery.match(/menos de\s*(\d+)\s*quartos/);
   if (match) { const num = parseInt(match[1], 10); if (!isNaN(num)) filters.num_bedrooms = { "$lt": num }; }
 
-  match = lowerCaseQuery.match(/(\d+)\s*casas de banho/);
+  match = lowerCaseQuery.match(/(\d+)\s*(casas de banho|wc|banheiro|quarto de banho)/);
   if (match) { const num = parseInt(match[1], 10); if (!isNaN(num)) filters.num_bathrooms = num; }
 
   match = lowerCaseQuery.match(/menos de\s*([\d.,]+)\s*m²/);
@@ -117,39 +117,29 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
     else if (lowerCaseQuery.includes('mais alto') || lowerCaseQuery.includes('mais caro')) filters.price_eur = { "$gt": currentListingPrice };
   }
 
-  // Intent detection for specific numerical measurements
-  if ((lowerCaseQuery.includes('tamanho do quarto') || lowerCaseQuery.includes('área do quarto') ||
-      lowerCaseQuery.includes('metros quadrados do quarto') || lowerCaseQuery.includes('dimensões do quarto')) &&
-      !lowerCaseQuery.includes('quarto de banho')) {
-    filters.intent_query_bedroom_area = true;
-  }
-  if (lowerCaseQuery.includes('área do terraço') || lowerCaseQuery.includes('metros quadrados do terraço') ||
-      lowerCaseQuery.includes('tamanho do terraço') || lowerCaseQuery.includes('dimensões do terraço')) {
-    filters.intent_query_terrace_area = true;
-  }
-  if (lowerCaseQuery.includes('tamanho da casa de banho') || lowerCaseQuery.includes('área da casa de banho') ||
-      lowerCaseQuery.includes('metros quadrados da casa de banho') || lowerCaseQuery.includes('dimensões da casa de banho') ||
-      lowerCaseQuery.includes('tamanho do quarto de banho') || lowerCaseQuery.includes('área do quarto de banho') ||
-      lowerCaseQuery.includes('metros quadrados do quarto de banho') || lowerCaseQuery.includes('dimensões do quarto de banho')) {
-    filters.intent_query_bathroom_area = true;
-  }
-  if (lowerCaseQuery.includes('dimensões da sala') || lowerCaseQuery.includes('área da sala') ||
-      lowerCaseQuery.includes('metros quadrados da sala') || lowerCaseQuery.includes('tamanho da sala')) {
-    filters.intent_query_living_kitchen_area = true;
-  }
 
-  // Dynamic feature filtering using client-specific tagging_rules
+  // Dynamic feature and intent filtering using client-specific tagging_rules
   if (clientConfig && clientConfig.tagging_rules) {
     const taggingRules = clientConfig.tagging_rules;
     const matchedTags = [];
+    const intents = [];
 
     console.log(`[rag-parsing] DEBUG: Checking tagging_rules for query: "${lowerCaseQuery}"`);
     console.log(`[rag-parsing] DEBUG: Available tagging_rules keys: ${Object.keys(taggingRules)}`);
 
-    for (const [tagPattern, keywords] of Object.entries(taggingRules)) {
-      if (Array.isArray(keywords) && keywords.some(keyword => lowerCaseQuery.includes(keyword.toLowerCase()))) {
-        matchedTags.push(tagPattern);
-        console.log(`[rag-parsing] DEBUG: Matched tagPattern "${tagPattern}"`);
+    for (const [key, value] of Object.entries(taggingRules)) {
+      if (Array.isArray(value)) {
+        // Feature: Check if any keywords match the query
+        if (value.some(keyword => lowerCaseQuery.includes(keyword.toLowerCase()))) {
+          matchedTags.push(key);
+          console.log(`[rag-parsing] DEBUG: Matched feature tag "${key}"`);
+        }
+      } else if (typeof value === 'object' && value.keywords && value.prompt_instruction) {
+        // Intent: Check if any keywords match the query
+        if (value.keywords.some(keyword => lowerCaseQuery.includes(keyword.toLowerCase()))) {
+          intents.push(value.prompt_instruction);
+          console.log(`[rag-parsing] DEBUG: Matched intent "${key}"`);
+        }
       }
     }
 
@@ -157,12 +147,19 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
       filters.generated_tags = { "$all": matchedTags };
       console.log(`[rag-parsing] DEBUG: Set filters.generated_tags to: ${JSON.stringify(filters.generated_tags)}`);
     } else {
-      console.log(`[rag-parsing] DEBUG: No matched tags found in tagging_rules`);
+      console.log(`[rag-parsing] DEBUG: No matched feature tags found in tagging_rules`);
+    }
+
+    if (intents.length > 0) {
+      filters.intents = intents;
+      console.log(`[rag-parsing] DEBUG: Set filters.intents to: ${JSON.stringify(filters.intents)}`);
+    } else {
+      console.log(`[rag-parsing] DEBUG: No matched intents found in tagging_rules`);
     }
   } else {
     console.log(`[rag-parsing] DEBUG: No clientConfig.tagging_rules available`);
   }
-  // No fallback to hardcoded features - system relies entirely on dynamic configuration
+  // No fallback to hardcoded features or intents - system relies entirely on dynamic configuration
 
   return filters;
 }

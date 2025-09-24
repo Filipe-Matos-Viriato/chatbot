@@ -25,39 +25,58 @@ const ChatInterface = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [visitorId, setVisitorId] = useState('placeholder_visitor_id'); // This should be dynamic in a real app
+  const [suggestedQuestions, setSuggestedQuestions] = useState([]); // State for suggested questions at bottom
 
   useEffect(() => {
     setSessionId(generateUUID());
   }, []);
 
-  const handleSend = async () => {
-    if (input.trim()) {
-      const userMessage = { from: 'user', text: input };
-      setMessages(prev => [...prev, userMessage]);
-      setInput('');
-      setIsLoading(true);
+  const sendMessage = async (messageText) => {
+    const userMessage = { from: 'user', text: messageText };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setSuggestedQuestions([]); // Clear suggested questions when sending any message
+    setIsLoading(true);
 
-      try {
-        const response = await fetch('http://localhost:3006/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-client-id': 'client-abc' // This should be dynamic in a real app
-          },
-          body: JSON.stringify({ query: input, context: null, session_id: sessionId, visitor_id: visitorId }), // Add context if needed
-        });
+    try {
+      const response = await fetch('http://localhost:3006/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-client-id': 'client-abc' // This should be dynamic in a real app
+        },
+        body: JSON.stringify({ query: messageText, context: null, session_id: sessionId, visitor_id: visitorId }), // Add context if needed
+      });
 
-        const data = await response.json();
-        const botMessage = { from: 'bot', text: data.response };
-        setMessages(prev => [...prev, botMessage]);
-      } catch (error) {
-        console.error("Failed to send message:", error);
-        const errorMessage = { from: 'bot', text: 'Sorry, I am having trouble connecting.' };
-        setMessages(prev => [...prev, errorMessage]);
-      } finally {
-        setIsLoading(false);
+      const data = await response.json();
+      const botMessage = { from: 'bot', text: data.response };
+      setMessages(prev => [...prev, botMessage]);
+
+      // Store suggested questions at bottom instead of as messages
+      if (data.suggestedQuestions && data.suggestedQuestions.length > 0) {
+        setSuggestedQuestions(data.suggestedQuestions);
+      } else {
+        setSuggestedQuestions([]);
       }
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      const errorMessage = { from: 'bot', text: 'Sorry, I am having trouble connecting.' };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  const handleSend = () => {
+    if (input.trim()) {
+      sendMessage(input.trim());
+    }
+  };
+
+  const handleSuggestedClick = (question) => {
+    // Clear suggested questions and send as regular user message
+    setSuggestedQuestions([]);
+    sendMessage(question);
   };
 
   return (
@@ -100,15 +119,30 @@ const ChatInterface = () => {
             </div>
           )}
         </CardContent>
-        <CardFooter className="flex items-center gap-2">
-          <Input 
-            placeholder="" 
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-            disabled={isLoading}
-          />
-          <Button onClick={handleSend} disabled={isLoading}>Send</Button>
+        <CardFooter className="flex flex-col gap-2">
+          {suggestedQuestions.length > 0 && (
+            <div className="flex flex-wrap gap-2 w-full justify-end">
+              {suggestedQuestions.map((question, index) => (
+                <div
+                  key={index}
+                  onClick={() => handleSuggestedClick(question)}
+                  className="px-3 py-2 bg-white text-gray-900 rounded-lg cursor-pointer border border-blue-500 hover:bg-gray-100 transition-colors text-sm"
+                >
+                  {question}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2 w-full">
+            <Input
+              placeholder=""
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+              disabled={isLoading}
+            />
+            <Button onClick={handleSend} disabled={isLoading}>Send</Button>
+          </div>
         </CardFooter>
       </Card>
     </div>

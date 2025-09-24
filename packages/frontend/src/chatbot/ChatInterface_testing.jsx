@@ -24,7 +24,7 @@ const ChatInterfaceTesting = () => {
   const [visitorId, setVisitorId] = useState(null); // Initialize as null, will be fetched dynamically
   const [listings, setListings] = useState([]); // New state for listings
   const [selectedListingId, setSelectedListingId] = useState(''); // New state for selected listing ID
-  const [suggestedQuestions, setSuggestedQuestions] = useState([]); // New state for suggested questions
+  const [suggestedQuestions, setSuggestedQuestions] = useState([]); // State for suggested questions at bottom
   const messagesEndRef = useRef(null);
 
   // Hardcode client ID for testing purposes as requested by the user
@@ -84,47 +84,6 @@ const ChatInterfaceTesting = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const fetchSuggestedQuestions = async () => {
-    console.log("[FRONTEND] fetchSuggestedQuestions called");
-    try {
-      const context = selectedListingId !== '' ? { type: 'listing', value: selectedListingId } : null;
-      const chatHistory = messages.slice(1); // Exclude the initial bot greeting
-
-      console.log("[FRONTEND] Context:", context);
-      console.log("[FRONTEND] Chat history length:", chatHistory.length);
-      console.log("[FRONTEND] Chat history:", chatHistory);
-
-      const response = await fetch(`${API_BASE_URL}/api/suggested-questions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-client-id': TEST_CLIENT_ID,
-        },
-        body: JSON.stringify({
-          context,
-          chatHistory,
-          clientId: TEST_CLIENT_ID
-        }),
-      });
-
-      console.log("[FRONTEND] Response status:", response.status);
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log("[FRONTEND] Response data:", data);
-        setSuggestedQuestions(data.questions || []);
-        console.log("[FRONTEND] Set suggested questions:", data.questions || []);
-      } else {
-        console.error("[FRONTEND] Failed to fetch suggested questions:", response.status);
-        const errorText = await response.text();
-        console.error("[FRONTEND] Error response:", errorText);
-        setSuggestedQuestions([]);
-      }
-    } catch (error) {
-      console.error("[FRONTEND] Error fetching suggested questions:", error);
-      setSuggestedQuestions([]);
-    }
-  };
 
   const handleSend = async (messageText = null) => {
     const textToSend = messageText || input.trim();
@@ -132,7 +91,7 @@ const ChatInterfaceTesting = () => {
       const userMessage = { from: 'user', text: textToSend };
       setMessages(prev => [...prev, userMessage]);
       setInput('');
-      setSuggestedQuestions([]); // Clear previous suggested questions
+      setSuggestedQuestions([]); // Clear suggested questions when sending any message
       setIsLoading(true);
 
       try {
@@ -159,8 +118,12 @@ const ChatInterfaceTesting = () => {
         const botMessage = { from: 'bot', text: data.response };
         setMessages(prev => [...prev, botMessage]);
 
-        // Fetch new suggested questions after the bot has responded
-        fetchSuggestedQuestions();
+        // Store suggested questions at bottom instead of as messages
+        if (data.suggestedQuestions && data.suggestedQuestions.length > 0) {
+          setSuggestedQuestions(data.suggestedQuestions);
+        } else {
+          setSuggestedQuestions([]);
+        }
       } catch (error) {
         console.error("Failed to send message:", error);
         const errorMessage = { from: 'bot', text: 'Sorry, I am having trouble connecting.' };
@@ -171,7 +134,10 @@ const ChatInterfaceTesting = () => {
     }
   };
 
-  const handleSuggestedQuestionClick = (question) => {
+
+  const handleSuggestedClick = (question) => {
+    // Clear suggested questions and send as regular user message
+    setSuggestedQuestions([]);
     handleSend(question);
   };
 
@@ -203,13 +169,30 @@ const ChatInterfaceTesting = () => {
               {message.from === 'bot' && (
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#d1d5db', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#4b5563', fontWeight: 'bold' }}>CB</div>
               )}
-              <div style={{ borderRadius: '8px', padding: '8px 12px', backgroundColor: message.from === 'user' ? '#3b82f6' : '#e5e7eb', color: message.from === 'user' ? '#ffffff' : '#1f2937' }}>
+              <div style={{
+                borderRadius: '8px',
+                padding: '8px 12px',
+                backgroundColor: message.from === 'user' ? '#3b82f6' : '#e5e7eb',
+                color: message.from === 'user' ? '#ffffff' : '#1f2937'
+              }}>
                 <div style={{ fontSize: '0.875rem' }}>
                   <ReactMarkdown>{message.text}</ReactMarkdown>
                 </div>
               </div>
               {message.from === 'user' && (
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#9ca3af', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#ffffff', fontWeight: 'bold' }}>YOU</div>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  backgroundColor: '#9ca3af',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  color: '#ffffff',
+                  fontWeight: 'bold'
+                }}>
+                  YOU
+                </div>
               )}
             </div>
           ))}
@@ -225,29 +208,27 @@ const ChatInterfaceTesting = () => {
         </div>
         <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
           {suggestedQuestions.length > 0 && (
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '8px' }}>Suggested Questions:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {suggestedQuestions.map((question, index) => (
-                  <button
-                    key={index}
-                    onClick={() => handleSuggestedQuestionClick(question)}
-                    disabled={isLoading || !visitorId}
-                    style={{
-                      padding: '6px 12px',
-                      backgroundColor: '#e5e7eb',
-                      color: '#374151',
-                      border: '1px solid #d1d5db',
-                      borderRadius: '16px',
-                      fontSize: '0.75rem',
-                      cursor: 'pointer',
-                      opacity: (isLoading || !visitorId) ? 0.7 : 1
-                    }}
-                  >
-                    {question}
-                  </button>
-                ))}
-              </div>
+            <div style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
+              {suggestedQuestions.map((question, index) => (
+                <div
+                  key={index}
+                  onClick={() => handleSuggestedClick(question)}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#ffffff',
+                    color: '#1f2937',
+                    borderRadius: '8px',
+                    fontSize: '0.875rem',
+                    cursor: 'pointer',
+                    border: '1px solid #3b82f6',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.target.style.backgroundColor = '#f9fafb'}
+                  onMouseLeave={(e) => e.target.style.backgroundColor = '#ffffff'}
+                >
+                  {question}
+                </div>
+              ))}
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
