@@ -241,7 +241,8 @@ async function generateEnrichedTags(listing, clientConfig) {
   }
   const basePrompt = clientConfig.listing_tagging_prompt;
 
-  const taggingRules = clientConfig.tagging_rules ? JSON.stringify(clientConfig.tagging_rules) : '{}';
+  const taggingRules = clientConfig.tagging_rules || {};
+  const taggingRulesString = JSON.stringify(taggingRules);
   const extractionRules = clientConfig.document_extraction ? JSON.stringify(clientConfig.document_extraction) : '{}';
 
   const authoritativeTags = {
@@ -263,7 +264,9 @@ async function generateEnrichedTags(listing, clientConfig) {
   console.log(`Authoritative tags for listing ${listing.id}:`, authoritativeTags);
 
   const fullPrompt = `${basePrompt}
-${taggingRules}
+${taggingRulesString}
+
+Generate semantic tags from the description that describe the style, vibe, atmosphere, or unique characteristics of the property. Focus on tags that are not covered by standard features or rules.
 
 Use these regex patterns for additional extraction:
 ${extractionRules}
@@ -271,9 +274,21 @@ ${extractionRules}
 Authoritative tags from database:
 ${JSON.stringify(authoritativeTags)}
 
-Return only a JSON object with a single key "generated_tags" containing an array of strings, each being a tag like "feature:pool" or "location:city_center".`;
+Return only a JSON object with a single key "generated_tags" containing an array of strings, each being a semantic tag like "style:modern_minimalist" or "vibe:cozy_and_inviting".`;
 
   const content = listing.description || createMetadataSummary(listing);
+
+  // Programmatic keyword-based tag generation
+  const ruleBasedTags = [];
+  for (const [tag, value] of Object.entries(taggingRules)) {
+    if (Array.isArray(value)) {
+      const keywords = value;
+      if (keywords.some(kw => content.toLowerCase().includes(kw.toLowerCase()))) {
+        ruleBasedTags.push(tag);
+      }
+    }
+  }
+  console.log(`Rule-based keyword tags (${ruleBasedTags.length}):`, ruleBasedTags);
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
@@ -319,11 +334,12 @@ Return only a JSON object with a single key "generated_tags" containing an array
   // Generate programmatic feature tags based on tagging rules
   const featureTags = generateProgrammaticFeatureTags(listing, clientConfig.tagging_rules);
 
-  // Combine LLM-generated tags with programmatically created tags and feature tags, ensuring no duplicates
+  // Combine LLM-generated tags with programmatically created tags, rule-based tags, and feature tags, ensuring no duplicates
   console.log(`LLM tags (${result.generated_tags.length}):`, result.generated_tags);
   console.log(`Programmatic tags (${programmaticTags.length}):`, programmaticTags);
+  console.log(`Rule-based tags (${ruleBasedTags.length}):`, ruleBasedTags);
   console.log(`Feature tags (${featureTags.length}):`, featureTags);
-  const rawCombined = [...result.generated_tags, ...programmaticTags, ...featureTags];
+  const rawCombined = [...result.generated_tags, ...programmaticTags, ...ruleBasedTags, ...featureTags];
   console.log(`Raw combined tags before deduplication (${rawCombined.length}):`, rawCombined);
   const combinedTags = [...new Set(rawCombined)];
   console.log(`Combined tags after deduplication (${combinedTags.length}):`, combinedTags);

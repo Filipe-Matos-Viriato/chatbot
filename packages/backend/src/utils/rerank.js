@@ -14,8 +14,27 @@ export function reRankMatches({
   queryFilters,
   queryScope,
   topN = 20,
+  targetedMatches = [],
 }) {
-  if (!Array.isArray(matches) || matches.length === 0) return [];
+  if (!Array.isArray(matches) || matches.length === 0) return { rankedMatches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
+
+  let contextualMatchStatus = 'NOT_APPLICABLE';
+  const hasFeatureQueryWithContext = contextListingId && queryFilters?.generated_tags;
+
+  if (hasFeatureQueryWithContext) {
+    const filterTags = queryFilters.generated_tags?.$all || [];
+    const contextualListingHasMatchingFeature = matches.some(m =>
+      m.metadata?.listing_id === contextListingId &&
+      Array.isArray(m.metadata?.generated_tags) &&
+      filterTags.every(tag => m.metadata.generated_tags.some(metaTag => metaTag.includes(tag)))
+    );
+
+    if (contextualListingHasMatchingFeature) {
+      contextualMatchStatus = 'MATCH_IN_CONTEXT';
+    } else {
+      contextualMatchStatus = 'NO_MATCH_IN_CONTEXT';
+    }
+  }
 
   const qLower = String(originalQuery || '').toLowerCase();
   const isLookingForT1 = qLower.includes('t1') || qLower.includes('1 quarto');
@@ -126,6 +145,16 @@ export function reRankMatches({
   // Filter out null results (excluded by hard filters)
   reRanked = reRanked.filter(match => match !== null);
 
+  // Apply contextual filtering based on match status
+  if (contextualMatchStatus === 'MATCH_IN_CONTEXT') {
+    // If the contextual listing has the feature, filter to ONLY that listing
+    reRanked = reRanked.filter(m => m.metadata?.listing_id === contextListingId);
+    console.log(`[rerank] DEBUG: Contextual listing ${contextListingId} has the queried feature. Filtered to only this listing.`);
+  } else if (contextualMatchStatus === 'NO_MATCH_IN_CONTEXT') {
+    // If the contextual listing does NOT have the feature, allow other listings to be returned
+    console.log(`[rerank] DEBUG: Contextual listing ${contextListingId} does not have the queried feature. Allowing other listings.`);
+  }
+
   // Post-processing for GENERAL_FILTERED queries to ensure diversity of listings
   if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && contextListingId) {
     const contextualMatches = reRanked.filter(m => m.metadata?.listing_id === contextListingId && m.filterMatchCount > 0);
@@ -167,7 +196,10 @@ export function reRankMatches({
     console.log('🔎 Re-ranking debug (top up to 8 shown):', JSON.stringify(debugBoostLogs, null, 2));
   } catch (_) {}
 
-  return ranked;
+  return {
+    rankedMatches: ranked,
+    contextualMatchStatus,
+  };
 }
 
 

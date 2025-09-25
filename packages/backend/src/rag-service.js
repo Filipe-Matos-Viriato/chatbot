@@ -11,7 +11,7 @@ import * as developmentService from './services/development-service.js';
 import visitorService from './services/visitor-service.js';
 import { withTimeout } from './utils/async-timeout.js';
 import { reRankMatches } from './utils/rerank.js';
-import { buildContext, pickText, buildContextFromMatches } from './utils/context.js';
+import { buildContext, pickText, buildContextFromMatches, buildStructuredListingSummary } from './utils/context.js';
 import { renderTemplate } from './utils/prompt.js';
 import { createLogger } from './utils/structured-logger.js';
 import { extractListingIdFromUrl, extractListingIdFromQuery, extractQueryFilters, isAggregativePriceQuery, QUERY_SCOPE } from './utils/rag-parsing.js';
@@ -44,7 +44,7 @@ const TWO_QUERY_ENABLED = String(process.env.RAG_TWO_QUERY_ENABLED || 'true') ==
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const log = createLogger('rag-service');
 
-async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}) {
+async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}, queryScope = QUERY_SCOPE.GENERAL_UNFILTERED) {
   // Validate search vector before proceeding
   if (!searchVector) {
     console.error(`[${clientConfig.clientName}] ❌ FATAL ERROR: Search vector is null or undefined`);
@@ -156,11 +156,18 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     queries.push(Promise.resolve({ matches: [] }));
   }
 
-  const broadTopK = Number(process.env.RAG_BROAD_TOPK || 30);
-  const broadParams = { vector: searchVector, topK: broadTopK, includeMetadata: true, filter: { ...baseFilter } };
-  const { vector: _v, ...loggableBroad } = broadParams;
-  log.info('pinecone.broad.query', { params: loggableBroad });
-  queries.push(withTimeout(namespacedIndex.query(broadParams), PINECONE_TIMEOUT_MS, 'pinecone-broad'));
+  // Skip broad search for LISTING_SPECIFIC queries to prevent context bleed
+  let broadParams = null;
+  if (queryScope !== QUERY_SCOPE.LISTING_SPECIFIC) {
+    const broadTopK = Number(process.env.RAG_BROAD_TOPK || 30);
+    broadParams = { vector: searchVector, topK: broadTopK, includeMetadata: true, filter: { ...baseFilter } };
+    const { vector: _v, ...loggableBroad } = broadParams;
+    log.info('pinecone.broad.query', { params: loggableBroad });
+    queries.push(withTimeout(namespacedIndex.query(broadParams), PINECONE_TIMEOUT_MS, 'pinecone-broad'));
+  } else {
+    queries.push(Promise.resolve({ matches: [] }));
+    console.log(`[${clientConfig.clientName}] Skipping broad search for LISTING_SPECIFIC query`);
+  }
 
   let targetedResponse, broadResponse;
   try {
@@ -169,7 +176,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     t.end({
       targetedCount: targetedResponse?.matches?.length || 0,
       broadCount: broadResponse?.matches?.length || 0,
-      broadTopK: broadParams.topK,
+      broadTopK: broadParams?.topK || 0,
       twoQueryEnabled: TWO_QUERY_ENABLED,
     });
   } catch (error) {
@@ -188,7 +195,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   console.log(`🔍 DEBUGGING - Broad Search Details:`);
   console.log(`  Base filter: ${JSON.stringify(baseFilter, null, 2)}`);
   console.log(`  Vector dimensions: ${searchVector.length}`);
-  console.log(`  TopK requested: ${broadParams.topK}`);
+  console.log(`  TopK requested: ${broadParams?.topK || 0}`);
   if (broadMatches.length > 0) {
     console.log(`  Best match score: ${broadMatches[0].score}`);
     console.log(`  Worst match score: ${broadMatches[broadMatches.length - 1].score}`);
@@ -232,6 +239,8 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   // Removed cross-namespace fallback to prevent data leakage between clients
   // All queries must use client-specific namespace for security
 
+  let reRankedResult = { contextualMatchStatus: 'NOT_APPLICABLE' };
+
   if (matches.length > 0) {
     const reRankQueryFilters = extractQueryFilters(originalQuery, currentListingPrice, clientConfig);
 
@@ -241,9 +250,11 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     const hasListingIdFromQuery = reRankQueryFilters.listing_id;
     const hasExternalContext = externalContext && (externalContext.value || externalContext.developmentId);
 
-    if (hasExternalContext && !hasSignificantFilters) {
+    if (hasListingIdFromQuery) {
       queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
-    } else if (hasSignificantFilters && !hasListingIdFromQuery) {
+    } else if (hasExternalContext && !hasSignificantFilters) {
+      queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
+    } else if (hasSignificantFilters) {
       queryScope = QUERY_SCOPE.GENERAL_FILTERED;
     }
 
@@ -252,7 +263,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     // Dynamically adjust topN based on queryScope to ensure broader results for general queries
     const topN = queryScope === QUERY_SCOPE.GENERAL_FILTERED ? 50 : 20;
 
-    matches = reRankMatches({
+    reRankedResult = reRankMatches({
       matches,
       contextListingId,
       contextDevelopmentId,
@@ -260,10 +271,15 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       queryFilters: reRankQueryFilters,
       queryScope,
       topN,
+      targetedMatches: targetedResponse?.matches || [],
     });
+    matches = reRankedResult.rankedMatches;
   }
 
-  return { matches };
+  return {
+    matches,
+    contextualMatchStatus: reRankedResult.contextualMatchStatus
+  };
 }
 
 // parsing helpers now imported from ./utils/rag-parsing.js
@@ -308,15 +324,17 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 
   const queryFilters = extractQueryFilters(query, null, clientConfig);
 
-  // Determine queryScope for system prompt instructions
+  // Determine queryScope for system prompt instructions (moved before performHybridSearch)
   let queryScope = QUERY_SCOPE.GENERAL_UNFILTERED;
   const hasSignificantFilters = queryFilters.generated_tags || queryFilters.num_bedrooms || queryFilters.price_eur || queryFilters.typology || queryFilters.num_bathrooms || queryFilters.total_area_sqm;
   const hasListingIdFromQuery = queryFilters.listing_id;
   const hasExternalContext = externalContext && (externalContext.value || externalContext.developmentId);
 
-  if (hasExternalContext && !hasSignificantFilters) {
+  if (hasListingIdFromQuery) {
     queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
-  } else if (hasSignificantFilters && !hasListingIdFromQuery) {
+  } else if (hasExternalContext && !hasSignificantFilters) {
+    queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
+  } else if (hasSignificantFilters) {
     queryScope = QUERY_SCOPE.GENERAL_FILTERED;
   }
 
@@ -348,14 +366,18 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   console.log(`  Lead collecting intent: ${leadCollectingIntent}`);
   console.log(`  Visitor contact info: ${JSON.stringify(visitorContactInfo)}`);
 
-  let queryResponse = { matches: [] };
+  let queryResponse = { matches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
   try {
-    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters);
+    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters, queryScope);
   } catch (error) {
     console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
     // Return empty matches if search fails due to invalid embedding
-    queryResponse = { matches: [] };
+    queryResponse = { matches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
   }
+
+  const structuredListingSummary = queryScope === QUERY_SCOPE.GENERAL_FILTERED
+    ? buildStructuredListingSummary(queryResponse.matches, queryFilters)
+    : null;
   
   // Add debugging for matches found
   console.log(`[${clientConfig.clientName}] 🔍 DEBUGGING - Search Results:`);
@@ -375,7 +397,22 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
+  // Format structured listing summary as readable text for better LLM processing
+  let formattedStructuredData = '';
+  if (structuredListingSummary && structuredListingSummary.matchingListings) {
+    const featureName = structuredListingSummary.requestedFeature || 'característica solicitada';
+    formattedStructuredData = `\n\nDados Estruturados dos Imóveis Encontrados:\n\nImóveis com ${featureName}:\n` +
+      structuredListingSummary.matchingListings.map(listing =>
+        `- Nome: ${listing.name}, Tipo: ${listing.type}, Quartos: ${listing.beds}, Preço: €${listing.price_eur}`
+      ).join('\n');
+  }
+
   let context = buildContextFromMatches(queryResponse.matches, preferredListingId, contextDevelopmentId);
+
+  // For GENERAL_FILTERED queries, use only the structured data to avoid confusion
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
+    context = formattedStructuredData;
+  }
 
   try {
     const citations = queryResponse.matches.slice(0, 5).map(m => {
@@ -533,9 +570,14 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       throw new Error("System prompt is not defined in the client configuration.");
   }
   
+  // For GENERAL_FILTERED, context already includes formattedStructuredData, so don't add it again
+  let additionalStructuredData = queryScope === QUERY_SCOPE.GENERAL_FILTERED ? '' : formattedStructuredData;
+
   const templateVariables = {
     chatHistory: truncatedChatHistory,
-    context: context + (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
+    context: context +
+      (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : '') +
+      additionalStructuredData,
     question: query,
     pageUrl: pageUrl || 'Não disponível',
     queryFilters: queryFilters,
@@ -568,9 +610,8 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     // This instruction is made stronger to override potential biases from general system instructions.
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Não há um imóvel ou empreendimento específico selecionado. A sua resposta DEVE ser GERAL e abranger MÚLTIPLAS opções/exemplos, se aplicável. É PROIBIDO focar-se num único imóvel ou empreendimento, a menos que o utilizador o solicite explicitamente na pergunta. Se o contexto relevante contiver detalhes de vários imóveis, resuma-os ou apresente-os como exemplos de forma não específica.`;
   } else if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
-    // For general filtered queries within a listing context, instruct the LLM to list all relevant properties
-    // that match the filters, including the contextual listing if applicable, and not to focus solely on it.
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: A pergunta é GERAL e inclui filtros específicos (como características ou tipos de imóvel). DEVE listar TODAS as propriedades relevantes do contexto que correspondam aos filtros, incluindo o imóvel atual se aplicável. NÃO se concentre apenas no imóvel atual - apresente múltiplas opções que atendam aos critérios da pergunta.`;
+    // For general filtered queries, instruct the LLM to enumerate ALL matching properties
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Use os "Dados Estruturados dos Imóveis Encontrados" fornecidos no contexto para gerar a sua resposta. ENUMERE TODOS os imóveis que correspondem aos filtros, apresentando CADA UM individualmente com suas características principais (nome, tipo, quartos, preço, etc.) de forma organizada. NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados estruturados fornecidos para garantir a precisão. NÃO diga "alguns imóveis" ou "exemplos" - liste TODOS os imóveis encontrados, um por um. Se foram encontrados 11 imóveis, liste os 11.`;
   } else if (queryScope === QUERY_SCOPE.LISTING_SPECIFIC) {
     // For listing-specific queries, instruct the LLM to list all features and characteristics mentioned in the context
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Quando descrever as características de um imóvel específico, liste TODAS as características e comodidades mencionadas no contexto fornecido, incluindo terraços, garagens, etc. Não omita nenhuma característica presente na informação disponível.`;
@@ -586,6 +627,14 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 
   // CRITICAL INSTRUCTION: Context structure
   systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O contexto é dividido em seções. Para o imóvel principal, há 'Ficha Técnica' (dados estruturados) e 'Descrição Adicional' (texto descritivo). Sintetize informações de AMBAS as seções do imóvel principal para criar uma resposta completa e conversacional. Use a seção 'Outros Imóveis Relevantes' APENAS se o usuário pedir explicitamente uma comparação. Mantenha um tom fluido e amigável, como um corretor de imóveis experiente.`;
+
+  // CRITICAL INSTRUCTION: Never mention listing IDs in responses
+  systemPrompt += `\n\n*** INSTRUÇÃO ABSOLUTA E PRIORITÁRIA: NUNCA mencione IDs de imóveis (como "ID: 4275") nas suas respostas ao utilizador. Sempre use apenas o nome do imóvel ou uma descrição clara. ***`;
+
+  // New soft-fail instruction for contextual feature queries
+  if (queryScope !== QUERY_SCOPE.GENERAL_FILTERED && queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT') {
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O utilizador perguntou sobre uma característica ("${query}") para um imóvel específico (ID: ${preferredListingId}), mas este imóvel não tem essa característica. No entanto, outros imóveis no contexto têm. INFORME o utilizador de forma clara que o imóvel atual NÃO TEM a característica e, em seguida, apresente os outros imóveis do contexto como alternativas que TÊM essa característica.`;
+  }
 
   // Dynamic intent-based instructions from database configuration
   if (queryFilters.intents && queryFilters.intents.length > 0) {
@@ -636,19 +685,26 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES DE PERGUNTAS - DEVE SER 
       let cleanedResponse = raw;
 
       try {
-        // Look for JSON at the end of the response
-        const jsonMatch = raw.match(/\{\s*"suggested_questions"\s*:\s*\[.*\]\s*\}\s*$/s);
+        // Look for JSON at the end of the response - more flexible pattern
+        const jsonMatch = raw.match(/\{\s*"suggested_questions"\s*:\s*\[.*?\]\s*\}\s*$/s);
         if (jsonMatch) {
           const jsonPart = jsonMatch[0];
+          console.log(`[${clientConfig.clientName}] Found JSON part: ${jsonPart}`);
           const parsed = JSON.parse(jsonPart);
           if (parsed.suggested_questions && Array.isArray(parsed.suggested_questions)) {
             suggestedQuestions = parsed.suggested_questions;
             // Remove the JSON part from the main response
             cleanedResponse = raw.replace(jsonPart, '').trim();
+            console.log(`[${clientConfig.clientName}] Successfully parsed ${suggestedQuestions.length} suggested questions`);
+          } else {
+            console.warn(`[${clientConfig.clientName}] JSON parsed but suggested_questions not found or not an array:`, parsed);
           }
+        } else {
+          console.warn(`[${clientConfig.clientName}] No JSON match found in response. Response ends with: "${raw.slice(-100)}"`);
         }
       } catch (error) {
-        console.warn(`[${clientConfig.clientName}] Failed to parse suggested questions JSON:`, error);
+        console.warn(`[${clientConfig.clientName}] Failed to parse suggested questions JSON:`, error.message);
+        console.warn(`[${clientConfig.clientName}] Raw response:`, raw);
         // If parsing fails, keep the original response as-is
       }
 

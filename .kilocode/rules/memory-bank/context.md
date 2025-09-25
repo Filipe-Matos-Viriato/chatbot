@@ -18,6 +18,7 @@ The primary focus has shifted to implementing comprehensive dashboard features f
     - Added `console.log` statements for debugging `price_eur` extraction.
     - Fixed `TypeError: Cannot read properties of undefined (reading 'id')` during listing creation.
     - Ensured `client_name` is populated in the `listings` table.
+    - **Programmatic Keyword Matching Implementation:** ✅ **COMPLETED** - Refactored tag generation to separate rule-based logic from LLM logic. Programmatic code now handles deterministic keyword matching for `tagging_rules` (e.g., generating "comodidade:terraco" when "terraço" is found in descriptions), while LLM focuses on semantic tags. Fixed critical bug where `taggingRules` was accidentally stringified, preventing keyword matching. This ensures reliable, efficient tag generation without LLM dependency for rule-based features.
 - **Listing Service Enhancements (`packages/backend/src/services/listing-service.js`):**
     - Added `getMinPrice(clientId)` and `getMaxPrice(clientId)` functions to efficiently retrieve minimum and maximum prices from the Supabase `listings` table.
 - **RAG Service Enhancements (`packages/backend/src/rag-service.js`):**
@@ -95,6 +96,19 @@ The primary focus has shifted to implementing comprehensive dashboard features f
     - **Solution:** Completely removed the cross-namespace fallback mechanism from `rag-service.js`.
     - **Impact:** Ensures all queries are strictly contained within the client's Pinecone namespace, preventing any cross-client data leakage.
     - **Files Modified:** `packages/backend/src/rag-service.js`
+
+- **Context Bleed Prevention: Soft-Fail Mechanism for Feature Queries**
+    - **Issue:** When users asked about specific features (e.g., "does this listing have a terrace?") for a particular listing, the chatbot would incorrectly pull information from other listings that have that feature, causing context bleed and wrong answers.
+    - **Root Cause:** The re-ranking logic applied feature filters to all chunks but didn't sufficiently isolate results to the contextual listing when a specific `listing_id` was provided.
+    - **Solution:** Implemented a "soft-fail" mechanism that:
+        - Detects when a contextual listing doesn't have a queried feature
+        - Allows other listings with the feature to be included in results for comparison
+        - Provides explicit LLM instructions to clearly inform users when the current listing lacks a feature while suggesting alternatives
+    - **Implementation:**
+        - Modified `packages/backend/src/utils/rerank.js` to return a `contextualMatchStatus` flag
+        - Updated `packages/backend/src/rag-service.js` to conditionally inject appropriate system prompts based on whether the contextual listing has the queried feature
+    - **Impact:** Prevents false positives while maintaining helpfulness by offering alternatives. Users now get accurate answers about their specific listing while still receiving useful suggestions.
+    - **Files Modified:** `packages/backend/src/utils/rerank.js`, `packages/backend/src/rag-service.js`
 
 - **Enhanced No-Matches Scenario Handling**
     - **New Feature:** When no relevant information is found in the knowledge base, the system now:

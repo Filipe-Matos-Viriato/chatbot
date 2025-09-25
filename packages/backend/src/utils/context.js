@@ -104,4 +104,38 @@ export function truncateByTokenBudget(text, budget) {
   return { text: text.slice(0, cut), tokenCount: budget };
 }
 
+export function buildStructuredListingSummary(matches, queryFilters) {
+  if (!matches || matches.length === 0) {
+    return null;
+  }
+
+  const listingsMap = new Map();
+  // Extract the first feature tag for context. A more robust solution might handle multiple tags.
+  const requestedFeature = queryFilters?.generated_tags?.$all[0] || 'Unknown Feature';
+
+  for (const match of matches) {
+    const metadata = match.metadata;
+    const listingId = metadata?.listing_id;
+
+    if (listingId && !listingsMap.has(listingId)) {
+      listingsMap.set(listingId, {
+        id: listingId,
+        name: metadata.name || 'Nome não disponível',
+        type: metadata.type || 'Tipo não disponível',
+        beds: metadata.beds || 'N/A',
+        price_eur: metadata.price || 'Preço não disponível',
+        hasFeature: true // Since filtering ensures the feature is present
+      });
+    }
+  }
+
+  if (listingsMap.size === 0) {
+    return null;
+  }
+
+  return {
+    requestedFeature: requestedFeature.replace(/comodidade:|feature:/, ''), // Clean up the feature name for display
+    matchingListings: Array.from(listingsMap.values())
+  };
+}
 
