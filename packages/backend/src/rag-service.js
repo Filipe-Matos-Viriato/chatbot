@@ -284,6 +284,31 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
 // parsing helpers now imported from ./utils/rag-parsing.js
 
+function extractFeatureFromQuery(query) {
+  const lower = query.toLowerCase();
+  let feature = query;
+
+  // Remove common question prefixes
+  const prefixes = [
+    'quais os ',
+    'quero saber todos os ',
+    'quero saber os ',
+    'todos os ',
+    'alguns ',
+    'quais são os ',
+    'quais '
+  ];
+
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      feature = query.slice(prefix.length);
+      break;
+    }
+  }
+
+  return feature.trim() || 'imóveis';
+}
+
 async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false, visitorId = null) {
   let aggregativeContext = '';
 
@@ -397,21 +422,11 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
-  // Format structured listing summary as readable text for better LLM processing
-  let formattedStructuredData = '';
-  if (structuredListingSummary && structuredListingSummary.matchingListings) {
-    const featureName = structuredListingSummary.requestedFeature || 'característica solicitada';
-    formattedStructuredData = `\n\nDados Estruturados dos Imóveis Encontrados:\n\nImóveis com ${featureName}:\n` +
-      structuredListingSummary.matchingListings.map(listing =>
-        `- Nome: ${listing.name}, Tipo: ${listing.type}, Quartos: ${listing.beds}, Preço: €${listing.price_eur}`
-      ).join('\n');
-  }
-
   let context = buildContextFromMatches(queryResponse.matches, preferredListingId, contextDevelopmentId);
 
-  // For GENERAL_FILTERED queries, use only the structured data to avoid confusion
-  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
-    context = formattedStructuredData;
+  // Add structured listing summary to context if available
+  if (structuredListingSummary) {
+    context += '\n\n' + structuredListingSummary;
   }
 
   try {
@@ -570,14 +585,10 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       throw new Error("System prompt is not defined in the client configuration.");
   }
   
-  // For GENERAL_FILTERED, context already includes formattedStructuredData, so don't add it again
-  let additionalStructuredData = queryScope === QUERY_SCOPE.GENERAL_FILTERED ? '' : formattedStructuredData;
-
   const templateVariables = {
     chatHistory: truncatedChatHistory,
     context: context +
-      (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : '') +
-      additionalStructuredData,
+      (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
     question: query,
     pageUrl: pageUrl || 'Não disponível',
     queryFilters: queryFilters,
@@ -585,10 +596,22 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   };
   let systemPrompt = renderTemplate(systemPromptTemplate, templateVariables);
 
-  // CRITICAL ANTI-HALLUCINATION INSTRUCTIONS - MUST BE FOLLOWED
-  systemPrompt += `\n\n*** ABSOLUTELY CRITICAL: NEVER HALLUCINATE OR INVENT INFORMATION ***\n`;
-  systemPrompt += `When asked about specific details like kitchen equipment, appliances, or any features not explicitly listed in the 'Conteúdo Relevante', you MUST respond: "Infelizmente, não temos a especificação exata dos [detalhes] na nossa base de dados." and then offer to send a brochure.\n`;
-  systemPrompt += `DO NOT list any possible, example, or assumed items. ONLY use information that is VERBATIM in the provided context.\n`;
+  // Add conditional instructions for GENERAL_FILTERED queries to control introductory text and formatting
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
+    const requestedFeature = extractFeatureFromQuery(query);
+    if (queryFilters.wantsAll) {
+      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão todos os ${requestedFeature} disponíveis:". Liste TODOS os imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [quartos], **Preço:** [preço]€. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
+    } else {
+      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão algumas opções de ${requestedFeature} disponíveis:". Liste algumas opções dos imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [quartos], **Preço:** [preço]€. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
+    }
+  }
+
+  // CRITICAL ANTI-HALLUCINATION INSTRUCTIONS - MUST BE FOLLOWED (excluded for GENERAL_FILTERED since features are verified)
+  if (queryScope !== QUERY_SCOPE.GENERAL_FILTERED) {
+    systemPrompt += `\n\n*** ABSOLUTELY CRITICAL: NEVER HALLUCINATE OR INVENT INFORMATION ***\n`;
+    systemPrompt += `When asked about specific details like kitchen equipment, appliances, or any features not explicitly listed in the 'Conteúdo Relevante', you MUST respond: "Infelizmente, não temos a especificação exata dos [detalhes] na nossa base de dados." and then offer to send a brochure.\n`;
+    systemPrompt += `DO NOT list any possible, example, or assumed items. ONLY use information that is VERBATIM in the provided context.\n`;
+  }
 
   // Add conditional lead collection instructions based on visitor contact info
   if (leadCollectingIntent) {
@@ -609,9 +632,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     // or offer multiple options, rather than focusing on a single listing from broad search results.
     // This instruction is made stronger to override potential biases from general system instructions.
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Não há um imóvel ou empreendimento específico selecionado. A sua resposta DEVE ser GERAL e abranger MÚLTIPLAS opções/exemplos, se aplicável. É PROIBIDO focar-se num único imóvel ou empreendimento, a menos que o utilizador o solicite explicitamente na pergunta. Se o contexto relevante contiver detalhes de vários imóveis, resuma-os ou apresente-os como exemplos de forma não específica.`;
-  } else if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
-    // For general filtered queries, instruct the LLM to enumerate ALL matching properties
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Use os "Dados Estruturados dos Imóveis Encontrados" fornecidos no contexto para gerar a sua resposta. ENUMERE TODOS os imóveis que correspondem aos filtros, apresentando CADA UM individualmente com suas características principais (nome, tipo, quartos, preço, etc.) de forma organizada. NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados estruturados fornecidos para garantir a precisão. NÃO diga "alguns imóveis" ou "exemplos" - liste TODOS os imóveis encontrados, um por um. Se foram encontrados 11 imóveis, liste os 11.`;
+  // GENERAL_FILTERED instructions moved earlier with conditional logic
   } else if (queryScope === QUERY_SCOPE.LISTING_SPECIFIC) {
     // For listing-specific queries, instruct the LLM to list all features and characteristics mentioned in the context
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Quando descrever as características de um imóvel específico, liste TODAS as características e comodidades mencionadas no contexto fornecido, incluindo terraços, garagens, etc. Não omita nenhuma característica presente na informação disponível.`;
@@ -632,8 +653,9 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   systemPrompt += `\n\n*** INSTRUÇÃO ABSOLUTA E PRIORITÁRIA: NUNCA mencione IDs de imóveis (como "ID: 4275") nas suas respostas ao utilizador. Sempre use apenas o nome do imóvel ou uma descrição clara. ***`;
 
   // New soft-fail instruction for contextual feature queries
-  if (queryScope !== QUERY_SCOPE.GENERAL_FILTERED && queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT') {
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O utilizador perguntou sobre uma característica ("${query}") para um imóvel específico (ID: ${preferredListingId}), mas este imóvel não tem essa característica. No entanto, outros imóveis no contexto têm. INFORME o utilizador de forma clara que o imóvel atual NÃO TEM a característica e, em seguida, apresente os outros imóveis do contexto como alternativas que TÊM essa característica.`;
+  if (queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT') {
+    const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Comece sempre a resposta dizendo "Desculpe, mas o imóvel atual não tem ${feature}. No entanto, aqui estão algumas opções disponíveis:" e depois liste as alternativas do contexto.`;
   }
 
   // Dynamic intent-based instructions from database configuration
@@ -642,17 +664,20 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
 
   // CRITICAL INSTRUCTION: Always generate suggested questions (overrides all other instructions)
-  systemPrompt += `\n\n*** INSTRUÇÃO CRÍTICA E OBRIGATÓRIA PARA PERGUNTAS SUGERIDAS ***
-APÓS a resposta principal, DEVE gerar exatamente 2-3 perguntas concretas e relevantes ainda nao respondidas, que antecipem as necessidades do visitante.
-AS PERGUNTAS DEVEM SER ESPECÍFICAS ao contexto do imóvel ou consulta, NÃO GENÉRICAS.
+  systemPrompt += `\n\n*** INSTRUÇÃO CRÍTICA E OBRIGATÓRIA PARA FRASES SUGERIDAS ***
+APÓS a resposta principal, DEVE gerar exatamente 2-3 frases concretas e relevantes ainda nao respondidas, que antecipem as necessidades do visitante.
+AS FRASES DEVEM SER ESPECÍFICAS ao contexto do imóvel ou consulta, NÃO GENÉRICAS.
+*** IMPORTANTE *** As frases DEVEM SER formuladas na primeira pessoa, como se o visitante estivesse a falar diretamente ao chatbot. NÃO use frases que o chatbot diria ao visitante.
+Exemplos CORRETOS (primeira pessoa): "Estou interessado em saber a área do terraço", "Quero conhecer as opções de financiamento"
+Exemplos INCORRETOS (evitar): "Quer saber a área do terraço?", "Gostaria de mais informações?"
 NÃO use frases como "Como posso ajudá-lo mais?" ou "Se desejar mais detalhes...".
-FORMATO OBRIGATÓRIO: Apresente as perguntas em formato JSON no final da resposta, usando esta estrutura exata:
-{"suggested_questions": ["Pergunta 1?", "Pergunta 2?", "Pergunta 3?"]}
-Exemplos de perguntas concretas:
-- Para imóvel específico: "Quer saber mais detalhes sobre o terraço?", "Interessa-lhe conhecer as opções de financiamento?"
-- Para consultas gerais: "Pretende ver imóveis noutra faixa de preço?", "Tem preferências por imóveis com certas características?"
-A resposta principal deve terminar normalmente, e o JSON das perguntas sugeridas deve vir APÓS a resposta, separado por uma linha em branco.
-ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES DE PERGUNTAS - DEVE SER SEGUIDA SEMPRE.`;
+FORMATO OBRIGATÓRIO: Apresente as frases em formato JSON no final da resposta, usando esta estrutura exata:
+{"suggested_questions": ["Frase 1", "Frase 2", "Frase 3"]}
+Exemplos de frases concretas:
+- Para imóvel específico: "Estou interessado em saber a área do terraço", "Quero conhecer as opções de financiamento disponíveis"
+- Para consultas gerais: "Estou interessado em imóveis noutra faixa de preço", "Quero saber quais são as características disponíveis"
+A resposta principal deve terminar normalmente, e o JSON das frases sugeridas deve vir APÓS a resposta, separado por uma linha em branco.
+ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPRE.`;
 
   // Removed: systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
