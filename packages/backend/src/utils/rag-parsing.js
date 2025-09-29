@@ -103,6 +103,15 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
   match = lowerCaseQuery.match(/menos de\s*(\d+)\s*quartos/);
   if (match) { const num = parseInt(match[1], 10); if (!isNaN(num)) filters.num_bedrooms = { "$lt": num }; }
 
+  // Handle written numbers for bedrooms
+  const writtenNumbers = { 'um': 1, 'uma': 1, 'dois': 2, 'duas': 2, 'três': 3, 'quatro': 4, 'cinco': 5 };
+  for (const [word, num] of Object.entries(writtenNumbers)) {
+    if (lowerCaseQuery.includes(word + ' quartos') || lowerCaseQuery.includes(word + ' quarto')) {
+      filters.num_bedrooms = num;
+      break;
+    }
+  }
+
   match = lowerCaseQuery.match(/(\d+)\s*(casas de banho|wc|banheiro|quarto de banho)/);
   if (match) { const num = parseInt(match[1], 10); if (!isNaN(num)) filters.num_bathrooms = num; }
 
@@ -129,14 +138,14 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
 
     for (const [key, value] of Object.entries(taggingRules)) {
       if (Array.isArray(value)) {
-        // Feature: Check if any keywords match the query
-        if (value.some(keyword => lowerCaseQuery.includes(keyword.toLowerCase()))) {
+        // Feature: Check if any keywords match the query using word boundaries
+        if (value.some(keyword => new RegExp('\\b' + keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(lowerCaseQuery))) {
           matchedTags.push(key);
           console.log(`[rag-parsing] DEBUG: Matched feature tag "${key}"`);
         }
       } else if (typeof value === 'object' && value.keywords && value.prompt_instruction) {
-        // Intent: Check if any keywords match the query
-        if (value.keywords.some(keyword => lowerCaseQuery.includes(keyword.toLowerCase()))) {
+        // Intent: Check if any keywords match the query using word boundaries
+        if (value.keywords.some(keyword => new RegExp('\\b' + keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(lowerCaseQuery))) {
           intents.push(value.prompt_instruction);
           console.log(`[rag-parsing] DEBUG: Matched intent "${key}"`);
         }
@@ -144,7 +153,7 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
     }
 
     if (matchedTags.length > 0) {
-      filters.generated_tags = { "$all": matchedTags };
+      filters.generated_tags = { "$all": matchedTags.map(tag => tag.replace(/_/g, ' ')) };
       console.log(`[rag-parsing] DEBUG: Set filters.generated_tags to: ${JSON.stringify(filters.generated_tags)}`);
     } else {
       console.log(`[rag-parsing] DEBUG: No matched feature tags found in tagging_rules`);
@@ -159,6 +168,10 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
   } else {
     console.log(`[rag-parsing] DEBUG: No clientConfig.tagging_rules available`);
   }
+
+  // Detect if user wants a complete list
+  filters.wantsAll = lowerCaseQuery.includes('todos') || lowerCaseQuery.includes('all') || lowerCaseQuery.includes('completa') || lowerCaseQuery.includes('complete') || lowerCaseQuery.includes('lista completa');
+
   // No fallback to hardcoded features or intents - system relies entirely on dynamic configuration
 
   return filters;

@@ -296,7 +296,8 @@ function extractFeatureFromQuery(query) {
     'todos os ',
     'alguns ',
     'quais são os ',
-    'quais '
+    'quais ',
+    'qual o '
   ];
 
   for (const prefix of prefixes) {
@@ -310,8 +311,18 @@ function extractFeatureFromQuery(query) {
 }
 
 async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false, visitorId = null) {
+  // Normalize externalContext format for backward compatibility
+  if (externalContext?.listingId && !externalContext.type) {
+    externalContext = {
+      type: 'listing',
+      value: externalContext.listingId,
+      developmentId: externalContext.developmentId
+    };
+  }
+
   let aggregativeContext = '';
 
+  let isNoMatches = false;
   // 1. Determine context IDs
   const listingIdFromUrl = extractListingIdFromUrl(pageUrl);
   const targetedListingId = externalContext?.value;
@@ -349,6 +360,15 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 
   const queryFilters = extractQueryFilters(query, null, clientConfig);
 
+  // Extract queried feature for potential no-matches handling
+  let queriedFeature = null;
+  if (queryFilters.generated_tags && queryFilters.generated_tags.$all && queryFilters.generated_tags.$all.length > 0) {
+    const tag = queryFilters.generated_tags.$all[0];
+    if (tag.startsWith('comodidade:')) {
+      queriedFeature = tag.replace('comodidade:', '');
+    }
+  }
+
   // Determine queryScope for system prompt instructions (moved before performHybridSearch)
   let queryScope = QUERY_SCOPE.GENERAL_UNFILTERED;
   const hasSignificantFilters = queryFilters.generated_tags || queryFilters.num_bedrooms || queryFilters.price_eur || queryFilters.typology || queryFilters.num_bathrooms || queryFilters.total_area_sqm;
@@ -357,10 +377,12 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 
   if (hasListingIdFromQuery) {
     queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
-  } else if (hasExternalContext && !hasSignificantFilters) {
-    queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
   } else if (hasSignificantFilters) {
     queryScope = QUERY_SCOPE.GENERAL_FILTERED;
+  } else if (hasExternalContext) {
+    queryScope = QUERY_SCOPE.LISTING_SPECIFIC;
+  } else {
+    queryScope = QUERY_SCOPE.GENERAL_UNFILTERED;
   }
 
   console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Determined queryScope for system prompt: ${queryScope} (hasExternalContext: ${hasExternalContext}, hasSignificantFilters: ${hasSignificantFilters}, hasListingIdFromQuery: ${hasListingIdFromQuery})`);
@@ -460,13 +482,18 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   const lastAssistantLine = (typeof chatHistory === 'string') ? (chatHistory.split('\n').reverse().find(l => l.startsWith('Assistente: ')) || '') : '';
   const lastAssistantMsg = lastAssistantLine.replace('Assistente: ', '');
   const onboardingPromptDetected = /perguntas rápidas|recomendar os melhores apartamentos/i.test(lastAssistantMsg || '');
-  if (queryResponse.matches.length === 0 && targetedListingId && (linkIntent || hasSpecificRef) && !onboardingPromptDetected) {
+  if (queryResponse.matches.length === 0 && targetedListingId && (linkIntent || hasSpecificRef) && !onboardingPromptDetected && queryScope !== QUERY_SCOPE.GENERAL_FILTERED) {
     const id = String(targetedListingId);
     const base = 'https://upinvestments.pt';
     const urlPt = `${base}/pt/imoveis/aveiro/${id}`;
     const urlEn = `${base}/en/real-estate/aveiro/${id}`;
     console.log(`[${clientConfig.clientName}] Returning deterministic URL response for listing ${id}`);
-    return `Aqui está o URL do imóvel: ${urlPt}\n(English) ${urlEn}`;
+    return {
+      response: `Aqui está o URL do imóvel: ${urlPt}\n(English) ${urlEn}`,
+      suggestedQuestions: [],
+      debug: { openaiPayload: [] },
+      isUnanswered: true
+    };
   }
   try {
     const texts = queryResponse.matches.map(m => pickText(m.metadata)).filter(Boolean);
@@ -488,6 +515,23 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   // Handle empty search results with enhanced no-matches scenario
   if (queryResponse.matches.length === 0) {
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found - implementing no-matches scenario`);
+
+    // For feature queries with no matches, provide direct clear answer
+    if (queriedFeature) {
+      console.log(`[${clientConfig.clientName}] Providing direct answer for missing feature`);
+      const response = externalContext?.type === 'listing'
+        ? `Este imóvel não tem ${queriedFeature}.`
+        : `Não temos imóveis com ${queriedFeature} disponíveis no momento.`;
+
+      return {
+        response,
+        suggestedQuestions: [`Estou interessado em imóveis com ${queriedFeature}`, "Quais outras características são importantes para si?"],
+        debug: { openaiPayload: [] },
+        isUnanswered: false
+      };
+    }
+
+    isNoMatches = true;
 
     // Check if visitor has contact information
     let hasContactInfo = false;
@@ -588,7 +632,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   const templateVariables = {
     chatHistory: truncatedChatHistory,
     context: context +
-      (aggregativeContext ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
+      (aggregativeContext && queryScope !== QUERY_SCOPE.LISTING_SPECIFIC ? `\n\nInformação Adicional:\n${aggregativeContext}` : ''),
     question: query,
     pageUrl: pageUrl || 'Não disponível',
     queryFilters: queryFilters,
@@ -596,13 +640,19 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   };
   let systemPrompt = renderTemplate(systemPromptTemplate, templateVariables);
 
+
+  // Add special instruction for GENERAL_FILTERED queries with no matches to prevent hallucination
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length === 0 && queriedFeature) {
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Não há imóveis com ${queriedFeature} na nossa base de dados. Responda dizendo "Desculpe, não encontramos imóveis com ${queriedFeature} no momento."`;
+  }
+
   // Add conditional instructions for GENERAL_FILTERED queries to control introductory text and formatting
-  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query)) {
     const requestedFeature = extractFeatureFromQuery(query);
     if (queryFilters.wantsAll) {
-      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão todos os ${requestedFeature} disponíveis:". Liste TODOS os imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [quartos], **Preço:** [preço]€. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
+      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão todos os ${requestedFeature} disponíveis:". Liste TODOS os imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [beds], **Preço:** [preço]€\n\n. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
     } else {
-      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão algumas opções de ${requestedFeature} disponíveis:". Liste algumas opções dos imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [quartos], **Preço:** [preço]€. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
+      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão algumas opções de ${requestedFeature} disponíveis:". Liste algumas opções dos imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [beds], **Preço:** [preço]€\n\n. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
     }
   }
 
@@ -653,7 +703,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   systemPrompt += `\n\n*** INSTRUÇÃO ABSOLUTA E PRIORITÁRIA: NUNCA mencione IDs de imóveis (como "ID: 4275") nas suas respostas ao utilizador. Sempre use apenas o nome do imóvel ou uma descrição clara. ***`;
 
   // New soft-fail instruction for contextual feature queries
-  if (queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT') {
+  if (queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT' && queryResponse.matches.length > 0) {
     const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Comece sempre a resposta dizendo "Desculpe, mas o imóvel atual não tem ${feature}. No entanto, aqui estão algumas opções disponíveis:" e depois liste as alternativas do contexto.`;
   }

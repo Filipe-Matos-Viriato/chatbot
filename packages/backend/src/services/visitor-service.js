@@ -351,6 +351,7 @@ class VisitorService {
       // Perform the upsert for all metrics to update
       if (Object.keys(metricsToUpdate).length > 0) {
         metricsToUpdate.listing_id = listingId;
+        metricsToUpdate.client_id = clientId; // Add missing client_id
         metricsToUpdate.updated_at = new Date().toISOString();
         if (clientName) {
           metricsToUpdate.client_name = clientName;
@@ -392,6 +393,7 @@ class VisitorService {
           .upsert(
             {
               listing_id: listingId,
+              client_id: clientId, // Add missing client_id
               conversion_rate: newConversionRate,
               updated_at: new Date().toISOString(),
             },
@@ -493,6 +495,7 @@ class VisitorService {
         .upsert(
           {
             listing_id: listingId,
+            client_id: clientId, // Add missing client_id
             unacknowledged_hot_leads: newHotLeads,
             updated_at: new Date().toISOString(),
           },
@@ -554,6 +557,7 @@ class VisitorService {
         .upsert(
           {
             listing_id: listingId,
+            client_id: clientId, // Add missing client_id
             lead_score_distribution_hot: hot,
             lead_score_distribution_warm: warm,
             lead_score_distribution_cold: cold,

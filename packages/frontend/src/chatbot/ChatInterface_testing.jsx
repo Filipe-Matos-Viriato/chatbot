@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL } from '../config/apiClient';
+import { detectEventType, extractContactInfo, logEvent } from '../utils/eventLogging.js';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -13,6 +14,7 @@ const generateUUID = () => {
     return v.toString(16);
   });
 };
+
 
 const ChatInterfaceTesting = () => {
   const [messages, setMessages] = useState([
@@ -25,6 +27,9 @@ const ChatInterfaceTesting = () => {
   const [listings, setListings] = useState([]); // New state for listings
   const [selectedListingId, setSelectedListingId] = useState(''); // New state for selected listing ID
   const [suggestedQuestions, setSuggestedQuestions] = useState([]); // State for suggested questions at bottom
+  const [questionCount, setQuestionCount] = useState(0); // Track number of questions asked
+  const [chatStartTime, setChatStartTime] = useState(null); // Track chat start time
+  const [currentLeadScore, setCurrentLeadScore] = useState(0); // Track current lead score
   const messagesEndRef = useRef(null);
 
   // Hardcode client ID for testing purposes as requested by the user
@@ -32,6 +37,7 @@ const ChatInterfaceTesting = () => {
 
   useEffect(() => {
     setSessionId(generateUUID());
+    setChatStartTime(Date.now()); // Initialize chat start time
 
     // Fetch or create visitor ID
     const initializeVisitor = async () => {
@@ -124,6 +130,48 @@ const ChatInterfaceTesting = () => {
         } else {
           setSuggestedQuestions([]);
         }
+
+        // === EVENT LOGGING SECTION ===
+        if (visitorId) {
+          // 1. Log the question-based event
+          const eventType = detectEventType(textToSend);
+          await logEvent(visitorId, eventType, TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
+
+          // 2. Update question count and log engagement events
+          setQuestionCount(prev => {
+            const newCount = prev + 1;
+
+            // Log question count events
+            if (newCount >= 3 && newCount <= 5) {
+              logEvent(visitorId, 'QUESTIONS_3_5', TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
+            } else if (newCount >= 6 && newCount <= 10) {
+              logEvent(visitorId, 'QUESTIONS_6_10', TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
+            } else if (newCount > 10) {
+              logEvent(visitorId, 'QUESTIONS_10_PLUS', TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
+            }
+
+            return newCount;
+          });
+
+          // 3. Check for contact information and log conversion event
+          const contactInfo = extractContactInfo(textToSend);
+          if (contactInfo.email || contactInfo.phone) {
+            console.log('📧 Contact info detected:', contactInfo);
+            await logEvent(visitorId, 'SUBMITTED_CONTACT', TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
+          }
+
+          // 4. Check chat duration and log time-based events
+          if (chatStartTime) {
+            const chatDuration = Date.now() - chatStartTime;
+            const minutesInChat = Math.floor(chatDuration / (1000 * 60));
+
+            if (minutesInChat >= 5 && minutesInChat < 10) {
+              await logEvent(visitorId, 'TIME_5_10_MIN', TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
+            } else if (minutesInChat >= 10) {
+              await logEvent(visitorId, 'TIME_10_PLUS_MIN', TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
+            }
+          }
+        }
       } catch (error) {
         console.error("Failed to send message:", error);
         const errorMessage = { from: 'bot', text: 'Sorry, I am having trouble connecting.' };
@@ -145,22 +193,41 @@ const ChatInterfaceTesting = () => {
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f3f4f6' }}>
       <div style={{ width: '440px', height: '700px', display: 'grid', gridTemplateRows: 'auto 1fr auto', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', backgroundColor: '#ffffff' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>Chatbot (Testing)</h2>
-          <div style={{ marginTop: '10px' }}>
-            <label htmlFor="listing-select" style={{ marginRight: '5px' }}>Simulate Listing:</label>
-            <select
-              id="listing-select"
-              value={selectedListingId}
-              onChange={(e) => setSelectedListingId(e.target.value)}
-              style={{ padding: '5px', borderRadius: '4px', border: '1px solid #d1d5db' }}
-            >
-              <option value="">No Listing Selected</option>
-              {listings.map((listing) => (
-                <option key={listing.id} value={listing.id}>
-                  {listing.id}
-                </option>
-              ))}
-            </select>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>Chatbot (Testing)</h2>
+            <div style={{
+              padding: '4px 8px',
+              borderRadius: '12px',
+              fontSize: '0.875rem',
+              fontWeight: 'bold',
+              backgroundColor: currentLeadScore >= 70 ? '#dcfce7' : currentLeadScore >= 40 ? '#fef3c7' : '#fecaca',
+              color: currentLeadScore >= 70 ? '#166534' : currentLeadScore >= 40 ? '#92400e' : '#991b1b',
+              border: `1px solid ${currentLeadScore >= 70 ? '#bbf7d0' : currentLeadScore >= 40 ? '#fde68a' : '#fca5a5'}`
+            }}>
+              Lead Score: {currentLeadScore}
+              {currentLeadScore >= 70 ? ' 🔥 Hot Lead' : currentLeadScore >= 40 ? ' 🟡 Warm Lead' : ' 🆕 New Lead'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+            <div>
+              <label htmlFor="listing-select" style={{ marginRight: '5px' }}>Simulate Listing:</label>
+              <select
+                id="listing-select"
+                value={selectedListingId}
+                onChange={(e) => setSelectedListingId(e.target.value)}
+                style={{ padding: '5px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+              >
+                <option value="">No Listing Selected</option>
+                {listings.map((listing) => (
+                  <option key={listing.id} value={listing.id}>
+                    {listing.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+              Questions: {questionCount} | Events logged: ✅
+            </div>
           </div>
         </div>
         <div style={{ padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>

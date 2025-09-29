@@ -76,10 +76,14 @@ export function reRankMatches({
     if (queryFilters && Object.keys(queryFilters).length > 0) {
       for (const key in queryFilters) {
         if (key === 'total_area_sqm' || key === 'price_eur' || key === 'num_bedrooms') {
+          // Map filter keys to metadata field names
+          const metaKey = key === 'num_bedrooms' ? 'beds' :
+                         key === 'total_area_sqm' ? 'total_area' :
+                         key === 'price_eur' ? 'price' : key;
           const filter = queryFilters[key];
-          if (filter?.$lt != null && meta[key] < filter.$lt) filterMatchCount++;
-          else if (filter?.$gt != null && meta[key] > filter.$gt) filterMatchCount++;
-          else if (meta[key] === filter) filterMatchCount++;
+          if (filter?.$lt != null && meta[metaKey] < filter.$lt) filterMatchCount++;
+          else if (filter?.$gt != null && meta[metaKey] > filter.$gt) filterMatchCount++;
+          else if (meta[metaKey] === filter) filterMatchCount++;
         } else if (key === 'typology') {
           if (meta.typology === queryFilters.typology || meta.type === queryFilters.typology) filterMatchCount++;
         } else if (key === 'generated_tags') {

@@ -133,9 +133,12 @@ export function buildStructuredListingSummary(matches, queryFilters) {
     return null;
   }
 
-  return {
-    requestedFeature: requestedFeature.replace(/comodidade:|feature:/, ''), // Clean up the feature name for display
-    matchingListings: Array.from(listingsMap.values())
-  };
+  let summary = `Característica solicitada: ${requestedFeature.replace(/comodidade:|feature:/, '')}\n\n`;
+  summary += 'Imóveis correspondentes:\n';
+  for (const listing of Array.from(listingsMap.values())) {
+    summary += `- Nome: ${listing.name}, Tipo: ${listing.type}, Quartos: ${listing.beds}, Preço: ${listing.price_eur}\n`;
+  }
+
+  return summary;
 }
 
