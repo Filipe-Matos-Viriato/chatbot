@@ -184,7 +184,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
   // API endpoint to handle chat requests
   app.post('/api/chat', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
-            const { query, visitor_id, sessionId, context, pageUrl } = req.body; // Changed visitorId to visitor_id
+            const { query, visitor_id, sessionId, context, pageUrl, onboardingContext } = req.body; // Changed visitorId to visitor_id
             const { clientConfig, userContext } = req; // Config and userContext are attached by middleware
             const timestamp = new Date().toISOString();
             const turnId = Date.now().toString(); // Simple unique ID for this turn
@@ -492,7 +492,8 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         chatHistory,
         pageUrl,
         contextShifted, // Pass the contextShifted flag
-        visitor_id // Pass visitor_id for unanswered question handling
+        visitor_id, // Pass visitor_id for unanswered question handling
+        onboardingContext // Pass onboarding context for personalized recommendations
       );
 
       // Store user message in chat_messages table (moved here to access isUnanswered)
@@ -1260,6 +1261,50 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error('Error deleting client:', error);
       res.status(500).json({ error: 'Failed to delete client.' });
+    }
+  });
+
+  // API endpoints for Onboarding Configuration Management
+  app.get('/api/admin/clients/:clientId/onboarding-config', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+      res.json({
+        onboarding_enabled: clientConfig.onboardingConfig.enabled,
+        default_onboarding_questions: clientConfig.onboardingConfig.questions
+      });
+    } catch (error) {
+      console.error('Error fetching onboarding config:', error);
+      res.status(500).json({ error: 'Failed to fetch onboarding configuration.' });
+    }
+  });
+
+  app.put('/api/admin/clients/:clientId/onboarding-config', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { onboarding_enabled, default_onboarding_questions } = req.body;
+
+      // Validate input
+      if (typeof onboarding_enabled !== 'boolean') {
+        return res.status(400).json({ error: 'onboarding_enabled must be a boolean.' });
+      }
+
+      // Update database
+      const { error } = await supabase
+        .from('clients')
+        .update({
+          onboarding_enabled,
+          default_onboarding_questions
+        })
+        .eq('client_id', clientId);
+
+      if (error) {
+        throw error;
+      }
+
+      res.json({ success: true, message: 'Onboarding configuration updated.' });
+    } catch (error) {
+      console.error('Error updating onboarding config:', error);
+      res.status(500).json({ error: 'Failed to update onboarding configuration.' });
     }
   });
 

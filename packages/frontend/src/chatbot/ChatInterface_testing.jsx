@@ -32,6 +32,22 @@ const ChatInterfaceTesting = () => {
   const [currentLeadScore, setCurrentLeadScore] = useState(0); // Track current lead score
   const messagesEndRef = useRef(null);
 
+  // Onboarding state
+  const [onboarding, setOnboarding] = useState({
+    started: false,
+    completed: false,
+    step: 0,
+    answers: {
+      typology: null,
+      budget_bucket: null,
+      buying_timeframe: null,
+      name: '',
+      email: '',
+      consent_marketing: false,
+    },
+  });
+  const [onboardingConfig, setOnboardingConfig] = useState(null);
+
   // Hardcode client ID for testing purposes as requested by the user
   const TEST_CLIENT_ID = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c';
 
@@ -60,6 +76,20 @@ const ChatInterfaceTesting = () => {
     };
 
     initializeVisitor();
+
+    // Load onboarding config
+    const loadOnboardingConfig = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/widget/config/${TEST_CLIENT_ID}`);
+        const config = await response.json();
+        setOnboardingConfig(config.onboardingConfig || null);
+      } catch (error) {
+        console.error('Failed to load onboarding config:', error);
+        setOnboardingConfig(null);
+      }
+    };
+
+    loadOnboardingConfig();
   }, []); // Run once on mount
 
   useEffect(() => {
@@ -94,6 +124,18 @@ const ChatInterfaceTesting = () => {
   const handleSend = async (messageText = null) => {
     const textToSend = messageText || input.trim();
     if (textToSend) {
+      // Check if onboarding should start
+      if (!onboarding.completed && !onboarding.started && onboardingConfig?.enabled !== false) {
+        setOnboarding(prev => ({ ...prev, started: true, step: 1 }));
+
+        const introMsg = {
+          from: 'bot',
+          text: onboardingConfig?.introMessage || 'Antes de continuar, posso fazer 3 perguntas rápidas para recomendar os melhores apartamentos? (leva < 30s)',
+        };
+        setMessages(prev => [...prev, introMsg]);
+        return;
+      }
+
       const userMessage = { from: 'user', text: textToSend };
       setMessages(prev => [...prev, userMessage]);
       setInput('');
@@ -182,6 +224,77 @@ const ChatInterfaceTesting = () => {
     }
   };
 
+
+  // Onboarding helper functions
+  const setOnboardingAnswer = (field, value) => {
+    setOnboarding(prev => ({
+      ...prev,
+      answers: { ...prev.answers, [field]: value },
+    }));
+  };
+
+  const submitOnboarding = async () => {
+    if (!visitorId) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/visitors/${visitorId}/onboarding`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-client-id': TEST_CLIENT_ID,
+        },
+        body: JSON.stringify(onboarding.answers),
+      });
+
+      if (!response.ok) throw new Error('Failed to save onboarding');
+
+      const data = await response.json();
+      console.log('Onboarding saved:', data);
+
+      setOnboarding(prev => ({ ...prev, completed: true }));
+
+      // Show recommendations
+      await showRecommendationsFromOnboarding();
+    } catch (error) {
+      console.error('Failed to submit onboarding:', error);
+      // Show error message
+      const errorMsg = { from: 'bot', text: 'Não foi possível guardar as respostas. Pode tentar novamente?' };
+      setMessages(prev => [...prev, errorMsg]);
+    }
+  };
+
+  const showRecommendationsFromOnboarding = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-client-id': TEST_CLIENT_ID,
+        },
+        body: JSON.stringify({
+          query: "Mostre-me recomendações de apartamentos baseadas nas minhas preferências do onboarding",
+          context: null, // No specific listing context
+          session_id: sessionId,
+          visitor_id: visitorId,
+          clientId: TEST_CLIENT_ID,
+          onboardingContext: onboarding.answers // Pass onboarding data
+        }),
+      });
+
+      const data = await response.json();
+      const recMsg = { from: 'bot', text: data.response };
+      setMessages(prev => [...prev, recMsg]);
+
+      // Handle suggested questions if any
+      if (data.suggestedQuestions) {
+        setSuggestedQuestions(data.suggestedQuestions);
+      }
+    } catch (error) {
+      console.error('Failed to get recommendations:', error);
+      const errorMsg = { from: 'bot', text: 'Desculpe, ocorreu um erro ao obter recomendações. Pode tentar novamente?' };
+      setMessages(prev => [...prev, errorMsg]);
+    }
+  };
 
   const handleSuggestedClick = (question) => {
     // Clear suggested questions and send as regular user message
@@ -274,6 +387,92 @@ const ChatInterfaceTesting = () => {
           <div ref={messagesEndRef} />
         </div>
         <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+          {/* Onboarding UI */}
+          {onboarding.started && !onboarding.completed && onboardingConfig?.questions && Array.isArray(onboardingConfig.questions) && (
+            <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+              {onboardingConfig.questions.map((question, index) => {
+                const step = index + 1;
+                if (onboarding.step !== step) return null;
+
+                if (question.type === 'select') {
+                  return (
+                    <div key={question.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ fontWeight: '600' }}>{question.question}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {question.options.map(opt => (
+                          <button
+                            key={opt.value}
+                            onClick={() => setOnboardingAnswer(question.id, opt.value)}
+                            style={{
+                              padding: '8px 12px',
+                              border: '1px solid #d1d5db',
+                              backgroundColor: onboarding.answers[question.id] === opt.value ? '#3b82f6' : '#ffffff',
+                              color: onboarding.answers[question.id] === opt.value ? '#ffffff' : '#374151',
+                              borderRadius: '4px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      {onboarding.answers[question.id] && (
+                        <button
+                          onClick={() => setOnboarding(prev => ({ ...prev, step: step + 1 }))}
+                          style={{ padding: '8px 16px', backgroundColor: '#3b82f6', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', alignSelf: 'flex-end' }}
+                        >
+                          Seguinte
+                        </button>
+                      )}
+                    </div>
+                  );
+                } else if (question.type === 'contact') {
+                  return (
+                    <div key={question.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ fontWeight: '600' }}>{question.question}</div>
+                      {question.fields.map(field => (
+                        <input
+                          key={field.id}
+                          type={field.type}
+                          placeholder={field.placeholder}
+                          value={onboarding.answers[field.id] || ''}
+                          onChange={(e) => setOnboardingAnswer(field.id, e.target.value)}
+                          style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }}
+                        />
+                      ))}
+                      {question.consent && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="checkbox"
+                            checked={onboarding.answers.consent_marketing || false}
+                            onChange={(e) => setOnboardingAnswer('consent_marketing', e.target.checked)}
+                          />
+                          {question.consent.text}
+                        </label>
+                      )}
+                      <button
+                        onClick={submitOnboarding}
+                        disabled={!question.fields.every(field => onboarding.answers[field.id])}
+                        style={{
+                          padding: '8px 16px',
+                          backgroundColor: (!question.fields.every(field => onboarding.answers[field.id])) ? '#d1d5db' : '#3b82f6',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: (!question.fields.every(field => onboarding.answers[field.id])) ? 'not-allowed' : 'pointer',
+                          alignSelf: 'flex-end'
+                        }}
+                      >
+                        Concluir
+                      </button>
+                    </div>
+                  );
+                }
+                return null;
+              })}
+            </div>
+          )}
+
           {suggestedQuestions.length > 0 && (
             <div style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
               {suggestedQuestions.map((question, index) => (

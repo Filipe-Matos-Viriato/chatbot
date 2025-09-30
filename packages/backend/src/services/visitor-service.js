@@ -926,9 +926,12 @@ class VisitorService {
   }
 
   /**
-   * Save onboarding answers into visitors table and compute/update lead_score.
-   */
+    * Save onboarding answers into visitors table individual columns and compute/update lead_score.
+    */
   async saveOnboarding(visitorId, clientId, onboardingPayload) {
+    console.log('[saveOnboarding] Starting save for visitor:', visitorId, 'client:', clientId);
+    console.log('[saveOnboarding] Onboarding payload:', JSON.stringify(onboardingPayload, null, 2));
+
     // Fetch existing visitor
     const { data: existing, error: fetchError } = await supabase
       .from('visitors')
@@ -936,7 +939,10 @@ class VisitorService {
       .eq('visitor_id', visitorId)
       .single();
 
+    console.log('[saveOnboarding] Fetch result - existing:', !!existing, 'error:', fetchError);
+
     if (fetchError || !existing) {
+      console.error('[saveOnboarding] Visitor not found:', fetchError);
       throw new Error('Visitor not found');
     }
 
@@ -950,28 +956,60 @@ class VisitorService {
     }
 
     const newScore = this.computeLeadScoreFromOnboarding(onboardingPayload, onboardingRules);
-    const mergedOnboarding = { ...(existing.onboarding_questions || {}), ...onboardingPayload };
     const previousScore = existing.lead_score;
+
+    // Prepare update data using individual fields that exist in the database
+    const updateData = {
+      // Use the higher of the two to avoid double-counting with events
+      lead_score: Math.max(existing.lead_score || 0, newScore),
+      previous_lead_score: previousScore,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Populate individual fields from onboarding data
+    if (onboardingPayload.typology) {
+      updateData.tipologia = onboardingPayload.typology;
+    }
+    if (onboardingPayload.name) {
+      updateData.name = onboardingPayload.name;
+    }
+    // Parse budget_bucket to numeric value for storage
+    if (onboardingPayload.budget_bucket) {
+      const budgetRaw = onboardingPayload.budget_bucket
+        .replace(/€/g, '')
+        .replace(/\s+/g, '')
+        .replace(/–/g, '-')
+        .trim();
+
+      let budgetValue = null;
+      if (/^100-200k$/i.test(budgetRaw)) budgetValue = 150000; // midpoint
+      else if (/^200-300k$/i.test(budgetRaw)) budgetValue = 250000;
+      else if (/^300-400k$/i.test(budgetRaw)) budgetValue = 350000;
+      else if (/^400-500k$/i.test(budgetRaw)) budgetValue = 450000;
+      else if (/^500k\+?$/i.test(budgetRaw) || /^>500k$/i.test(budgetRaw)) budgetValue = 550000; // above 500k
+
+      if (budgetValue) {
+        updateData.budget = budgetValue;
+      }
+    }
+
+    console.log('[saveOnboarding] Update data:', JSON.stringify(updateData, null, 2));
 
     const { data: updated, error: updateError } = await supabase
       .from('visitors')
-      .update({
-        onboarding_questions: mergedOnboarding,
-        onboarding_completed: true,
-        // Use the higher of the two to avoid double-counting with events
-        lead_score: Math.max(existing.lead_score || 0, newScore),
-        previous_lead_score: previousScore,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq('visitor_id', visitorId)
       .select();
 
+    console.log('[saveOnboarding] Update result - data:', !!updated, 'error:', JSON.stringify(updateError, null, 2));
+
     if (updateError) {
+      console.error('[saveOnboarding] Database update error:', JSON.stringify(updateError, null, 2));
       throw new Error('Failed to save onboarding');
     }
 
     // Fire-and-forget: upsert non-PII preference profile to Pinecone
-    this.upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, mergedOnboarding).catch(() => {});
+    this.upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, onboardingPayload).catch(() => {});
 
     return updated?.[0];
   }

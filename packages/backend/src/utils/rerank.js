@@ -85,7 +85,15 @@ export function reRankMatches({
           else if (filter?.$gt != null && meta[metaKey] > filter.$gt) filterMatchCount++;
           else if (meta[metaKey] === filter) filterMatchCount++;
         } else if (key === 'typology') {
-          if (meta.typology === queryFilters.typology || meta.type === queryFilters.typology) filterMatchCount++;
+          // Handle typology filtering (T1, T2, T3, etc.) by mapping to bedroom count
+          const typologyValue = queryFilters.typology;
+          if (typologyValue && typologyValue.match(/^T\d+$/i)) {
+            const bedroomCount = parseInt(typologyValue.substring(1), 10);
+            if (meta.beds === bedroomCount) filterMatchCount++;
+          } else {
+            // Fallback to direct string match if not in T\d+ format
+            if (meta.typology === typologyValue || meta.type === typologyValue) filterMatchCount++;
+          }
         } else if (key === 'generated_tags') {
           // Handle dynamic tag filtering
           const filterTags = queryFilters[key]?.$all || [];

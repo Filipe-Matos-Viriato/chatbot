@@ -61,6 +61,13 @@ async function getClientConfig(clientId) {
       primaryColor: data.theme?.primaryColor || "#007bff",
       welcomeMessage: "Olá! Como posso ajudar?",
       headerText: "Fala conosco!"
+    },
+    // Add onboarding configuration
+    onboardingConfig: {
+      enabled: data.onboarding_enabled !== false, // Default true
+      questions: data.default_onboarding_questions?.questions || null,
+      introMessage: data.default_onboarding_questions?.introMessage || null,
+      completionMessage: data.default_onboarding_questions?.completionMessage || null
     }
   };
 

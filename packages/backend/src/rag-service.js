@@ -285,42 +285,160 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 // parsing helpers now imported from ./utils/rag-parsing.js
 
 function extractFeatureFromQuery(query) {
-  const lower = query.toLowerCase();
-  let feature = query;
+   const lower = query.toLowerCase();
+   let feature = query;
 
-  // Remove common question prefixes
-  const prefixes = [
-    'quais os ',
-    'quero saber todos os ',
-    'quero saber os ',
-    'todos os ',
-    'alguns ',
-    'quais são os ',
-    'quais ',
-    'qual o '
-  ];
+   // Remove common question prefixes
+   const prefixes = [
+     'quais os ',
+     'quero saber todos os ',
+     'quero saber os ',
+     'todos os ',
+     'alguns ',
+     'quais são os ',
+     'quais ',
+     'qual o '
+   ];
 
-  for (const prefix of prefixes) {
-    if (lower.startsWith(prefix)) {
-      feature = query.slice(prefix.length);
-      break;
-    }
-  }
+   for (const prefix of prefixes) {
+     if (lower.startsWith(prefix)) {
+       feature = query.slice(prefix.length);
+       break;
+     }
+   }
 
-  return feature.trim() || 'imóveis';
-}
+   return feature.trim() || 'imóveis';
+ }
 
-async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false, visitorId = null) {
-  // Normalize externalContext format for backward compatibility
-  if (externalContext?.listingId && !externalContext.type) {
-    externalContext = {
-      type: 'listing',
-      value: externalContext.listingId,
-      developmentId: externalContext.developmentId
-    };
-  }
+/**
+ * Converts onboarding answers into query filters for RAG search
+ * @param {Object} onboardingAnswers - User's onboarding responses
+ * @returns {Object} Query filters compatible with extractQueryFilters
+ */
+function convertOnboardingToFilters(onboardingAnswers) {
+   const filters = {};
 
-  let aggregativeContext = '';
+   if (!onboardingAnswers || typeof onboardingAnswers !== 'object') {
+     return filters;
+   }
+
+   // Convert typology preference
+   if (onboardingAnswers.typology && onboardingAnswers.typology !== 'Indiferente') {
+     filters.typology = onboardingAnswers.typology;
+   }
+
+   // Convert budget range to price filter
+   if (onboardingAnswers.budget_bucket && onboardingAnswers.budget_bucket !== 'Prefer not to say') {
+     const priceRange = parseBudgetRange(onboardingAnswers.budget_bucket);
+     if (priceRange.min !== null && priceRange.max !== null) {
+       filters.price_eur = { gte: priceRange.min, lte: priceRange.max };
+     }
+   }
+
+   // Convert buying timeframe (could be used for urgency scoring in future)
+   if (onboardingAnswers.buying_timeframe) {
+     // For now, we'll store this as metadata but not use it in filtering
+     // Could be used for lead scoring or agent assignment
+     filters.buying_timeframe = onboardingAnswers.buying_timeframe;
+   }
+
+   return filters;
+ }
+
+/**
+ * Parses budget bucket string into min/max price range
+ * @param {string} budgetBucket - Budget range string (e.g., "€200–300k")
+ * @returns {Object} Object with min and max price values
+ */
+function parseBudgetRange(budgetBucket) {
+   if (!budgetBucket || typeof budgetBucket !== 'string') {
+     return { min: null, max: null };
+   }
+
+   // Handle different budget formats
+   const lowerBucket = budgetBucket.toLowerCase().trim();
+
+   if (lowerBucket.includes('€100–200k') || lowerBucket.includes('100-200k')) {
+     return { min: 100000, max: 200000 };
+   } else if (lowerBucket.includes('€200–300k') || lowerBucket.includes('200-300k')) {
+     return { min: 200000, max: 300000 };
+   } else if (lowerBucket.includes('€300–400k') || lowerBucket.includes('300-400k')) {
+     return { min: 300000, max: 400000 };
+   } else if (lowerBucket.includes('€400–500k') || lowerBucket.includes('400-500k')) {
+     return { min: 400000, max: 500000 };
+   } else if (lowerBucket.includes('€500k+') || lowerBucket.includes('500k+')) {
+     return { min: 500000, max: null };
+   }
+
+   // Try to parse generic patterns like "€100k-€200k"
+   const rangeMatch = budgetBucket.match(/€?(\d+)k?\s*[-–]\s*€?(\d+)k?/i);
+   if (rangeMatch) {
+     const min = parseInt(rangeMatch[1], 10) * 1000;
+     const max = parseInt(rangeMatch[2], 10) * 1000;
+     return { min, max };
+   }
+
+   return { min: null, max: null };
+ }
+
+/**
+ * Transforms onboarding answers into a natural language query for recommendations
+ * @param {Object} onboardingAnswers - User's onboarding responses
+ * @returns {string} Natural language query for RAG
+ */
+function transformOnboardingToQuery(onboardingAnswers) {
+   if (!onboardingAnswers || typeof onboardingAnswers !== 'object') {
+     return "Mostre-me recomendações de apartamentos";
+   }
+
+   let queryParts = ["Mostre-me recomendações de"];
+
+   // Add typology
+   if (onboardingAnswers.typology && onboardingAnswers.typology !== 'Indiferente') {
+     queryParts.push(onboardingAnswers.typology.toLowerCase());
+   } else {
+     queryParts.push("apartamentos");
+   }
+
+   // Add budget information
+   if (onboardingAnswers.budget_bucket && onboardingAnswers.budget_bucket !== 'Prefer not to say') {
+     queryParts.push(`na faixa de preço ${onboardingAnswers.budget_bucket}`);
+   }
+
+   // Add timeframe context
+   if (onboardingAnswers.buying_timeframe) {
+     queryParts.push(`para ${onboardingAnswers.buying_timeframe.toLowerCase()}`);
+   }
+
+   return queryParts.join(" ");
+ }
+
+async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false, visitorId = null, onboardingContext = null) {
+   // Normalize externalContext format for backward compatibility
+   if (externalContext?.listingId && !externalContext.type) {
+     externalContext = {
+       type: 'listing',
+       value: externalContext.listingId,
+       developmentId: externalContext.developmentId
+     };
+   }
+
+   // Handle onboarding context - transform onboarding answers into personalized recommendations
+   let isOnboardingRecommendation = false;
+   if (onboardingContext && typeof onboardingContext === 'object') {
+     console.log(`[${clientConfig.clientName}] 🎯 Detected onboarding context, transforming to personalized recommendations`);
+     isOnboardingRecommendation = true;
+
+     // Transform onboarding answers into query filters
+     const onboardingFilters = convertOnboardingToFilters(onboardingContext);
+     console.log(`[${clientConfig.clientName}] Onboarding filters:`, JSON.stringify(onboardingFilters, null, 2));
+
+     // Override query with onboarding-specific query
+     query = transformOnboardingToQuery(onboardingContext);
+     console.log(`[${clientConfig.clientName}] Transformed query: "${query}"`);
+   }
+
+   let aggregativeContext = '';
 
   let isNoMatches = false;
   // 1. Determine context IDs
@@ -358,7 +476,13 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     }
   }
 
-  const queryFilters = extractQueryFilters(query, null, clientConfig);
+  // Extract query filters - use onboarding filters if available, otherwise extract from query
+  let queryFilters;
+  if (isOnboardingRecommendation) {
+    queryFilters = convertOnboardingToFilters(onboardingContext);
+  } else {
+    queryFilters = extractQueryFilters(query, null, clientConfig);
+  }
 
   // Extract queried feature for potential no-matches handling
   let queriedFeature = null;
@@ -647,7 +771,8 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
 
   // Add conditional instructions for GENERAL_FILTERED queries to control introductory text and formatting
-  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query)) {
+  // Skip for onboarding recommendations to prevent prompt conflicts
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query) && !isOnboardingRecommendation) {
     const requestedFeature = extractFeatureFromQuery(query);
     if (queryFilters.wantsAll) {
       systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão todos os ${requestedFeature} disponíveis:". Liste TODOS os imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [beds], **Preço:** [preço]€\n\n. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
@@ -711,6 +836,19 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   // Dynamic intent-based instructions from database configuration
   if (queryFilters.intents && queryFilters.intents.length > 0) {
     systemPrompt += `\n\n${queryFilters.intents.join('\n\n')}`;
+  }
+
+  // Add onboarding-specific instructions if this is an onboarding recommendation
+  if (isOnboardingRecommendation) {
+    systemPrompt += `\n\n*** INSTRUÇÃO ESPECIAL PARA RECOMENDAÇÕES DE ONBOARDING ***
+Esta é uma recomendação personalizada baseada nas preferências do utilizador do onboarding.
+INSTRUÇÃO CRÍTICA: Comece SEMPRE a resposta dizendo exatamente "${onboardingContext.completionMessage || 'Com base nas suas preferências'}".
+Liste 3-5 imóveis que correspondam às preferências do utilizador (tipologia: ${onboardingContext.typology || 'qualquer'}, orçamento: ${onboardingContext.budget_bucket || 'qualquer'}).
+Formate cada imóvel como: **Nome do Imóvel** - €PREÇO\n  • Tipologia: [tipo]\n  • Quartos: [beds]\n  • Características principais\n\n
+NÃO mencione IDs internos dos imóveis.
+Use formatação rica com **negrito** para nomes e preços.
+Garanta que as recomendações são relevantes e personalizadas.
+*** IMPORTANTE *** Não pergunte pelo contacto - isso já foi feito no onboarding.`;
   }
 
   // CRITICAL INSTRUCTION: Always generate suggested questions (overrides all other instructions)

@@ -13,6 +13,8 @@ create table public.visitors (
   development_preference text null,
   phone text null,
   previous_lead_score smallint null default 0,
+  onboarding_questions jsonb null,
+  onboarding_completed boolean null default false,
   constraint visitors_pkey primary key (id),
   constraint visitors_visitor_id_key unique (visitor_id)
 ) TABLESPACE pg_default;

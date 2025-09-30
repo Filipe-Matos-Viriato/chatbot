@@ -134,7 +134,7 @@ class App extends Component {
       const listMd = filtered.map((l, idx) => `- ${idx + 1}. ${l.name || 'Imóvel'} — €${(l.price || l.price_eur || 0).toLocaleString()}${l.id ? ` (ID: ${l.id})` : ''}`).join('\n');
       const recMsg = {
         id: Date.now() + 4,
-        text: `Com base nas suas preferências, aqui estão algumas opções:\n\n${listMd}\n\nQuer falar sobre algum destes?` ,
+        text: `${this.state.config.onboardingCompletionMessage || 'Com base nas suas preferências, aqui estão algumas opções:'}\n\n${listMd}\n\nQuer falar sobre algum destes?`,
         sender: 'bot',
         timestamp: new Date(),
       };
@@ -228,7 +228,18 @@ class App extends Component {
         throw new Error('Failed to load configuration');
       }
       const config = await configResponse.json();
-      
+
+      // Store onboarding configuration
+      this.setState({
+        config: {
+          ...config,
+          onboardingEnabled: config.onboardingConfig?.enabled ?? true,
+          onboardingQuestions: config.onboardingConfig?.questions || null,
+          onboardingIntroMessage: config.onboardingConfig?.introMessage || null,
+          onboardingCompletionMessage: config.onboardingConfig?.completionMessage || null
+        }
+      });
+
       // Check for an existing visitor ID in localStorage
       let visitorId = localStorage.getItem('visitorId');
       let sessionData;
@@ -402,19 +413,19 @@ class App extends Component {
 
     this.setState({ inputValue: '', isTyping: true });
 
-    // On first user message, if onboarding not completed, start onboarding and buffer the message instead of calling chat
+    // On first user message, if onboarding not completed and enabled, start onboarding and buffer the message instead of calling chat
     const { onboarding, hasSentFirstMessage } = this.state;
-    if (!hasSentFirstMessage && !onboarding.completed && !onboarding.started) {
+    if (!hasSentFirstMessage && !onboarding.completed && !onboarding.started && config.onboardingEnabled) {
       this.setState({
         onboarding: { ...onboarding, started: true, step: 1 },
         initialUserMessageBuffer: inputValue,
         isTyping: false,
         hasSentFirstMessage: true,
       });
-      // Show onboarding intro from bot
+      // Show onboarding intro from bot using dynamic message
       const introMsg = {
         id: Date.now() + 1,
-        text: 'Antes de continuar, posso fazer 3 perguntas rápidas para recomendar os melhores apartamentos? (leva < 30s)',
+        text: config.onboardingIntroMessage || 'Antes de continuar, posso fazer 3 perguntas rápidas para recomendar os melhores apartamentos? (leva < 30s)',
         sender: 'bot',
         timestamp: new Date(),
       };
@@ -800,55 +811,71 @@ class App extends Component {
         ]),
 
         // Onboarding flow UI
-        onboarding.started && !onboarding.completed && h('div', {
+        onboarding.started && !onboarding.completed && config.onboardingQuestions && h('div', {
           style: Object.entries(styles.inputContainer).map(([key, value]) => `${key.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${value}`).join('; ')
         }, [
-          onboarding.step === 1 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
-            h('div', { style: 'font-weight:600;' }, 'Que tipologia procura?'),
-            h('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' }, ['T0','T1','T2','T3','T3 Duplex','T4','Indiferente'].map(opt => 
-              h('button', { onClick: () => this.setOnboardingAnswer('typology', opt), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, opt)
-            )),
-            h('div', null, onboarding.answers.typology ? `Selecionado: ${onboarding.answers.typology}` : ''),
-            h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 2 } })), disabled: !onboarding.answers.typology, style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white; align-self:flex-end;' }, 'Seguinte')
-          ]),
+          // Dynamic question rendering based on config
+          config.onboardingQuestions.questions.map((question, index) => {
+            const step = index + 1;
+            if (onboarding.step !== step) return null;
 
-          onboarding.step === 2 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
-            h('div', { style: 'font-weight:600;' }, 'Qual o seu orçamento?'),
-            h('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' }, ['€100–200k','€200–300k','€300–400k','€400–500k','€500k+','Prefiro não dizer'].map(opt => 
-              h('button', { onClick: () => this.setOnboardingAnswer('budget_bucket', opt.replace('€','').replace('Prefiro não dizer','Prefer not to say')), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, opt)
-            )),
-            h('div', null, onboarding.answers.budget_bucket ? `Selecionado: ${onboarding.answers.budget_bucket}` : ''),
-            h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
-              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 1 } })), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;' }, 'Voltar'),
-              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 3 } })), disabled: !onboarding.answers.budget_bucket, style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, 'Seguinte')
-            ])
-          ]),
-
-          onboarding.step === 3 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
-            h('div', { style: 'font-weight:600;' }, 'Para quando pretende comprar?'),
-            h('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' }, ['ASAP (<1 mês)','1–3 meses','3–6 meses','6+ meses','Apenas a explorar'].map(opt => 
-              h('button', { onClick: () => this.setOnboardingAnswer('buying_timeframe', opt), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, opt)
-            )),
-            h('div', null, onboarding.answers.buying_timeframe ? `Selecionado: ${onboarding.answers.buying_timeframe}` : ''),
-            h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
-              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 2 } })), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;' }, 'Voltar'),
-              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 4 } })), disabled: !onboarding.answers.buying_timeframe, style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, 'Seguinte')
-            ])
-          ]),
-
-          onboarding.step === 4 && h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
-            h('div', { style: 'font-weight:600;' }, 'Quase lá! Como o podemos contactar?'),
-            h('input', { type: 'text', placeholder: 'Nome', value: onboarding.answers.name, onInput: (e) => this.setOnboardingAnswer('name', e.target.value), style: 'padding:10px; border:1px solid #3f3f3f; background:rgba(20,20,20,.9); color:white;' }),
-            h('input', { type: 'email', placeholder: 'Email', value: onboarding.answers.email, onInput: (e) => this.setOnboardingAnswer('email', e.target.value), style: 'padding:10px; border:1px solid #3f3f3f; background:rgba(20,20,20,.9); color:white;' }),
-            h('label', { style: 'display:flex; align-items:center; gap:8px; color:white;' }, [
-              h('input', { type: 'checkbox', checked: onboarding.answers.consent_marketing, onChange: (e) => this.setOnboardingAnswer('consent_marketing', e.target.checked) }),
-              'Aceito receber comunicações relevantes sobre este empreendimento.'
-            ]),
-            h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
-              h('button', { onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: 3 } })), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;' }, 'Voltar'),
-              h('button', { onClick: this.submitOnboarding, disabled: !(onboarding.answers.name && onboarding.answers.email), style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;' }, 'Concluir')
-            ])
-          ])
+            if (question.type === 'select') {
+              return h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
+                h('div', { style: 'font-weight:600;' }, question.question),
+                h('div', { style: 'display:flex; flex-wrap:wrap; gap:8px;' }, question.options.map(opt =>
+                  h('button', {
+                    onClick: () => this.setOnboardingAnswer(question.id, opt.value),
+                    style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;'
+                  }, opt.label)
+                )),
+                h('div', null, onboarding.answers[question.id] ? `Selecionado: ${question.options.find(opt => opt.value === onboarding.answers[question.id])?.label || onboarding.answers[question.id]}` : ''),
+                h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
+                  step > 1 && h('button', {
+                    onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: step - 1 } })),
+                    style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;'
+                  }, 'Voltar'),
+                  h('button', {
+                    onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: step + 1 } })),
+                    disabled: !onboarding.answers[question.id],
+                    style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;'
+                  }, step === config.onboardingQuestions.questions.length ? 'Seguinte' : 'Seguinte')
+                ])
+              ]);
+            } else if (question.type === 'contact') {
+              return h('div', { style: 'display:flex; flex-direction:column; gap:8px; width:100%;' }, [
+                h('div', { style: 'font-weight:600;' }, question.question),
+                ...question.fields.map(field =>
+                  h('input', {
+                    type: field.type,
+                    placeholder: field.placeholder,
+                    value: onboarding.answers[field.id] || '',
+                    onInput: (e) => this.setOnboardingAnswer(field.id, e.target.value),
+                    style: 'padding:10px; border:1px solid #3f3f3f; background:rgba(20,20,20,.9); color:white;'
+                  })
+                ),
+                question.consent && h('label', { style: 'display:flex; align-items:center; gap:8px; color:white;' }, [
+                  h('input', {
+                    type: 'checkbox',
+                    checked: onboarding.answers.consent_marketing || false,
+                    onChange: (e) => this.setOnboardingAnswer('consent_marketing', e.target.checked)
+                  }),
+                  question.consent.text
+                ]),
+                h('div', { style: 'display:flex; gap:8px; justify-content:space-between;' }, [
+                  h('button', {
+                    onClick: () => this.setState(prev => ({ onboarding: { ...prev.onboarding, step: step - 1 } })),
+                    style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#4b5563; color:white;'
+                  }, 'Voltar'),
+                  h('button', {
+                    onClick: this.submitOnboarding,
+                    disabled: !question.fields.every(field => onboarding.answers[field.id]),
+                    style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;'
+                  }, 'Concluir')
+                ])
+              ]);
+            }
+            return null;
+          })
         ]),
 
         // Input
