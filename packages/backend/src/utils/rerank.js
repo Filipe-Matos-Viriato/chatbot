@@ -81,9 +81,20 @@ export function reRankMatches({
                          key === 'total_area_sqm' ? 'total_area' :
                          key === 'price_eur' ? 'price' : key;
           const filter = queryFilters[key];
-          if (filter?.$lt != null && meta[metaKey] < filter.$lt) filterMatchCount++;
-          else if (filter?.$gt != null && meta[metaKey] > filter.$gt) filterMatchCount++;
-          else if (meta[metaKey] === filter) filterMatchCount++;
+          const value = meta[metaKey];
+
+          // Handle range filters like { gte: 200000, lte: 300000 }
+          if (typeof filter === 'object' && filter !== null) {
+            let matchesRange = true;
+            if (filter.gte != null && value < filter.gte) matchesRange = false;
+            if (filter.lte != null && value > filter.lte) matchesRange = false;
+            if (matchesRange) filterMatchCount++;
+          }
+          // Handle legacy MongoDB-style operators
+          else if (filter?.$lt != null && value < filter.$lt) filterMatchCount++;
+          else if (filter?.$gt != null && value > filter.$gt) filterMatchCount++;
+          // Handle exact matches
+          else if (value === filter) filterMatchCount++;
         } else if (key === 'typology') {
           // Handle typology filtering (T1, T2, T3, etc.) by mapping to bedroom count
           const typologyValue = queryFilters.typology;
@@ -168,31 +179,42 @@ export function reRankMatches({
   }
 
   // Post-processing for GENERAL_FILTERED queries to ensure diversity of listings
-  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && contextListingId) {
-    const contextualMatches = reRanked.filter(m => m.metadata?.listing_id === contextListingId && m.filterMatchCount > 0);
-    const otherMatches = reRanked.filter(m => m.metadata?.listing_id !== contextListingId && m.filterMatchCount > 0);
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
+    if (contextListingId) {
+      // Existing logic for contextual queries (with specific listing context)
+      const contextualMatches = reRanked.filter(m => m.metadata?.listing_id === contextListingId && m.filterMatchCount > 0);
+      const otherMatches = reRanked.filter(m => m.metadata?.listing_id !== contextListingId && m.filterMatchCount > 0);
 
-    let finalRanked = [];
-    if (contextualMatches.length > 0) {
-      // Take the top 1-2 best contextual matches that satisfy the filters
-      contextualMatches.sort((a, b) => b.score - a.score);
-      finalRanked.push(...contextualMatches.slice(0, 2)); // Take top 2 contextual matches
-    }
-
-    // Add other matching listings, ensuring diversity
-    // Sort other matches by score and add them
-    otherMatches.sort((a, b) => b.score - a.score);
-    finalRanked.push(...otherMatches);
-
-    // Remove duplicates by ID, keeping the higher score if duplicates exist
-    const uniqueMatches = new Map();
-    for (const match of finalRanked) {
-      const id = match.metadata?.listing_id || match.metadata?.development_id || match.id;
-      if (!uniqueMatches.has(id) || uniqueMatches.get(id).score < match.score) {
-        uniqueMatches.set(id, match);
+      let finalRanked = [];
+      if (contextualMatches.length > 0) {
+        // Take the top 1-2 best contextual matches that satisfy the filters
+        contextualMatches.sort((a, b) => b.score - a.score);
+        finalRanked.push(...contextualMatches.slice(0, 2)); // Take top 2 contextual matches
       }
+
+      // Add other matching listings, ensuring diversity
+      // Sort other matches by score and add them
+      otherMatches.sort((a, b) => b.score - a.score);
+      finalRanked.push(...otherMatches);
+
+      // Remove duplicates by ID, keeping the higher score if duplicates exist
+      const uniqueMatches = new Map();
+      for (const match of finalRanked) {
+        const id = match.metadata?.listing_id || match.metadata?.development_id || match.id;
+        if (!uniqueMatches.has(id) || uniqueMatches.get(id).score < match.score) {
+          uniqueMatches.set(id, match);
+        }
+      }
+      reRanked = Array.from(uniqueMatches.values());
+    } else {
+      // NEW: For non-contextual GENERAL_FILTERED queries (like onboarding recommendations)
+      // Only keep listings that match at least one filter to ensure relevance
+      console.log(`[rerank] Applying filter-based filtering for non-contextual GENERAL_FILTERED query`);
+      const beforeCount = reRanked.length;
+      reRanked = reRanked.filter(m => m.filterMatchCount > 0);
+      const afterCount = reRanked.length;
+      console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings based on filter matches`);
     }
-    reRanked = Array.from(uniqueMatches.values());
   }
 
   const ranked = reRanked.sort((a, b) => b.score - a.score).slice(0, topN);

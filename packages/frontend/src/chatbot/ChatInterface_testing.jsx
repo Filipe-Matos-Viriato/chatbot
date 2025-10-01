@@ -30,6 +30,7 @@ const ChatInterfaceTesting = () => {
   const [questionCount, setQuestionCount] = useState(0); // Track number of questions asked
   const [chatStartTime, setChatStartTime] = useState(null); // Track chat start time
   const [currentLeadScore, setCurrentLeadScore] = useState(0); // Track current lead score
+  const [typingIndicator, setTypingIndicator] = useState('.'); // Animated typing indicator
   const messagesEndRef = useRef(null);
 
   // Onboarding state
@@ -119,6 +120,21 @@ const ChatInterfaceTesting = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Animate typing indicator
+  useEffect(() => {
+    if (!isLoading) return;
+
+    const interval = setInterval(() => {
+      setTypingIndicator(prev => {
+        if (prev === '.') return '..';
+        if (prev === '..') return '...';
+        return '.';
+      });
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [isLoading]);
 
 
   const handleSend = async (messageText = null) => {
@@ -264,6 +280,14 @@ const ChatInterfaceTesting = () => {
   };
 
   const showRecommendationsFromOnboarding = async () => {
+    // Add loading status message
+    const loadingMsg = {
+      from: 'bot',
+      text: 'Analisando suas preferências...'
+    };
+    setMessages(prev => [...prev, loadingMsg]);
+    setIsLoading(true);
+
     try {
       const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
@@ -282,8 +306,13 @@ const ChatInterfaceTesting = () => {
       });
 
       const data = await response.json();
-      const recMsg = { from: 'bot', text: data.response };
-      setMessages(prev => [...prev, recMsg]);
+
+      // Replace loading message with actual response
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = { from: 'bot', text: data.response };
+        return newMessages;
+      });
 
       // Handle suggested questions if any
       if (data.suggestedQuestions) {
@@ -291,8 +320,18 @@ const ChatInterfaceTesting = () => {
       }
     } catch (error) {
       console.error('Failed to get recommendations:', error);
-      const errorMsg = { from: 'bot', text: 'Desculpe, ocorreu um erro ao obter recomendações. Pode tentar novamente?' };
-      setMessages(prev => [...prev, errorMsg]);
+
+      // Replace loading message with error message
+      setMessages(prev => {
+        const newMessages = [...prev];
+        newMessages[newMessages.length - 1] = {
+          from: 'bot',
+          text: 'Desculpe, ocorreu um erro ao obter recomendações. Pode tentar novamente?'
+        };
+        return newMessages;
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -380,13 +419,13 @@ const ChatInterfaceTesting = () => {
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
               <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#d1d5db', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#4b5563', fontWeight: 'bold' }}>CB</div>
               <div style={{ borderRadius: '8px', padding: '8px 12px', backgroundColor: '#e5e7eb', color: '#1f2937' }}>
-                <p style={{ fontSize: '0.875rem' }}>...</p>
+                <p style={{ fontSize: '0.875rem' }}>{typingIndicator}</p>
               </div>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
-        <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+        <div style={{ paddingTop: '16px', paddingBottom: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
           {/* Onboarding UI */}
           {onboarding.started && !onboarding.completed && onboardingConfig?.questions && Array.isArray(onboardingConfig.questions) && (
             <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
@@ -419,7 +458,30 @@ const ChatInterfaceTesting = () => {
                       {onboarding.answers[question.id] && (
                         <button
                           onClick={() => setOnboarding(prev => ({ ...prev, step: step + 1 }))}
-                          style={{ padding: '8px 16px', backgroundColor: '#3b82f6', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', alignSelf: 'flex-end' }}
+                          style={{
+                            padding: '8px 16px',
+                            backgroundColor: '#3b82f6',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            marginLeft: 'auto',
+                            marginRight: 0,
+                            display: 'block',
+                            transition: 'background-color 0.2s, transform 0.1s'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.backgroundColor = '#2563eb';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.backgroundColor = '#3b82f6';
+                          }}
+                          onMouseDown={(e) => {
+                            e.target.style.transform = 'scale(0.95)';
+                          }}
+                          onMouseUp={(e) => {
+                            e.target.style.transform = 'scale(1)';
+                          }}
                         >
                           Seguinte
                         </button>
@@ -460,7 +522,28 @@ const ChatInterfaceTesting = () => {
                           border: 'none',
                           borderRadius: '4px',
                           cursor: (!question.fields.every(field => onboarding.answers[field.id])) ? 'not-allowed' : 'pointer',
-                          alignSelf: 'flex-end'
+                          alignSelf: 'flex-end',
+                          transition: 'background-color 0.2s, transform 0.1s'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!e.target.disabled) {
+                            e.target.style.backgroundColor = '#2563eb';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!e.target.disabled) {
+                            e.target.style.backgroundColor = '#3b82f6';
+                          }
+                        }}
+                        onMouseDown={(e) => {
+                          if (!e.target.disabled) {
+                            e.target.style.transform = 'scale(0.95)';
+                          }
+                        }}
+                        onMouseUp={(e) => {
+                          if (!e.target.disabled) {
+                            e.target.style.transform = 'scale(1)';
+                          }
                         }}
                       >
                         Concluir
@@ -474,7 +557,7 @@ const ChatInterfaceTesting = () => {
           )}
 
           {suggestedQuestions.length > 0 && (
-            <div style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end' }}>
+            <div style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end', padding: '0 16px 0 16px' }}>
               {suggestedQuestions.map((question, index) => (
                 <div
                   key={index}
@@ -497,7 +580,7 @@ const ChatInterfaceTesting = () => {
               ))}
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px' }}>
             <input
               type="text"
               placeholder="Type your message..."
@@ -510,7 +593,36 @@ const ChatInterfaceTesting = () => {
             <button
               onClick={() => handleSend()}
               disabled={isLoading || !visitorId} // Disable if loading or visitorId is not set
-              style={{ padding: '8px 16px', backgroundColor: '#3b82f6', color: '#ffffff', border: 'none', borderRadius: '4px', cursor: 'pointer', opacity: (isLoading || !visitorId) ? 0.7 : 1 }}
+              style={{
+                padding: '8px 16px',
+                backgroundColor: '#3b82f6',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: (isLoading || !visitorId) ? 'not-allowed' : 'pointer',
+                opacity: (isLoading || !visitorId) ? 0.7 : 1,
+                transition: 'background-color 0.2s, transform 0.1s'
+              }}
+              onMouseEnter={(e) => {
+                if (!(isLoading || !visitorId)) {
+                  e.target.style.backgroundColor = '#2563eb';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!(isLoading || !visitorId)) {
+                  e.target.style.backgroundColor = '#3b82f6';
+                }
+              }}
+              onMouseDown={(e) => {
+                if (!(isLoading || !visitorId)) {
+                  e.target.style.transform = 'scale(0.95)';
+                }
+              }}
+              onMouseUp={(e) => {
+                if (!(isLoading || !visitorId)) {
+                  e.target.style.transform = 'scale(1)';
+                }
+              }}
             >
               Send
             </button>

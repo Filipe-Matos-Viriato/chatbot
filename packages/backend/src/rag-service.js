@@ -16,6 +16,7 @@ import { renderTemplate } from './utils/prompt.js';
 import { createLogger } from './utils/structured-logger.js';
 import { extractListingIdFromUrl, extractListingIdFromQuery, extractQueryFilters, isAggregativePriceQuery, QUERY_SCOPE } from './utils/rag-parsing.js';
 import { removeRedundantClosingCTA } from './utils/postprocess.js';
+import { generateHybridQuestions } from './utils/question-strategies.js';
 import supabase from './config/supabase.js';
 
 // Initialize clients
@@ -284,6 +285,33 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 
 // parsing helpers now imported from ./utils/rag-parsing.js
 
+/**
+ * Determines the type of query for context-aware question generation
+ * @param {string} query - User query
+ * @returns {string|null} Query type or null
+ */
+function determineQueryType(query) {
+  const lowerQuery = query.toLowerCase();
+
+  if (lowerQuery.includes('preço') || lowerQuery.includes('custo') ||
+      lowerQuery.includes('valor') || lowerQuery.includes('€')) {
+    return 'PRICE';
+  }
+
+  if (lowerQuery.includes('localização') || lowerQuery.includes('zona') ||
+      lowerQuery.includes('área') || lowerQuery.includes('bairro')) {
+    return 'LOCATION';
+  }
+
+  if (lowerQuery.includes('comodidade') || lowerQuery.includes('característica') ||
+      lowerQuery.includes('piscina') || lowerQuery.includes('garagem') ||
+      lowerQuery.includes('terraço')) {
+    return 'AMENITIES';
+  }
+
+  return null;
+}
+
 function extractFeatureFromQuery(query) {
    const lower = query.toLowerCase();
    let feature = query;
@@ -412,6 +440,90 @@ function transformOnboardingToQuery(onboardingAnswers) {
 
    return queryParts.join(" ");
  }
+
+/**
+ * Enriches user context with behavioral data for personalized question generation
+ * @param {string} visitorId - Unique visitor identifier
+ * @param {string} clientId - Client UUID
+ * @returns {Promise<Object>} User context object
+ */
+async function enrichUserContext(visitorId, clientId) {
+  if (!visitorId) {
+    return {
+      leadScore: 0,
+      preferences: {},
+      recentEvents: [],
+      hasHistory: false
+    };
+  }
+
+  try {
+    // Single optimized query with join - ~20ms
+    const { data, error } = await supabase
+      .from('visitors')
+      .select(`
+        lead_score,
+        previous_lead_score,
+        tipologia,
+        budget,
+        development_preference,
+        name,
+        email,
+        phone,
+        events!inner(
+          event_type,
+          timestamp,
+          listing_id
+        )
+      `)
+      .eq('visitor_id', visitorId)
+      .eq('client_id', clientId)
+      .order('events.timestamp', { ascending: false })
+      .limit(5) // Only recent events
+      .single();
+
+    if (error || !data) {
+      console.warn(`[enrichUserContext] No data found for visitor ${visitorId}`);
+      return {
+        leadScore: 0,
+        preferences: {},
+        recentEvents: [],
+        hasHistory: false
+      };
+    }
+
+    // Calculate engagement trend
+    const scoreTrend = data.lead_score - (data.previous_lead_score || 0);
+    const engagementLevel = data.lead_score >= 70 ? 'high' :
+                           data.lead_score >= 40 ? 'medium' : 'low';
+
+    return {
+      leadScore: data.lead_score || 0,
+      scoreTrend,
+      engagementLevel,
+      preferences: {
+        tipologia: data.tipologia,
+        budget: data.budget,
+        development: data.development_preference
+      },
+      recentEvents: (data.events || []).map(e => ({
+        type: e.event_type,
+        listingId: e.listing_id,
+        timestamp: e.timestamp
+      })),
+      hasContact: Boolean(data.email || data.phone),
+      hasHistory: true
+    };
+  } catch (error) {
+    console.error('[enrichUserContext] Error:', error);
+    return {
+      leadScore: 0,
+      preferences: {},
+      recentEvents: [],
+      hasHistory: false
+    };
+  }
+}
 
 async function generateResponse(query, clientConfig, queryEmbeddingVector, externalContext = null, userContext = null, chatHistory = null, pageUrl = null, contextShifted = false, visitorId = null, onboardingContext = null) {
    // Normalize externalContext format for backward compatibility
@@ -748,11 +860,46 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       truncatedChatHistory = "Nenhum histórico anterior disponível";
   }
 
+  // NEW: Enrich user context for personalized questions
+  const enrichedUserContext = await enrichUserContext(visitorId, clientConfig.clientId);
+
+  // NEW: Build context-aware question generation instructions
+  let questionGenerationContext = '';
+
+  if (enrichedUserContext.hasHistory) {
+    questionGenerationContext = `
+CONTEXTO DO UTILIZADOR PARA FRASES SUGERIDAS:
+- Nível de Engagement: ${enrichedUserContext.engagementLevel} (Score: ${enrichedUserContext.leadScore}/100)
+- Tendência: ${enrichedUserContext.scoreTrend > 0 ? 'crescente (+' + enrichedUserContext.scoreTrend + ')' :
+             enrichedUserContext.scoreTrend < 0 ? 'decrescente (' + enrichedUserContext.scoreTrend + ')' : 'estável'}
+${enrichedUserContext.preferences.tipologia ? `- Preferência de Tipologia: ${enrichedUserContext.preferences.tipologia}` : ''}
+${enrichedUserContext.preferences.budget ? `- Orçamento: €${enrichedUserContext.preferences.budget.toLocaleString('pt-PT')}` : ''}
+${enrichedUserContext.preferences.development ? `- Empreendimento de Interesse: ${enrichedUserContext.preferences.development}` : ''}
+${enrichedUserContext.recentEvents.length > 0 ? `- Ações Recentes: ${enrichedUserContext.recentEvents.map(e => e.type).join(', ')}` : ''}
+${enrichedUserContext.hasContact ? '- Utilizador já forneceu contacto (lead qualificado)' : '- Utilizador ainda não forneceu contacto'}
+
+ESTRATÉGIA DE FRASES BASEADA NO ENGAGEMENT:
+${enrichedUserContext.engagementLevel === 'high' ? `
+- FOCO: Conversão e ação imediata
+- Sugerir: marcar visita, falar com consultor, processo de compra
+- Tom: Direto e orientado para decisão
+` : enrichedUserContext.engagementLevel === 'medium' ? `
+- FOCO: Aprofundamento e comparação
+- Sugerir: características específicas, comparar opções, financiamento
+- Tom: Informativo e exploratório
+` : `
+- FOCO: Descoberta e orientação
+- Sugerir: explorar opções, entender características, conhecer empreendimentos
+- Tom: Educativo e acolhedor
+`}
+`;
+  }
+
   const systemPromptTemplate = clientConfig.prompts.systemInstruction;
   if (!systemPromptTemplate) {
       throw new Error("System prompt is not defined in the client configuration.");
   }
-  
+
   const templateVariables = {
     chatHistory: truncatedChatHistory,
     context: context +
@@ -771,14 +918,16 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
 
   // Add conditional instructions for GENERAL_FILTERED queries to control introductory text and formatting
-  // Skip for onboarding recommendations to prevent prompt conflicts
-  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query) && !isOnboardingRecommendation) {
-    const requestedFeature = extractFeatureFromQuery(query);
-    if (queryFilters.wantsAll) {
-      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão todos os ${requestedFeature} disponíveis:". Liste TODOS os imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [beds], **Preço:** [preço]€\n\n. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
-    } else {
-      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "Aqui estão algumas opções de ${requestedFeature} disponíveis:". Liste algumas opções dos imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [beds], **Preço:** [preço]€\n\n. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
-    }
+  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query)) {
+    const requestedFeature = isOnboardingRecommendation ?
+      "imóveis baseados nas suas preferências" :
+      extractFeatureFromQuery(query);
+
+    const introMessage = isOnboardingRecommendation ?
+      (onboardingContext?.completionMessage || "Com base nas suas preferências") + ", aqui estão algumas opções disponíveis:" :
+      `Aqui estão algumas opções de ${requestedFeature} disponíveis:`;
+
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "${introMessage}". Liste algumas opções dos imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [beds], **Preço:** [preço]€\n\n. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
   }
 
   // CRITICAL ANTI-HALLUCINATION INSTRUCTIONS - MUST BE FOLLOWED (excluded for GENERAL_FILTERED since features are verified)
@@ -838,34 +987,39 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     systemPrompt += `\n\n${queryFilters.intents.join('\n\n')}`;
   }
 
-  // Add onboarding-specific instructions if this is an onboarding recommendation
-  if (isOnboardingRecommendation) {
-    systemPrompt += `\n\n*** INSTRUÇÃO ESPECIAL PARA RECOMENDAÇÕES DE ONBOARDING ***
-Esta é uma recomendação personalizada baseada nas preferências do utilizador do onboarding.
-INSTRUÇÃO CRÍTICA: Comece SEMPRE a resposta dizendo exatamente "${onboardingContext.completionMessage || 'Com base nas suas preferências'}".
-Liste 3-5 imóveis que correspondam às preferências do utilizador (tipologia: ${onboardingContext.typology || 'qualquer'}, orçamento: ${onboardingContext.budget_bucket || 'qualquer'}).
-Formate cada imóvel como: **Nome do Imóvel** - €PREÇO\n  • Tipologia: [tipo]\n  • Quartos: [beds]\n  • Características principais\n\n
-NÃO mencione IDs internos dos imóveis.
-Use formatação rica com **negrito** para nomes e preços.
-Garanta que as recomendações são relevantes e personalizadas.
-*** IMPORTANTE *** Não pergunte pelo contacto - isso já foi feito no onboarding.`;
-  }
 
   // CRITICAL INSTRUCTION: Always generate suggested questions (overrides all other instructions)
-  systemPrompt += `\n\n*** INSTRUÇÃO CRÍTICA E OBRIGATÓRIA PARA FRASES SUGERIDAS ***
-APÓS a resposta principal, DEVE gerar exatamente 2-3 frases concretas e relevantes ainda nao respondidas, que antecipem as necessidades do visitante.
-AS FRASES DEVEM SER ESPECÍFICAS ao contexto do imóvel ou consulta, NÃO GENÉRICAS.
-*** IMPORTANTE *** As frases DEVEM SER formuladas na primeira pessoa, como se o visitante estivesse a falar diretamente ao chatbot. NÃO use frases que o chatbot diria ao visitante.
-Exemplos CORRETOS (primeira pessoa): "Estou interessado em saber a área do terraço", "Quero conhecer as opções de financiamento"
-Exemplos INCORRETOS (evitar): "Quer saber a área do terraço?", "Gostaria de mais informações?"
-NÃO use frases como "Como posso ajudá-lo mais?" ou "Se desejar mais detalhes...".
-FORMATO OBRIGATÓRIO: Apresente as frases em formato JSON no final da resposta, usando esta estrutura exata:
+  // Use database-driven prompt with fallback to hardcoded version
+  const enhancedQuestionPrompt = clientConfig.enhanced_question_generation_prompt ||
+    `*** INSTRUÇÃO CRÍTICA E OBRIGATÓRIA PARA FRASES SUGERIDAS ***
+${questionGenerationContext}
+
+APÓS a resposta principal, DEVE gerar exatamente 2-3 frases concretas e relevantes ainda não respondidas, que antecipem as necessidades do visitante.
+
+AS FRASES DEVEM SER:
+1. ESPECÍFICAS ao contexto atual (imóvel, desenvolvimento, ou geral)
+2. PERSONALIZADAS com base no nível de engagement e preferências do utilizador
+3. PROGRESSIVAS - guiar o utilizador para o próximo passo lógico na sua jornada
+4. FORMULADAS na primeira pessoa (como se o visitante estivesse a falar)
+
+EXEMPLOS CONTEXTUAIS:
+${externalContext?.type === 'listing' ? `
+- Engagement Alto: "Estou interessado em marcar uma visita a este imóvel", "Quero falar com um consultor sobre este apartamento"
+- Engagement Médio: "Estou interessado em saber as opções de financiamento", "Quero comparar com outros T${queryFilters.num_bedrooms || 'X'}"
+- Engagement Baixo: "Estou curioso sobre as características desta zona", "Quero ver outros imóveis semelhantes"
+` : `
+- Engagement Alto: "Estou pronto para marcar visitas aos imóveis", "Quero falar sobre o processo de compra"
+- Engagement Médio: "Estou interessado em comparar preços e características", "Quero saber mais sobre financiamento"
+- Engagement Baixo: "Estou a começar a procurar, pode orientar-me?", "Quero conhecer as opções disponíveis"
+`}
+
+FORMATO OBRIGATÓRIO: Apresente as frases em formato JSON no final da resposta:
 {"suggested_questions": ["Frase 1", "Frase 2", "Frase 3"]}
-Exemplos de frases concretas:
-- Para imóvel específico: "Estou interessado em saber a área do terraço", "Quero conhecer as opções de financiamento disponíveis"
-- Para consultas gerais: "Estou interessado em imóveis noutra faixa de preço", "Quero saber quais são as características disponíveis"
+
 A resposta principal deve terminar normalmente, e o JSON das frases sugeridas deve vir APÓS a resposta, separado por uma linha em branco.
 ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPRE.`;
+
+  systemPrompt += `\n\n${enhancedQuestionPrompt}`;
 
   // Removed: systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
@@ -904,21 +1058,54 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPR
           const jsonPart = jsonMatch[0];
           console.log(`[${clientConfig.clientName}] Found JSON part: ${jsonPart}`);
           const parsed = JSON.parse(jsonPart);
+
           if (parsed.suggested_questions && Array.isArray(parsed.suggested_questions)) {
-            suggestedQuestions = parsed.suggested_questions;
+            // NEW: Use hybrid approach for validation and fallback
+            const questionContext = {
+              leadScore: enrichedUserContext.leadScore,
+              hasListingContext: Boolean(externalContext?.type === 'listing'),
+              hasDevelopmentContext: Boolean(externalContext?.type === 'development'),
+              lastQueryType: determineQueryType(query), // Helper function to detect query type
+              preferences: enrichedUserContext.preferences
+            };
+
+            suggestedQuestions = generateHybridQuestions(
+              parsed.suggested_questions,
+              questionContext
+            );
+
             // Remove the JSON part from the main response
             cleanedResponse = raw.replace(jsonPart, '').trim();
-            console.log(`[${clientConfig.clientName}] Successfully parsed ${suggestedQuestions.length} suggested questions`);
+            console.log(`[${clientConfig.clientName}] Generated ${suggestedQuestions.length} questions (hybrid approach)`);
           } else {
             console.warn(`[${clientConfig.clientName}] JSON parsed but suggested_questions not found or not an array:`, parsed);
+            // Fallback to templates
+            suggestedQuestions = generateHybridQuestions([], {
+              leadScore: enrichedUserContext.leadScore,
+              hasListingContext: Boolean(externalContext?.type === 'listing'),
+              hasDevelopmentContext: Boolean(externalContext?.type === 'development'),
+              preferences: enrichedUserContext.preferences
+            });
           }
         } else {
           console.warn(`[${clientConfig.clientName}] No JSON match found in response. Response ends with: "${raw.slice(-100)}"`);
+          // Fallback to templates
+          suggestedQuestions = generateHybridQuestions([], {
+            leadScore: enrichedUserContext.leadScore,
+            hasListingContext: Boolean(externalContext?.type === 'listing'),
+            hasDevelopmentContext: Boolean(externalContext?.type === 'development'),
+            preferences: enrichedUserContext.preferences
+          });
         }
       } catch (error) {
-        console.warn(`[${clientConfig.clientName}] Failed to parse suggested questions JSON:`, error.message);
-        console.warn(`[${clientConfig.clientName}] Raw response:`, raw);
-        // If parsing fails, keep the original response as-is
+        console.warn(`[${clientConfig.clientName}] Failed to parse suggested questions:`, error.message);
+        // Fallback to templates
+        suggestedQuestions = generateHybridQuestions([], {
+          leadScore: enrichedUserContext?.leadScore || 0,
+          hasListingContext: Boolean(externalContext?.type === 'listing'),
+          hasDevelopmentContext: Boolean(externalContext?.type === 'development'),
+          preferences: enrichedUserContext?.preferences || {}
+        });
       }
 
       const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';
@@ -1013,8 +1200,9 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
   console.log(`[RAG-SERVICE] Built context for LLM, length: ${context.length} characters`);
   console.log(`[RAG-SERVICE] Context content:`, context);
 
-  const prompt = `
-    You are a real estate chatbot assistant. Based on the following context about a real estate listing or development, generate exactly three distinct, relevant, and concise questions that a potential buyer or tenant might ask about this property.
+  // Use database-driven prompt with fallback to hardcoded version
+  const prompt = clientConfig.basic_suggested_questions_prompt ||
+    `You are a real estate chatbot assistant. Based on the following context about a real estate listing or development, generate exactly three distinct, relevant, and concise questions that a potential buyer or tenant might ask about this property.
 
     IMPORTANT: All questions must be specifically related to real estate, property features, pricing, location, or buying/renting process. Do not generate questions about unrelated topics like technology, healthcare, or general knowledge.
 
@@ -1025,8 +1213,7 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
     If you cannot generate three relevant real estate questions from the context, return {"questions": []}.
 
     Context:
-    ${context}
-  `;
+    ${context}`;
 
   console.log(`[RAG-SERVICE] Sending prompt to LLM`);
 

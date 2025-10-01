@@ -9,8 +9,15 @@ import UrlPatternEditor from './UrlPatternEditor';
 import PromptsEditor from './PromptsEditor';
 import ChatHistoryTaggingRulesEditor from './ChatHistoryTaggingRulesEditor';
 import LeadScoringRulesEditor from './LeadScoringRulesEditor';
+import OnboardingQuestionsEditor from './OnboardingQuestionsEditor';
+import QuestionGenerationSettingsEditor from './QuestionGenerationSettingsEditor';
+import QuestionTemplatesEditor from './QuestionTemplatesEditor';
+import QuestionTemplatesObservations from './QuestionTemplatesObservations';
+import QuestionGenerationStrategiesInfo from './QuestionGenerationStrategiesInfo';
 import ListingTaggingPromptEditor from './ListingTaggingPromptEditor';
 import DevelopmentTaggingPromptEditor from './DevelopmentTaggingPromptEditor';
+import EnhancedQuestionGenerationPromptEditor from './EnhancedQuestionGenerationPromptEditor';
+import BasicSuggestedQuestionsPromptEditor from './BasicSuggestedQuestionsPromptEditor';
 import EmbedScriptGenerator from './EmbedScriptGenerator';
 
 const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditingClient, fetchClients, setError }) => {
@@ -25,7 +32,7 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
     e.preventDefault();
     try {
       const dataToSend = { ...editFormData };
-            const jsonFields = ['document_extraction', 'chunking_rules', 'tagging_rules', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules'];
+            const jsonFields = ['document_extraction', 'chunking_rules', 'tagging_rules', 'prompts', 'chat_history_tagging_rules', 'lead_scoring_rules', 'default_onboarding_questions', 'question_generation_config', 'question_templates', 'enhanced_question_generation_prompt', 'basic_suggested_questions_prompt'];
 
       for (const field of jsonFields) {
         if (dataToSend[field]) {
@@ -139,10 +146,32 @@ const EditClientForm = ({ editingClient, editFormData, setEditFormData, setEditi
           value={editFormData.lead_scoring_rules}
           onChange={handleEditFormChange}
         />
-        <EmbedScriptGenerator
-          clientId={editFormData.client_id}
-          clientName={editFormData.client_name}
+        <OnboardingQuestionsEditor
+          value={editFormData.default_onboarding_questions}
+          onChange={handleEditFormChange}
         />
+        <QuestionGenerationSettingsEditor
+          value={editFormData.question_generation_config}
+          onChange={handleEditFormChange}
+        />
+        <QuestionGenerationStrategiesInfo />
+        <QuestionTemplatesEditor
+           value={editFormData.question_templates}
+           onChange={handleEditFormChange}
+         />
+         <QuestionTemplatesObservations />
+         <EnhancedQuestionGenerationPromptEditor
+           value={editFormData.enhanced_question_generation_prompt}
+           onChange={handleEditFormChange}
+         />
+         <BasicSuggestedQuestionsPromptEditor
+           value={editFormData.basic_suggested_questions_prompt}
+           onChange={handleEditFormChange}
+         />
+         <EmbedScriptGenerator
+           clientId={editFormData.client_id}
+           clientName={editFormData.client_name}
+         />
         <div className="md:col-span-3 flex justify-end items-center">
           <button
             type="button"

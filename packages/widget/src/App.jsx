@@ -636,6 +636,7 @@ class App extends Component {
 
   render() {
     const { isOpen, messages, inputValue, isTyping, config, error, onboarding } = this.state;
+
     
     if (error) {
       return h('div', { 
@@ -869,7 +870,16 @@ class App extends Component {
                   h('button', {
                     onClick: this.submitOnboarding,
                     disabled: !question.fields.every(field => onboarding.answers[field.id]),
-                    style: 'padding:8px 12px; border:1px solid #3f3f3f; background:#6b7280; color:white;'
+                    className: 'onboarding-submit-button',
+                    style: `
+                      padding:8px 12px;
+                      border:1px solid #3f3f3f;
+                      background:#6b7280;
+                      color:white;
+                      cursor:pointer;
+                      transition: all 0.2s ease;
+                      border-radius: 0;
+                    `
                   }, 'Concluir')
                 ])
               ]);
@@ -902,7 +912,32 @@ class App extends Component {
                 background: ${inputValue.trim() ? sendButtonBg : '#4b5563'};
                 color: white;
                 opacity: ${inputValue.trim() ? '1' : '0.7'};
+                cursor: ${inputValue.trim() ? 'pointer' : 'not-allowed'};
               `,
+              onMouseOver: (e) => {
+                if (!e.target.disabled && inputValue.trim()) {
+                  e.target.style.background = '#7c8187';
+                  e.target.style.transform = 'translateY(-1px)';
+                }
+              },
+              onMouseOut: (e) => {
+                if (!e.target.disabled && inputValue.trim()) {
+                  e.target.style.background = sendButtonBg;
+                  e.target.style.transform = 'translateY(0)';
+                }
+              },
+              onMouseDown: (e) => {
+                if (!e.target.disabled && inputValue.trim()) {
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = 'inset 0 2px 4px rgba(0,0,0,0.2)';
+                }
+              },
+              onMouseUp: (e) => {
+                if (!e.target.disabled && inputValue.trim()) {
+                  e.target.style.transform = 'translateY(-1px)';
+                  e.target.style.boxShadow = 'none';
+                }
+              },
               'aria-label': 'Send message',
               'aria-disabled': !inputValue.trim(),
               className: 'widget-button widget-send-button'

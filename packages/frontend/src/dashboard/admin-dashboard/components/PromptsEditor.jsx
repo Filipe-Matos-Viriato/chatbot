@@ -1,3 +1,8 @@
+// packages/frontend/src/dashboard/admin-dashboard/components/PromptsEditor.jsx
+// React component providing a dual-mode editor for chatbot prompts with visual and JSON editing capabilities
+// To enable administrators to configure chatbot personality, behavior, and fallback responses through an intuitive interface
+// Relevant files: EditClientForm.jsx, ClientManagementTab.jsx, client-config-service.js, rag-service.js
+
 import React, { useState, useEffect } from 'react';
 
 const PromptsEditor = ({ value, onChange }) => {

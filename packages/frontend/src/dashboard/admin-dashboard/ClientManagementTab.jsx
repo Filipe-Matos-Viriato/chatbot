@@ -22,8 +22,13 @@ const ClientManagementTab = () => {
     prompts: '',
     chat_history_tagging_rules: '',
     lead_scoring_rules: '',
+    default_onboarding_questions: '',
+    question_generation_config: '',
+    question_templates: '',
     listing_tagging_prompt: '',
     development_tagging_prompt: '',
+    enhanced_question_generation_prompt: '',
+    basic_suggested_questions_prompt: '',
   });
 
   const fetchClients = async (searchQuery = '') => {
@@ -64,8 +69,13 @@ const ClientManagementTab = () => {
         prompts: client.prompts ? JSON.stringify(client.prompts, null, 2) : '',
         chat_history_tagging_rules: client.chat_history_tagging_rules ? JSON.stringify(client.chat_history_tagging_rules, null, 2) : '',
         lead_scoring_rules: client.lead_scoring_rules ? JSON.stringify(client.lead_scoring_rules, null, 2) : '',
+        default_onboarding_questions: client.default_onboarding_questions ? JSON.stringify(client.default_onboarding_questions, null, 2) : '',
+        question_generation_config: client.question_generation_config ? JSON.stringify(client.question_generation_config, null, 2) : '',
+        question_templates: client.question_templates ? JSON.stringify(client.question_templates, null, 2) : '',
         listing_tagging_prompt: client.listing_tagging_prompt || '',
         development_tagging_prompt: client.development_tagging_prompt || '',
+        enhanced_question_generation_prompt: client.enhanced_question_generation_prompt || '',
+        basic_suggested_questions_prompt: client.basic_suggested_questions_prompt || '',
       });
     }
   };

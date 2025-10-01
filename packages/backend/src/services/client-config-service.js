@@ -68,7 +68,28 @@ async function getClientConfig(clientId) {
       questions: data.default_onboarding_questions?.questions || null,
       introMessage: data.default_onboarding_questions?.introMessage || null,
       completionMessage: data.default_onboarding_questions?.completionMessage || null
-    }
+    },
+    // Add question generation configuration
+    questionGenerationConfig: data.question_generation_config || {
+      enabled: true,
+      strategy: 'hybrid',
+      fallback_behavior: 'template',
+      question_count: 3,
+      personalization: {
+        use_budget: true,
+        use_tipologia: true,
+        use_development_preference: true
+      },
+      engagement_thresholds: {
+        high: 70,
+        medium: 40
+      }
+    },
+    // Add question templates from database
+    questionTemplates: data.question_templates,
+    // Add question generation prompts from database
+    enhanced_question_generation_prompt: data.enhanced_question_generation_prompt,
+    basic_suggested_questions_prompt: data.basic_suggested_questions_prompt
   };
 
   configCache.set(cacheKey, clientConfig);
