@@ -45,7 +45,7 @@ const TWO_QUERY_ENABLED = String(process.env.RAG_TWO_QUERY_ENABLED || 'true') ==
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const log = createLogger('rag-service');
 
-async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}, queryScope = QUERY_SCOPE.GENERAL_UNFILTERED) {
+async function performHybridSearch(searchVector, clientConfig, externalContext = null, originalQuery = "", userContext = null, queryFilters = {}, queryScope = QUERY_SCOPE.GENERAL_UNFILTERED, visitorId = null, isOnboardingRecommendation = false) {
   // Validate search vector before proceeding
   if (!searchVector) {
     console.error(`[${clientConfig.clientName}] ❌ FATAL ERROR: Search vector is null or undefined`);
@@ -264,6 +264,9 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     // Dynamically adjust topN based on queryScope to ensure broader results for general queries
     const topN = queryScope === QUERY_SCOPE.GENERAL_FILTERED ? 50 : 20;
 
+    // Get user preferences for re-ranking logic
+    const userPreferencesForReRanking = visitorId ? await visitorService.getUserPreferences(visitorId, clientConfig.clientId) : null;
+
     reRankedResult = reRankMatches({
       matches,
       contextListingId,
@@ -273,6 +276,8 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       queryScope,
       topN,
       targetedMatches: targetedResponse?.matches || [],
+      userPreferences: userPreferencesForReRanking,
+      isOnboardingRecommendation,
     });
     matches = reRankedResult.rankedMatches;
   }
@@ -448,6 +453,8 @@ function transformOnboardingToQuery(onboardingAnswers) {
  * @returns {Promise<Object>} User context object
  */
 async function enrichUserContext(visitorId, clientId) {
+  console.log(`[enrichUserContext] Called with visitorId: ${visitorId}, clientId: ${clientId}`);
+
   if (!visitorId) {
     return {
       leadScore: 0,
@@ -470,7 +477,7 @@ async function enrichUserContext(visitorId, clientId) {
         name,
         email,
         phone,
-        events!inner(
+        events(
           event_type,
           timestamp,
           listing_id
@@ -593,7 +600,9 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   if (isOnboardingRecommendation) {
     queryFilters = convertOnboardingToFilters(onboardingContext);
   } else {
-    queryFilters = extractQueryFilters(query, null, clientConfig);
+    // Get user preferences for persistent context enrichment
+    const userPreferences = visitorId ? await visitorService.getUserPreferences(visitorId, clientConfig.clientId) : null;
+    queryFilters = extractQueryFilters(query, null, clientConfig, userPreferences);
   }
 
   // Extract queried feature for potential no-matches handling
@@ -651,7 +660,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 
   let queryResponse = { matches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
   try {
-    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters, queryScope);
+    queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters, queryScope, visitorId, isOnboardingRecommendation);
   } catch (error) {
     console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
     // Return empty matches if search fails due to invalid embedding
@@ -980,6 +989,9 @@ ${enrichedUserContext.engagementLevel === 'high' ? `
   if (queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT' && queryResponse.matches.length > 0) {
     const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Comece sempre a resposta dizendo "Desculpe, mas o imóvel atual não tem ${feature}. No entanto, aqui estão algumas opções disponíveis:" e depois liste as alternativas do contexto.`;
+  } else if (queryResponse.contextualMatchStatus === 'MATCH_IN_CONTEXT' && queryResponse.matches.length > 0) {
+    const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O imóvel atual TEM ${feature}. Comece a resposta confirmando diretamente que "Este imóvel tem ${feature}." Não mostre alternativas a menos que o utilizador peça explicitamente.`;
   }
 
   // Dynamic intent-based instructions from database configuration
@@ -1173,7 +1185,7 @@ async function generateSuggestedQuestions(clientConfig, externalContext = null, 
 
   let queryResponse;
   try {
-    queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, searchQuery, userContext);
+    queryResponse = await performHybridSearch(queryEmbedding.data[0].embedding, clientConfig, externalContext, searchQuery, userContext, {}, QUERY_SCOPE.GENERAL_UNFILTERED, null);
     console.log(`[RAG-SERVICE] performHybridSearch returned ${queryResponse.matches.length} matches`);
   } catch (error) {
     console.error(`[${clientConfig.clientName}] Error in performHybridSearch for suggested questions:`, error);

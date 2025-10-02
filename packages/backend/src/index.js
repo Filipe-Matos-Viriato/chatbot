@@ -799,7 +799,7 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
    
-  // API endpoint to get a visitor by ID
+  // API endpoint to validate visitor session
   app.post('/v1/visitor', async (req, res) => {
     try {
       const { visitorId } = req.body;
@@ -810,10 +810,10 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       if (!visitor) {
         return res.status(404).json({ error: 'Visitor not found' });
       }
-      res.json(visitor);
+      res.json({ valid: true, visitor_id: visitor.visitor_id });
     } catch (error) {
-      console.error('Error getting visitor:', error);
-      res.status(500).json({ error: 'Failed to get visitor.' });
+      console.error('Error validating visitor:', error);
+      res.status(500).json({ error: 'Failed to validate visitor.' });
     }
   });
 

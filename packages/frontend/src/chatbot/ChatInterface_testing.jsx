@@ -7,6 +7,7 @@ import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { API_BASE_URL } from '../config/apiClient';
 import { detectEventType, extractContactInfo, logEvent } from '../utils/eventLogging.js';
+import VisitorSessionManager from '../utils/visitorSessionManager';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -17,13 +18,18 @@ const generateUUID = () => {
 
 
 const ChatInterfaceTesting = () => {
+  // Hardcode client ID for testing purposes as requested by the user
+  const TEST_CLIENT_ID = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c';
+
   const [messages, setMessages] = useState([
     { from: 'bot', text: 'Olá! Sou o seu assistente virtual. Como posso ajudar?' },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionManager] = useState(() => new VisitorSessionManager(TEST_CLIENT_ID, API_BASE_URL));
+  const [visitorId, setVisitorId] = useState(null);
   const [sessionId, setSessionId] = useState(null);
-  const [visitorId, setVisitorId] = useState(null); // Initialize as null, will be fetched dynamically
+  const [sessionHealth, setSessionHealth] = useState('initializing');
   const [listings, setListings] = useState([]); // New state for listings
   const [selectedListingId, setSelectedListingId] = useState(''); // New state for selected listing ID
   const [suggestedQuestions, setSuggestedQuestions] = useState([]); // State for suggested questions at bottom
@@ -49,34 +55,28 @@ const ChatInterfaceTesting = () => {
   });
   const [onboardingConfig, setOnboardingConfig] = useState(null);
 
-  // Hardcode client ID for testing purposes as requested by the user
-  const TEST_CLIENT_ID = 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c';
 
   useEffect(() => {
-    setSessionId(generateUUID());
     setChatStartTime(Date.now()); // Initialize chat start time
 
-    // Fetch or create visitor ID
-    const initializeVisitor = async () => {
+    // Initialize session using VisitorSessionManager
+    const initializeSession = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/v1/sessions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ clientId: TEST_CLIENT_ID }),
-        });
-        const data = await response.json();
-        setVisitorId(data.visitor_id);
-        console.log("Visitor ID initialized:", data.visitor_id);
+        setSessionHealth('loading');
+        const session = await sessionManager.getOrCreateSession();
+        setVisitorId(session.visitorId);
+        setSessionId(session.sessionId);
+        setSessionHealth('healthy');
+        console.log('[ChatInterface] Session initialized:', session);
       } catch (error) {
-        console.error("Failed to initialize visitor session:", error);
+        console.error('[ChatInterface] Failed to initialize session:', error);
+        setSessionHealth('error');
         // Set visitorId to null to disable chat input and button
         setVisitorId(null);
       }
     };
 
-    initializeVisitor();
+    initializeSession();
 
     // Load onboarding config
     const loadOnboardingConfig = async () => {
@@ -91,7 +91,7 @@ const ChatInterfaceTesting = () => {
     };
 
     loadOnboardingConfig();
-  }, []); // Run once on mount
+  }, [sessionManager]); // Run once on mount
 
   useEffect(() => {
     const fetchListings = async () => {
@@ -121,6 +121,62 @@ const ChatInterfaceTesting = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Add session recovery for visibility changes (page focus)
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && !visitorId) {
+        console.log('[ChatInterface] Page became visible, checking for session recovery');
+        const currentSession = sessionManager.getCurrentSession();
+        if (currentSession && await sessionManager.validateSession(currentSession)) {
+          setVisitorId(currentSession.visitorId);
+          setSessionId(currentSession.sessionId);
+          setSessionHealth('recovered');
+          console.log('[ChatInterface] Session recovered:', currentSession.visitorId);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [visitorId, sessionManager]);
+
+  // Add session health check function
+  const checkSessionHealth = async () => {
+    if (!visitorId) {
+      setSessionHealth('no-session');
+      return;
+    }
+
+    try {
+      const isValid = await sessionManager.validateSession({ visitorId });
+      setSessionHealth(isValid ? 'healthy' : 'invalid');
+    } catch (error) {
+      console.error('[ChatInterface] Session health check failed:', error);
+      setSessionHealth('error');
+    }
+  };
+
+  // Periodic health checks
+  useEffect(() => {
+    if (visitorId) {
+      const healthCheckInterval = setInterval(checkSessionHealth, 30000); // Every 30 seconds
+      return () => clearInterval(healthCheckInterval);
+    }
+  }, [visitorId]);
+
+  // Visual session health indicator (for debugging)
+  const getSessionHealthColor = () => {
+    switch (sessionHealth) {
+      case 'healthy': return 'green';
+      case 'recovered': return 'blue';
+      case 'loading': return 'yellow';
+      case 'error':
+      case 'invalid':
+      case 'no-session': return 'red';
+      default: return 'gray';
+    }
+  };
+
   // Animate typing indicator
   useEffect(() => {
     if (!isLoading) return;
@@ -138,6 +194,13 @@ const ChatInterfaceTesting = () => {
 
 
   const handleSend = async (messageText = null) => {
+    // Validate session before sending
+    if (!visitorId) {
+      console.error('[ChatInterface] No valid visitor session for chat');
+      setSessionHealth('error');
+      return;
+    }
+
     const textToSend = messageText || input.trim();
     if (textToSend) {
       // Check if onboarding should start

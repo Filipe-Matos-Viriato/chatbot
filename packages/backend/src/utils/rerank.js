@@ -15,6 +15,8 @@ export function reRankMatches({
   queryScope,
   topN = 20,
   targetedMatches = [],
+  userPreferences = null,
+  isOnboardingRecommendation = false,
 }) {
   if (!Array.isArray(matches) || matches.length === 0) return { rankedMatches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
 
@@ -174,8 +176,40 @@ export function reRankMatches({
     reRanked = reRanked.filter(m => m.metadata?.listing_id === contextListingId);
     console.log(`[rerank] DEBUG: Contextual listing ${contextListingId} has the queried feature. Filtered to only this listing.`);
   } else if (contextualMatchStatus === 'NO_MATCH_IN_CONTEXT') {
-    // If the contextual listing does NOT have the feature, allow other listings to be returned
-    console.log(`[rerank] DEBUG: Contextual listing ${contextListingId} does not have the queried feature. Allowing other listings.`);
+    // If the contextual listing does NOT have the feature, filter alternatives by user preferences
+    console.log(`[rerank] DEBUG: Contextual listing ${contextListingId} does not have the queried feature. Filtering alternatives by user preferences.`);
+
+    // Filter out the contextual listing and apply user preference filters
+    reRanked = reRanked.filter(m => {
+      const meta = m.metadata || {};
+
+      // Exclude the contextual listing
+      if (meta.listing_id === contextListingId) return false;
+
+      // Apply user preference filters if available
+      if (userPreferences) {
+        // Filter by typology
+        if (userPreferences.typology) {
+          const userTypology = userPreferences.typology;
+          if (userTypology.match(/^T\d+$/i)) {
+            const bedroomCount = parseInt(userTypology.substring(1), 10);
+            if (meta.beds !== bedroomCount) return false;
+          }
+        }
+
+        // Filter by budget range
+        if (userPreferences.budget) {
+          const listingPrice = meta.price;
+          if (listingPrice && listingPrice > userPreferences.budget) {
+            return false; // Price too high
+          }
+        }
+      }
+
+      return true;
+    });
+
+    console.log(`[rerank] DEBUG: After user preference filtering, ${reRanked.length} alternative listings remain.`);
   }
 
   // Post-processing for GENERAL_FILTERED queries to ensure diversity of listings
@@ -207,13 +241,60 @@ export function reRankMatches({
       }
       reRanked = Array.from(uniqueMatches.values());
     } else {
-      // NEW: For non-contextual GENERAL_FILTERED queries (like onboarding recommendations)
-      // Only keep listings that match at least one filter to ensure relevance
-      console.log(`[rerank] Applying filter-based filtering for non-contextual GENERAL_FILTERED query`);
-      const beforeCount = reRanked.length;
-      reRanked = reRanked.filter(m => m.filterMatchCount > 0);
-      const afterCount = reRanked.length;
-      console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings based on filter matches`);
+      // For non-contextual GENERAL_FILTERED queries
+      if (isOnboardingRecommendation) {
+        // STRICT filtering for onboarding recommendations - only exact matches
+        console.log(`[rerank] Applying strict filter-based filtering for onboarding recommendations`);
+        const beforeCount = reRanked.length;
+        reRanked = reRanked.filter(m => m.filterMatchCount > 0);
+        const afterCount = reRanked.length;
+        console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings (strict filtering for onboarding)`);
+      } else {
+        // LENIENT filtering for feature queries - show close alternatives
+        console.log(`[rerank] Applying lenient filter-based filtering for feature queries`);
+        const beforeCount = reRanked.length;
+
+        reRanked = reRanked.filter(m => {
+          const meta = m.metadata || {};
+
+          // Always include listings that match at least one filter
+          if (m.filterMatchCount > 0) return true;
+
+          // For listings that don't match filters, include them if they're reasonably close
+          // to user preferences (for feature queries like "tem terraço?")
+          if (userPreferences) {
+            let isReasonablyClose = false;
+
+            // Check typology - allow adjacent typologies
+            if (userPreferences.typology && userPreferences.typology.match(/^T\d+$/i)) {
+              const userBedrooms = parseInt(userPreferences.typology.substring(1), 10);
+              const listingBedrooms = meta.beds;
+              if (listingBedrooms && Math.abs(listingBedrooms - userBedrooms) <= 1) {
+                isReasonablyClose = true;
+              }
+            }
+
+            // Check budget - allow listings within 20% of the range
+            if (userPreferences.budget && !isReasonablyClose) {
+              const listingPrice = meta.price;
+              if (listingPrice) {
+                const tolerance = userPreferences.budget * 0.2; // 20% tolerance
+                if (Math.abs(listingPrice - userPreferences.budget) <= tolerance) {
+                  isReasonablyClose = true;
+                }
+              }
+            }
+
+            if (isReasonablyClose) return true;
+          }
+
+          // If no user preferences or listing doesn't match/close, exclude it
+          return false;
+        });
+
+        const afterCount = reRanked.length;
+        console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings (lenient filtering for feature queries)`);
+      }
     }
   }
 

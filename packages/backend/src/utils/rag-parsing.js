@@ -79,7 +79,7 @@ export function isAggregativePriceQuery(query) {
 /**
  * Extracts soft filters from a user query for heuristic re-ranking.
  */
-export function extractQueryFilters(query, currentListingPrice = null, clientConfig = null) {
+export function extractQueryFilters(query, currentListingPrice = null, clientConfig = null, userPreferences = null) {
   const filters = {};
   const lowerCaseQuery = String(query || '').toLowerCase();
 
@@ -172,7 +172,76 @@ export function extractQueryFilters(query, currentListingPrice = null, clientCon
   // Detect if user wants a complete list
   filters.wantsAll = lowerCaseQuery.includes('todos') || lowerCaseQuery.includes('all') || lowerCaseQuery.includes('completa') || lowerCaseQuery.includes('complete') || lowerCaseQuery.includes('lista completa');
 
-  // No fallback to hardcoded features or intents - system relies entirely on dynamic configuration
+  // Detect deictic references (these, those, this, that, etc.) for smart context resolution
+  filters.hasDeicticReference = (
+    lowerCaseQuery.includes('estes') ||
+    lowerCaseQuery.includes('estas') ||
+    lowerCaseQuery.includes('esses') ||
+    lowerCaseQuery.includes('essas') ||
+    lowerCaseQuery.includes('estes imóveis') ||
+    lowerCaseQuery.includes('estas opções') ||
+    lowerCaseQuery.includes('algum destes') ||
+    lowerCaseQuery.includes('alguma destas') ||
+    lowerCaseQuery.includes('these') ||
+    lowerCaseQuery.includes('those') ||
+    lowerCaseQuery.includes('this one') ||
+    lowerCaseQuery.includes('that one')
+  );
+
+  if (filters.hasDeicticReference) {
+    console.log(`[rag-parsing] DEBUG: Detected deictic reference, will use user preferences instead of explicit listing context`);
+  }
+
+  // Include user preferences from onboarding for persistent context enrichment
+  if (userPreferences && userPreferences.hasPreferences) {
+    // Add typology preference as a filter
+    if (userPreferences.typology && !filters.typology) {
+      filters.typology = userPreferences.typology;
+      console.log(`[rag-parsing] DEBUG: Added user typology preference: ${userPreferences.typology}`);
+    }
+
+    // Add budget preference as a price range filter
+    if (userPreferences.budget && !filters.price_eur) {
+      // Create a price range around the user's budget preference
+      const budget = userPreferences.budget;
+      const tolerance = 0.3; // 30% tolerance
+      const minPrice = Math.floor(budget * (1 - tolerance));
+      const maxPrice = Math.ceil(budget * (1 + tolerance));
+
+      filters.price_eur = { "$gte": minPrice, "$lte": maxPrice };
+      console.log(`[rag-parsing] DEBUG: Added user budget preference range: €${minPrice}-€${maxPrice}`);
+    }
+
+    // Add development preference if available
+    if (userPreferences.development_preference) {
+      filters.development_preference = userPreferences.development_preference;
+      console.log(`[rag-parsing] DEBUG: Added user development preference: ${userPreferences.development_preference}`);
+    }
+  }
+
+  // Fallback to hardcoded intent detection when no clientConfig is provided (for backward compatibility)
+  if (!clientConfig || !clientConfig.tagging_rules) {
+    // Detect intent for bedroom area queries
+    if (lowerCaseQuery.includes('tamanho') && (lowerCaseQuery.includes('quarto') || lowerCaseQuery.includes('dormitório')) &&
+        !lowerCaseQuery.includes('casa de banho') && !lowerCaseQuery.includes('banheiro') && !lowerCaseQuery.includes('quarto de banho')) {
+      filters.intent_query_bedroom_area = true;
+    }
+
+    // Detect intent for bathroom area queries
+    if (lowerCaseQuery.includes('tamanho') && (lowerCaseQuery.includes('casa de banho') || lowerCaseQuery.includes('banheiro') || lowerCaseQuery.includes('quarto de banho'))) {
+      filters.intent_query_bathroom_area = true;
+    }
+
+    // Detect intent for terrace area queries
+    if (lowerCaseQuery.includes('tamanho') && (lowerCaseQuery.includes('terraço') || lowerCaseQuery.includes('terraco'))) {
+      filters.intent_query_terrace_area = true;
+    }
+
+    // Detect intent for living/kitchen area queries
+    if (lowerCaseQuery.includes('tamanho') && (lowerCaseQuery.includes('sala') || lowerCaseQuery.includes('cozinha'))) {
+      filters.intent_query_living_kitchen_area = true;
+    }
+  }
 
   return filters;
 }

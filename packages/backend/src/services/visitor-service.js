@@ -10,6 +10,8 @@ import { Pinecone } from '@pinecone-database/pinecone';
 class VisitorService {
   constructor() {
     // No longer using in-memory map, data will be stored in Supabase
+    this.preferencesCache = new Map();
+    this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
   }
 
   async createVisitor(clientId, listingId) {
@@ -922,6 +924,67 @@ class VisitorService {
       ]);
     } catch (error) {
       console.error('Failed to upsert visitor preference profile to Pinecone:', error);
+    }
+  }
+
+  /**
+   * Get user preferences from onboarding data for persistent context enrichment
+   * @param {string} visitorId - Visitor ID
+   * @param {string} clientId - Client ID
+   * @returns {Promise<Object>} User preferences object
+   */
+  async getUserPreferences(visitorId, clientId) {
+    const cacheKey = `${clientId}:${visitorId}`;
+    const cached = this.preferencesCache.get(cacheKey);
+
+    // Return cached data if still valid
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.data;
+    }
+
+    try {
+      const { data: visitor, error } = await supabase
+        .from('visitors')
+        .select('tipologia, budget, development_preference, name, email, phone')
+        .eq('visitor_id', visitorId)
+        .eq('client_id', clientId)
+        .single();
+
+      if (error || !visitor) {
+        console.warn(`[getUserPreferences] No visitor found for ${visitorId}`);
+        const emptyPrefs = {
+          typology: null,
+          budget: null,
+          development_preference: null,
+          hasContact: false,
+          hasPreferences: false
+        };
+        this.preferencesCache.set(cacheKey, { data: emptyPrefs, timestamp: Date.now() });
+        return emptyPrefs;
+      }
+
+      const preferences = {
+        typology: visitor.tipologia || null,
+        budget: visitor.budget || null,
+        development_preference: visitor.development_preference || null,
+        hasContact: Boolean(visitor.email || visitor.phone),
+        hasPreferences: Boolean(visitor.tipologia || visitor.budget || visitor.development_preference)
+      };
+
+      // Cache the result
+      this.preferencesCache.set(cacheKey, { data: preferences, timestamp: Date.now() });
+      return preferences;
+    } catch (error) {
+      console.error('[getUserPreferences] Error:', error);
+      const emptyPrefs = {
+        typology: null,
+        budget: null,
+        development_preference: null,
+        hasContact: false,
+        hasPreferences: false
+      };
+      this.preferencesCache.set(cacheKey, { data: emptyPrefs, timestamp: Date.now() });
+      return emptyPrefs;
     }
   }
 
