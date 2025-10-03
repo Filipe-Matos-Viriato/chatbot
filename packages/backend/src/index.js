@@ -1108,7 +1108,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         return res.status(403).json({ error: 'Unauthorized access to client listings.' });
       }
       const listings = await listingService.getListingsByClientId(clientId);
-      console.log('[DEBUG] GET /v1/clients/:clientId/listings response:', listings);
       res.json(listings);
     } catch (error) {
       console.error('Error fetching listings by client ID:', error);
@@ -1508,14 +1507,12 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         console.error(`[Backend] Error fetching listing:`, listingError);
         throw listingError;
       }
-      console.log(`[Backend] Listing data for ID ${id} and Client ID ${clientId}:`, listing);
       console.log(`[Backend] Listing error for ID ${id} and Client ID ${clientId}:`, listingError);
 
       if (metricsError && metricsError.code !== 'PGRST116') {
         console.error(`[Backend] Error fetching metrics:`, metricsError);
         throw metricsError;
       }
-      console.log(`[Backend] Metrics data:`, metrics);
 
       if (unansweredQuestionsError) {
         console.error(`[Backend] Error fetching unanswered questions:`, unansweredQuestionsError);
@@ -1531,7 +1528,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         console.error(`[Backend] Error fetching handoffs:`, handoffsError);
         throw handoffsError;
       }
-      console.log(`[Backend] Handoffs:`, handoffs);
 
 
       // Aggregate handoffs by reason
@@ -1970,7 +1966,6 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
         timestamp: entry.timestamp,
       }));
 
-      console.log('[DEBUG] Formatted chat history sent to frontend:', formattedHistory);
       res.json(formattedHistory);
     } catch (error) {
       console.error(`Error fetching chat history for visitor ${req.params.visitorId}:`, error);

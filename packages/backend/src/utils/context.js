@@ -13,7 +13,7 @@ export function buildContext({ pageContext = '', matches = [] }) {
   return pageContext + texts.join('\n\n---\n\n');
 }
 
-export function buildContextFromMatches(matches, contextListingId = null, contextDevelopmentId = null) {
+export function buildContextFromMatches(matches, contextListingId = null, contextDevelopmentId = null, isBroadOverview = false) {
   if (!matches || matches.length === 0) {
     return '';
   }
@@ -81,7 +81,9 @@ export function buildContextFromMatches(matches, contextListingId = null, contex
         uniqueOthers.push(m);
       }
     }
-    uniqueOthers.slice(0, 5).forEach(m => { // Limit to top 5 to avoid too much text
+    // For broad overview queries, show more listings to give comprehensive view
+    const maxOtherListings = isBroadOverview ? 12 : 5;
+    uniqueOthers.slice(0, maxOtherListings).forEach(m => {
       const mMeta = m.metadata;
       let summary = `- **ID:** ${mMeta.id || mMeta.listing_id || 'N/A'}`;
       if (mMeta.name) summary += `, **Nome:** ${mMeta.name}`;

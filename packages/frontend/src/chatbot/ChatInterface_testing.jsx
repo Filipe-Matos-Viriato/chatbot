@@ -67,7 +67,7 @@ const ChatInterfaceTesting = () => {
         setVisitorId(session.visitorId);
         setSessionId(session.sessionId);
         setSessionHealth('healthy');
-        console.log('[ChatInterface] Session initialized:', session);
+        console.log('[ChatInterface] Session initialized:', session.visitorId);
       } catch (error) {
         console.error('[ChatInterface] Failed to initialize session:', error);
         setSessionHealth('error');
@@ -328,7 +328,7 @@ const ChatInterfaceTesting = () => {
       if (!response.ok) throw new Error('Failed to save onboarding');
 
       const data = await response.json();
-      console.log('Onboarding saved:', data);
+      console.log('Onboarding saved successfully');
 
       setOnboarding(prev => ({ ...prev, completed: true }));
 

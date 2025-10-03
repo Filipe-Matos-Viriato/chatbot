@@ -189,18 +189,7 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   const broadMatches = (broadResponse?.matches || []);
   console.log(`[${clientConfig.clientName}] targeted matches=${matches.length}, broad matches=${broadMatches.length}`);
 
-  console.log(`Found ${matches.length} matches in targeted listing search.`);
-  console.log(`Found ${broadMatches.length} matches in broad search.`);
-  
-  // Add detailed debugging for broad search
-  console.log(`🔍 DEBUGGING - Broad Search Details:`);
-  console.log(`  Base filter: ${JSON.stringify(baseFilter, null, 2)}`);
-  console.log(`  Vector dimensions: ${searchVector.length}`);
-  console.log(`  TopK requested: ${broadParams?.topK || 0}`);
-  if (broadMatches.length > 0) {
-    console.log(`  Best match score: ${broadMatches[0].score}`);
-    console.log(`  Worst match score: ${broadMatches[broadMatches.length - 1].score}`);
-  }
+  console.log(`[${clientConfig.clientName}] Search results: ${matches.length} targeted, ${broadMatches.length} broad`);
 
   const priceMatch = matches.find(match => match.metadata && match.metadata.price_eur !== undefined) || broadMatches.find(m => m.metadata && m.metadata.price_eur !== undefined);
   let currentListingPrice = null;
@@ -630,7 +619,16 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     queryScope = QUERY_SCOPE.GENERAL_UNFILTERED;
   }
 
-  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Determined queryScope for system prompt: ${queryScope} (hasExternalContext: ${hasExternalContext}, hasSignificantFilters: ${hasSignificantFilters}, hasListingIdFromQuery: ${hasListingIdFromQuery})`);
+  // Detect if this is a broad overview query (wants comprehensive view of multiple listings)
+  // Even with external context, broad typology queries should show overview
+  const queryLower = String(query || '').toLowerCase();
+  const hasTypologyFilter = queryFilters.typology;
+  const hasBroadIntentWords = /\b(todos|todas|all|every|disponíveis?|available|list|show)\b/i.test(queryLower);
+  const lacksSpecificReference = !/\b(este|esta|this|esse|essa|that)\b/i.test(queryLower);
+
+  const isBroadOverview = hasTypologyFilter && (hasBroadIntentWords || (hasSignificantFilters && lacksSpecificReference));
+
+  console.log(`[${clientConfig.clientName}] 🔍 DEBUG: Determined queryScope: ${queryScope}, isBroadOverview: ${isBroadOverview} (hasTypologyFilter: ${hasTypologyFilter}, hasBroadIntentWords: ${hasBroadIntentWords}, lacksSpecificReference: ${lacksSpecificReference})`);
 
   // Detect lead-collecting intent
   const lowerQuery = String(query || '').toLowerCase();
@@ -651,12 +649,8 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     }
   }
 
-  // Add debugging for filters
-  console.log(`[${clientConfig.clientName}] 🔍 DEBUGGING - Filters Applied:`);
-  console.log(`  Query filters: ${JSON.stringify(queryFilters, null, 2)}`);
-  console.log(`  Original query: "${query}"`);
-  console.log(`  Lead collecting intent: ${leadCollectingIntent}`);
-  console.log(`  Visitor contact info: ${JSON.stringify(visitorContactInfo)}`);
+  // Concise filter summary
+  console.log(`[${clientConfig.clientName}] Filters: ${Object.keys(queryFilters).length} applied, lead intent: ${leadCollectingIntent}`);
 
   let queryResponse = { matches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
   try {
@@ -671,17 +665,11 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     ? buildStructuredListingSummary(queryResponse.matches, queryFilters)
     : null;
   
-  // Add debugging for matches found
-  console.log(`[${clientConfig.clientName}] 🔍 DEBUGGING - Search Results:`);
-  console.log(`  Total matches found: ${queryResponse.matches.length}`);
-  if (queryResponse.matches.length > 0) {
-    console.log(`  First match score: ${queryResponse.matches[0].score}`);
-    console.log(`  Match metadata keys: ${Object.keys(queryResponse.matches[0].metadata || {})}`);
-    queryResponse.matches.slice(0, 3).forEach((match, index) => {
-      console.log(`    Match ${index + 1}: ${match.metadata.listing_id || match.metadata.development_id || 'Unknown ID'} (score: ${match.score})`);
-    });
+  // Concise match summary
+  if (queryResponse.matches.length === 0) {
+    console.log(`[${clientConfig.clientName}] ⚠️ No matches found for query: "${query}"`);
   } else {
-    console.log(`  ⚠️ No matches found in Pinecone for query: "${query}"`);
+    console.log(`[${clientConfig.clientName}] Found ${queryResponse.matches.length} matches (top score: ${queryResponse.matches[0].score.toFixed(3)})`);
   }
   
   // Check if we have no matches and handle accordingly
@@ -689,7 +677,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
-  let context = buildContextFromMatches(queryResponse.matches, preferredListingId, contextDevelopmentId);
+  let context = buildContextFromMatches(queryResponse.matches, preferredListingId, contextDevelopmentId, isBroadOverview);
 
   // Add structured listing summary to context if available
   if (structuredListingSummary) {
@@ -748,12 +736,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
       category: m.metadata?.document_category,
       hasText: Boolean(pickText(m.metadata)),
     }));
-    console.log(`[${clientConfig.clientName}] 🧩 Context assembly:`, JSON.stringify({
-      pickedTextCount: texts.length,
-      hasPageContext: Boolean(pageContext),
-      topMatchSummaries,
-      sampleText: texts[0] ? texts[0].slice(0, 200) : null,
-    }, null, 2));
+    console.log(`[${clientConfig.clientName}] Context assembled: ${texts.length} text chunks`);
   } catch (_) {}
   let remainingTokens = CONTEXT_TOKEN_BUDGET;
   
@@ -875,33 +858,22 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   // NEW: Build context-aware question generation instructions
   let questionGenerationContext = '';
 
-  if (enrichedUserContext.hasHistory) {
-    questionGenerationContext = `
-CONTEXTO DO UTILIZADOR PARA FRASES SUGERIDAS:
-- Nível de Engagement: ${enrichedUserContext.engagementLevel} (Score: ${enrichedUserContext.leadScore}/100)
-- Tendência: ${enrichedUserContext.scoreTrend > 0 ? 'crescente (+' + enrichedUserContext.scoreTrend + ')' :
-             enrichedUserContext.scoreTrend < 0 ? 'decrescente (' + enrichedUserContext.scoreTrend + ')' : 'estável'}
-${enrichedUserContext.preferences.tipologia ? `- Preferência de Tipologia: ${enrichedUserContext.preferences.tipologia}` : ''}
-${enrichedUserContext.preferences.budget ? `- Orçamento: €${enrichedUserContext.preferences.budget.toLocaleString('pt-PT')}` : ''}
-${enrichedUserContext.preferences.development ? `- Empreendimento de Interesse: ${enrichedUserContext.preferences.development}` : ''}
-${enrichedUserContext.recentEvents.length > 0 ? `- Ações Recentes: ${enrichedUserContext.recentEvents.map(e => e.type).join(', ')}` : ''}
-${enrichedUserContext.hasContact ? '- Utilizador já forneceu contacto (lead qualificado)' : '- Utilizador ainda não forneceu contacto'}
+  if (enrichedUserContext.hasHistory && enrichedUserContext.leadScore > 0) {
+    // Only inject context when meaningful data exists
+    const contextParts = [];
+    if (enrichedUserContext.engagementLevel) {
+      contextParts.push(`Engagement: ${enrichedUserContext.engagementLevel} (${enrichedUserContext.leadScore}/100)`);
+    }
+    if (enrichedUserContext.preferences?.tipologia) {
+      contextParts.push(`Preferência: ${enrichedUserContext.preferences.tipologia}`);
+    }
+    if (enrichedUserContext.preferences?.budget) {
+      contextParts.push(`Orçamento: €${enrichedUserContext.preferences.budget.toLocaleString('pt-PT')}`);
+    }
 
-ESTRATÉGIA DE FRASES BASEADA NO ENGAGEMENT:
-${enrichedUserContext.engagementLevel === 'high' ? `
-- FOCO: Conversão e ação imediata
-- Sugerir: marcar visita, falar com consultor, processo de compra
-- Tom: Direto e orientado para decisão
-` : enrichedUserContext.engagementLevel === 'medium' ? `
-- FOCO: Aprofundamento e comparação
-- Sugerir: características específicas, comparar opções, financiamento
-- Tom: Informativo e exploratório
-` : `
-- FOCO: Descoberta e orientação
-- Sugerir: explorar opções, entender características, conhecer empreendimentos
-- Tom: Educativo e acolhedor
-`}
-`;
+    if (contextParts.length > 0) {
+      questionGenerationContext = `\nCONTEXTO UTILIZADOR: ${contextParts.join(', ')}`;
+    }
   }
 
   const systemPromptTemplate = clientConfig.prompts.systemInstruction;
@@ -926,17 +898,13 @@ ${enrichedUserContext.engagementLevel === 'high' ? `
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Não há imóveis com ${queriedFeature} na nossa base de dados. Responda dizendo "Desculpe, não encontramos imóveis com ${queriedFeature} no momento."`;
   }
 
-  // Add conditional instructions for GENERAL_FILTERED queries to control introductory text and formatting
+  // Add guidance for GENERAL_FILTERED queries to encourage natural, informative responses
   if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query)) {
-    const requestedFeature = isOnboardingRecommendation ?
-      "imóveis baseados nas suas preferências" :
-      extractFeatureFromQuery(query);
-
-    const introMessage = isOnboardingRecommendation ?
-      (onboardingContext?.completionMessage || "Com base nas suas preferências") + ", aqui estão algumas opções disponíveis:" :
-      `Aqui estão algumas opções de ${requestedFeature} disponíveis:`;
-
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA E OBRIGATÓRIA: Comece a resposta dizendo exatamente "${introMessage}". Liste algumas opções dos imóveis da lista fornecida no contexto. Formate cada imóvel como: **Nome:** [nome], **Tipo:** [tipo], **Quartos:** [beds], **Preço:** [preço]€\n\n. Formate o preço com separadores de milhares usando pontos (ex: 123.456€). NÃO INVENTE nem modifique as informações dos imóveis; use apenas os dados da lista fornecida para garantir a precisão.`;
+    if (isBroadOverview) {
+      systemPrompt += `\n\nINSTRUÇÃO PARA VISÃO GERAL ABRANGENTE: O utilizador está pedindo uma visão geral de múltiplas opções. Apresente 8-12 imóveis relevantes de forma organizada mas conversacional, destacando as principais características de cada um. Foque em dar uma visão abrangente das opções disponíveis.`;
+    } else {
+      systemPrompt += `\n\nINSTRUÇÃO PARA RESPOSTAS NATURAIS: Para consultas sobre imóveis filtrados, gere uma resposta conversacional e informativa em português. Apresente os imóveis de forma natural, destacando características especiais e fornecendo comentários inteligentes sobre cada opção. Adapte o estilo da resposta ao tipo de consulta do utilizador.`;
+    }
   }
 
   // CRITICAL ANTI-HALLUCINATION INSTRUCTIONS - MUST BE FOLLOWED (excluded for GENERAL_FILTERED since features are verified)
@@ -976,32 +944,15 @@ ${enrichedUserContext.engagementLevel === 'high' ? `
     // Removed: systemPrompt += "\n\nNota: Se houver um URL correspondente no contexto para o imóvel referido, inclui-o explicitamente na resposta.";
   }
 
-  // CRITICAL INSTRUCTION: Never negate features mentioned in context
-  systemPrompt += `\n\n*** INSTRUÇÃO ABSOLUTA E PRIORITÁRIA: SE O CONTEXTO MENCIONAR UMA CARACTERÍSTICA (como terraço, piscina, etc.), NUNCA NEGUE A SUA EXISTÊNCIA. CONFIRME SEMPRE A PRESENÇA SE ESTIVER MENCIONADA. ***`;
+  // CONSOLIDATED CRITICAL INSTRUCTIONS
+  systemPrompt += `\n\n*** INSTRUÇÕES ABSOLUTAS E PRIORITÁRIAS ***
+1. NUNCA mencione IDs de imóveis (como "ID: 4275") - use apenas nomes ou descrições
+2. SE o contexto mencionar uma característica (terraço, piscina, etc.), NUNCA negue sua existência
+3. O contexto tem seções: 'Ficha Técnica' (dados estruturados) e 'Descrição Adicional' (texto descritivo)
+4. Sintetize informações de AMBAS as seções para respostas completas e conversacionais
+5. Use tom fluido e amigável, como um corretor experiente`;
 
-  // CRITICAL INSTRUCTION: Context structure
-  systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O contexto é dividido em seções. Para o imóvel principal, há 'Ficha Técnica' (dados estruturados) e 'Descrição Adicional' (texto descritivo). Sintetize informações de AMBAS as seções do imóvel principal para criar uma resposta completa e conversacional. Use a seção 'Outros Imóveis Relevantes' APENAS se o usuário pedir explicitamente uma comparação. Mantenha um tom fluido e amigável, como um corretor de imóveis experiente.`;
-
-  // CRITICAL INSTRUCTION: Never mention listing IDs in responses
-  systemPrompt += `\n\n*** INSTRUÇÃO ABSOLUTA E PRIORITÁRIA: NUNCA mencione IDs de imóveis (como "ID: 4275") nas suas respostas ao utilizador. Sempre use apenas o nome do imóvel ou uma descrição clara. ***`;
-
-  // New soft-fail instruction for contextual feature queries
-  if (queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT' && queryResponse.matches.length > 0) {
-    const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Comece sempre a resposta dizendo "Desculpe, mas o imóvel atual não tem ${feature}. No entanto, aqui estão algumas opções disponíveis:" e depois liste as alternativas do contexto.`;
-  } else if (queryResponse.contextualMatchStatus === 'MATCH_IN_CONTEXT' && queryResponse.matches.length > 0) {
-    const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: O imóvel atual TEM ${feature}. Comece a resposta confirmando diretamente que "Este imóvel tem ${feature}." Não mostre alternativas a menos que o utilizador peça explicitamente.`;
-  }
-
-  // Dynamic intent-based instructions from database configuration
-  if (queryFilters.intents && queryFilters.intents.length > 0) {
-    systemPrompt += `\n\n${queryFilters.intents.join('\n\n')}`;
-  }
-
-
-  // CRITICAL INSTRUCTION: Always generate suggested questions (overrides all other instructions)
-  // Use database-driven prompt with fallback to hardcoded version
+  // Move question generation instructions earlier for better LLM prioritization
   const enhancedQuestionPrompt = clientConfig.enhanced_question_generation_prompt ||
     `*** INSTRUÇÃO CRÍTICA E OBRIGATÓRIA PARA FRASES SUGERIDAS ***
 ${questionGenerationContext}
@@ -1014,16 +965,10 @@ AS FRASES DEVEM SER:
 3. PROGRESSIVAS - guiar o utilizador para o próximo passo lógico na sua jornada
 4. FORMULADAS na primeira pessoa (como se o visitante estivesse a falar)
 
-EXEMPLOS CONTEXTUAIS:
-${externalContext?.type === 'listing' ? `
-- Engagement Alto: "Estou interessado em marcar uma visita a este imóvel", "Quero falar com um consultor sobre este apartamento"
-- Engagement Médio: "Estou interessado em saber as opções de financiamento", "Quero comparar com outros T${queryFilters.num_bedrooms || 'X'}"
-- Engagement Baixo: "Estou curioso sobre as características desta zona", "Quero ver outros imóveis semelhantes"
-` : `
-- Engagement Alto: "Estou pronto para marcar visitas aos imóveis", "Quero falar sobre o processo de compra"
-- Engagement Médio: "Estou interessado em comparar preços e características", "Quero saber mais sobre financiamento"
-- Engagement Baixo: "Estou a começar a procurar, pode orientar-me?", "Quero conhecer as opções disponíveis"
-`}
+EXEMPLOS CONTEXTUAIS (formato primeira pessoa):
+- "Estou interessado em marcar uma visita"
+- "Quero saber sobre financiamento"
+- "Posso falar com um consultor?"
 
 FORMATO OBRIGATÓRIO: Apresente as frases em formato JSON no final da resposta:
 {"suggested_questions": ["Frase 1", "Frase 2", "Frase 3"]}
@@ -1032,6 +977,22 @@ A resposta principal deve terminar normalmente, e o JSON das frases sugeridas de
 ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPRE.`;
 
   systemPrompt += `\n\n${enhancedQuestionPrompt}`;
+
+  // Guidance for contextual feature queries - allow natural responses while maintaining feature validation
+  if (queryResponse.contextualMatchStatus === 'NO_MATCH_IN_CONTEXT' && queryResponse.matches.length > 0) {
+    const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
+    systemPrompt += `\n\nORIENTAÇÃO PARA CONSULTAS DE CARACTERÍSTICAS: O imóvel atual não possui ${feature}. Foque a resposta em apresentar alternativas disponíveis que tenham esta característica, mantendo um tom útil e informativo.`;
+  } else if (queryResponse.contextualMatchStatus === 'MATCH_IN_CONTEXT' && queryResponse.matches.length > 0) {
+    const feature = query.replace(/^tem\s+/, '').replace(/\?$/, '');
+    systemPrompt += `\n\nORIENTAÇÃO PARA CONSULTAS DE CARACTERÍSTICAS: O imóvel atual possui ${feature}. Confirme esta informação de forma natural e destaque outras características positivas do imóvel.`;
+  }
+
+  // Dynamic intent-based instructions from database configuration
+  if (queryFilters.intents && queryFilters.intents.length > 0) {
+    systemPrompt += `\n\n${queryFilters.intents.join('\n\n')}`;
+  }
+
+
 
   // Removed: systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
@@ -1058,6 +1019,11 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPR
       );
       timer.end({ model: generativeModel, maxTokens: MAX_RESPONSE_TOKENS });
       const raw = completion.choices[0].message.content;
+
+      // Monitor response completeness (reduced verbosity)
+      const responseTokens = encode(raw).length;
+      const isComplete = !raw.endsWith('...') && !raw.endsWith(':') && raw.length > 50;
+      console.log(`[${clientConfig.clientName}] Response: ${responseTokens} tokens, complete: ${isComplete}`);
 
       // Parse suggested questions from JSON format at the end of response
       let suggestedQuestions = [];
@@ -1118,6 +1084,15 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPR
           hasDevelopmentContext: Boolean(externalContext?.type === 'development'),
           preferences: enrichedUserContext?.preferences || {}
         });
+      }
+
+      // Validate response completeness
+      const isCompleteResponse = cleanedResponse.length > 50 && !raw.endsWith('...') && !raw.endsWith(':');
+      const hasQuestions = suggestedQuestions.length > 0;
+
+      if (!isCompleteResponse || !hasQuestions) {
+        console.warn(`[${clientConfig.clientName}] Incomplete response detected: complete=${isCompleteResponse}, questions=${hasQuestions}`);
+        // Could trigger retry with simplified prompt
       }
 
       const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';

@@ -20,11 +20,11 @@ export const ClientProvider = ({ children }) => {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
-                console.log("ClientContext: Fetched clients data:", data); // Add this line
+                console.log(`ClientContext: Fetched ${data.length} clients`);
                 setClients(data);
                 if (data.length > 0) {
                     setSelectedClientId(data[0].client_id); // Set first client as default
-                    console.log("ClientContext: Initial selectedClientId set to", data[0].client_id); // Add log
+                    console.log("ClientContext: Initial selectedClientId set to", data[0].client_id);
                 } else {
                     setSelectedClientId(''); // Ensure it's an empty string if no clients
                     console.log("ClientContext: No clients found, selectedClientId set to empty string"); // Add log

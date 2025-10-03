@@ -214,41 +214,113 @@ export function reRankMatches({
 
   // Post-processing for GENERAL_FILTERED queries to ensure diversity of listings
   if (queryScope === QUERY_SCOPE.GENERAL_FILTERED) {
+    // Determine if this is an explicit typology query that should be strict
+    const hasExplicitTypologyFilter = queryFilters.typology && queryFilters.typology.match(/^T\d+$/i);
+    const isExplicitTypologyQuery = hasExplicitTypologyFilter && (
+      qLower.includes('t1') || qLower.includes('t2') || qLower.includes('t3') ||
+      qLower.includes('apartamentos t') || qLower.includes('todos os t') ||
+      qLower.includes(' t1') || qLower.includes(' t2') || qLower.includes(' t3')
+    );
+
     if (contextListingId) {
-      // Existing logic for contextual queries (with specific listing context)
-      const contextualMatches = reRanked.filter(m => m.metadata?.listing_id === contextListingId && m.filterMatchCount > 0);
-      const otherMatches = reRanked.filter(m => m.metadata?.listing_id !== contextListingId && m.filterMatchCount > 0);
-
-      let finalRanked = [];
-      if (contextualMatches.length > 0) {
-        // Take the top 1-2 best contextual matches that satisfy the filters
-        contextualMatches.sort((a, b) => b.score - a.score);
-        finalRanked.push(...contextualMatches.slice(0, 2)); // Take top 2 contextual matches
-      }
-
-      // Add other matching listings, ensuring diversity
-      // Sort other matches by score and add them
-      otherMatches.sort((a, b) => b.score - a.score);
-      finalRanked.push(...otherMatches);
-
-      // Remove duplicates by ID, keeping the higher score if duplicates exist
-      const uniqueMatches = new Map();
-      for (const match of finalRanked) {
-        const id = match.metadata?.listing_id || match.metadata?.development_id || match.id;
-        if (!uniqueMatches.has(id) || uniqueMatches.get(id).score < match.score) {
-          uniqueMatches.set(id, match);
-        }
-      }
-      reRanked = Array.from(uniqueMatches.values());
-    } else {
-      // For non-contextual GENERAL_FILTERED queries
-      if (isOnboardingRecommendation) {
-        // STRICT filtering for onboarding recommendations - only exact matches
-        console.log(`[rerank] Applying strict filter-based filtering for onboarding recommendations`);
+      if (isExplicitTypologyQuery) {
+        // STRICT filtering for explicit typology queries in contextual mode - only exact matches
+        console.log(`[rerank] Applying strict filtering for explicit typology query in contextual mode: ${queryFilters.typology}`);
         const beforeCount = reRanked.length;
         reRanked = reRanked.filter(m => m.filterMatchCount > 0);
         const afterCount = reRanked.length;
-        console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings (strict filtering for onboarding)`);
+        console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings (strict filtering for explicit typology in contextual mode)`);
+      } else {
+        // Existing logic for contextual queries (with specific listing context)
+        const contextualMatches = reRanked.filter(m => m.metadata?.listing_id === contextListingId && m.filterMatchCount > 0);
+        const otherMatches = reRanked.filter(m => m.metadata?.listing_id !== contextListingId && m.filterMatchCount > 0);
+
+        let finalRanked = [];
+        if (contextualMatches.length > 0) {
+          // Take the top 1-2 best contextual matches that satisfy the filters
+          contextualMatches.sort((a, b) => b.score - a.score);
+          finalRanked.push(...contextualMatches.slice(0, 2)); // Take top 2 contextual matches
+        }
+
+        // Add other matching listings, ensuring diversity
+        // Sort other matches by score and add them
+        otherMatches.sort((a, b) => b.score - a.score);
+        finalRanked.push(...otherMatches);
+
+        // Remove duplicates by ID, keeping the higher score if duplicates exist
+        const uniqueMatches = new Map();
+        for (const match of finalRanked) {
+          const id = match.metadata?.listing_id || match.metadata?.development_id || match.id;
+          if (!uniqueMatches.has(id) || uniqueMatches.get(id).score < match.score) {
+            uniqueMatches.set(id, match);
+          }
+        }
+        reRanked = Array.from(uniqueMatches.values());
+      }
+    } else {
+      // For non-contextual GENERAL_FILTERED queries
+      if (isOnboardingRecommendation) {
+        // FLEXIBLE filtering for onboarding recommendations - strict typology, flexible price
+        console.log(`[rerank] Applying flexible filter-based filtering for onboarding recommendations`);
+        const beforeCount = reRanked.length;
+
+        reRanked = reRanked.filter(m => {
+          const meta = m.metadata || {};
+
+          // For onboarding, use a two-tier approach:
+          // Tier 1: Listings that pass ALL filters (strict matching) - these were working before
+          if (m.filterMatchCount > 0) return true;
+
+          // Tier 2: Additional listings that are close matches but didn't pass all filters
+          // This adds flexibility for onboarding while preserving the working strict matches
+
+          // Check if this listing matches typology (primary requirement for onboarding)
+          let hasTypologyMatch = false;
+          if (queryFilters.typology && queryFilters.typology.match(/^T\d+$/i)) {
+            const expectedBeds = parseInt(queryFilters.typology.substring(1), 10);
+            // Use the same typology checking logic as the main filtering
+            if (meta.beds === expectedBeds) {
+              hasTypologyMatch = true;
+            } else if (meta.typology === queryFilters.typology || meta.type === queryFilters.typology) {
+              hasTypologyMatch = true;
+            }
+          }
+
+          if (!hasTypologyMatch) return false;
+
+          // For price ranges, be flexible - allow listings reasonably close to user budget
+          if (queryFilters.price_eur && typeof queryFilters.price_eur === 'object') {
+            const listingPrice = meta.price;
+            if (listingPrice) {
+              const { gte, lte } = queryFilters.price_eur;
+              const range = lte - gte;
+              const tolerance = Math.max(range * 0.5, 50000); // 50% of range or €50k minimum
+
+              // Allow listings within an expanded range around user preferences
+              const expandedMin = Math.max(0, gte - tolerance);
+              const expandedMax = lte + tolerance;
+
+              if (listingPrice < expandedMin || listingPrice > expandedMax) {
+                return false;
+              }
+            }
+          }
+
+          // For other filters like buying_timeframe, be flexible for onboarding
+          // Don't exclude listings just because they don't match timeframe
+
+          return true;
+        });
+
+        const afterCount = reRanked.length;
+        console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings (flexible filtering for onboarding)`);
+      } else if (isExplicitTypologyQuery) {
+        // STRICT filtering for explicit typology queries - only exact matches
+        console.log(`[rerank] Applying strict filtering for explicit typology query: ${queryFilters.typology}`);
+        const beforeCount = reRanked.length;
+        reRanked = reRanked.filter(m => m.filterMatchCount > 0);
+        const afterCount = reRanked.length;
+        console.log(`[rerank] Filtered from ${beforeCount} to ${afterCount} listings (strict filtering for explicit typology)`);
       } else {
         // LENIENT filtering for feature queries - show close alternatives
         console.log(`[rerank] Applying lenient filter-based filtering for feature queries`);
@@ -265,8 +337,8 @@ export function reRankMatches({
           if (userPreferences) {
             let isReasonablyClose = false;
 
-            // Check typology - allow adjacent typologies
-            if (userPreferences.typology && userPreferences.typology.match(/^T\d+$/i)) {
+            // Check typology - allow adjacent typologies only for non-explicit queries
+            if (userPreferences.typology && userPreferences.typology.match(/^T\d+$/i) && !hasExplicitTypologyFilter) {
               const userBedrooms = parseInt(userPreferences.typology.substring(1), 10);
               const listingBedrooms = meta.beds;
               if (listingBedrooms && Math.abs(listingBedrooms - userBedrooms) <= 1) {
