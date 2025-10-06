@@ -78,17 +78,72 @@ const ChatInterfaceTesting = () => {
 
     initializeSession();
 
-    // Load onboarding config
+    // Load onboarding config with fallback for testing
     const loadOnboardingConfig = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/api/v1/widget/config/${TEST_CLIENT_ID}`);
         const config = await response.json();
-        setOnboardingConfig(config.onboardingConfig || null);
+        setOnboardingConfig(config.onboardingConfig || getFallbackOnboardingConfig());
       } catch (error) {
-        console.error('Failed to load onboarding config:', error);
-        setOnboardingConfig(null);
+        console.error('Failed to load onboarding config, using fallback:', error);
+        setOnboardingConfig(getFallbackOnboardingConfig());
       }
     };
+
+    // Fallback onboarding config for testing
+    const getFallbackOnboardingConfig = () => ({
+      enabled: true,
+      introMessage: 'Antes de continuar, posso fazer 3 perguntas rápidas para recomendar os melhores apartamentos? (leva < 30s)',
+      questions: [
+        {
+          id: 'typology',
+          type: 'select',
+          question: 'Que tipo de apartamento procura?',
+          options: [
+            { value: 'T1', label: 'T1' },
+            { value: 'T2', label: 'T2' },
+            { value: 'T3', label: 'T3' },
+            { value: 'T4', label: 'T4' }
+          ]
+        },
+        {
+          id: 'budget_bucket',
+          type: 'select',
+          question: 'Qual é o seu orçamento aproximado?',
+          options: [
+            { value: '€100–150k', label: '€100–150k' },
+            { value: '€150–200k', label: '€150–200k' },
+            { value: '€200–300k', label: '€200–300k' },
+            { value: '€300–400k', label: '€300–400k' },
+            { value: '€400–600k', label: '€400–600k' }
+          ]
+        },
+        {
+          id: 'buying_timeframe',
+          type: 'select',
+          question: 'Quando planeia comprar?',
+          options: [
+            { value: 'Imediatamente', label: 'Imediatamente' },
+            { value: '1–3 meses', label: '1–3 meses' },
+            { value: '3–6 meses', label: '3–6 meses' },
+            { value: '6–12 meses', label: '6–12 meses' }
+          ]
+        },
+        {
+          id: 'contact',
+          type: 'contact',
+          question: 'Para lhe enviar recomendações personalizadas, preciso dos seus dados:',
+          fields: [
+            { id: 'name', type: 'text', placeholder: 'Nome completo' },
+            { id: 'email', type: 'email', placeholder: 'Email' }
+          ],
+          consent: {
+            text: 'Aceito receber comunicações sobre imóveis',
+            required: true
+          }
+        }
+      ]
+    });
 
     loadOnboardingConfig();
   }, [sessionManager]); // Run once on mount
@@ -370,12 +425,20 @@ const ChatInterfaceTesting = () => {
 
       const data = await response.json();
 
-      // Replace loading message with actual response
+      // Replace loading message with success message first
       setMessages(prev => {
         const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = { from: 'bot', text: data.response };
+        newMessages[newMessages.length - 1] = { from: 'bot', text: 'Thank you for your preferences! Here are some personalized recommendations:' };
         return newMessages;
       });
+
+      // Mark progress as complete
+      setOnboarding(prev => ({ ...prev, completed: true }));
+
+      // Add the actual recommendations as a separate message
+      setTimeout(() => {
+        setMessages(prev => [...prev, { from: 'bot', text: data.response }]);
+      }, 500);
 
       // Handle suggested questions if any
       if (data.suggestedQuestions) {
@@ -405,7 +468,7 @@ const ChatInterfaceTesting = () => {
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f3f4f6' }}>
+    <div data-cy="chat-interface" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f3f4f6' }}>
       <div style={{ width: '440px', height: '700px', display: 'grid', gridTemplateRows: 'auto 1fr auto', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden', backgroundColor: '#ffffff' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -445,9 +508,9 @@ const ChatInterfaceTesting = () => {
             </div>
           </div>
         </div>
-        <div style={{ padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div data-cy="chat-messages" style={{ padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {messages.map((message, index) => (
-            <div key={index} style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', justifyContent: message.from === 'user' ? 'flex-end' : 'flex-start' }}>
+            <div key={index} data-cy={message.from === 'user' ? 'user-message' : 'bot-message'} style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', justifyContent: message.from === 'user' ? 'flex-end' : 'flex-start' }}>
               {message.from === 'bot' && (
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#d1d5db', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#4b5563', fontWeight: 'bold' }}>CB</div>
               )}
@@ -479,7 +542,7 @@ const ChatInterfaceTesting = () => {
             </div>
           ))}
           {isLoading && (
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+            <div data-cy="typing-indicator" style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
               <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#d1d5db', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#4b5563', fontWeight: 'bold' }}>CB</div>
               <div style={{ borderRadius: '8px', padding: '8px 12px', backgroundColor: '#e5e7eb', color: '#1f2937' }}>
                 <p style={{ fontSize: '0.875rem' }}>{typingIndicator}</p>
@@ -491,7 +554,60 @@ const ChatInterfaceTesting = () => {
         <div style={{ paddingTop: '16px', paddingBottom: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
           {/* Onboarding UI */}
           {onboarding.started && !onboarding.completed && onboardingConfig?.questions && Array.isArray(onboardingConfig.questions) && (
-            <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+            <div data-cy="onboarding-container" style={{ padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+              {/* Progress Indicator */}
+              {onboarding.completed ? (
+                <div data-cy="progress-complete" style={{ marginBottom: '16px', textAlign: 'center' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    backgroundColor: '#10b981',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '0.875rem',
+                    fontWeight: 'bold',
+                    margin: '0 auto'
+                  }}>
+                    ✓
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#10b981', marginTop: '4px' }}>
+                    Concluído
+                  </div>
+                </div>
+              ) : (
+                <div data-cy="progress-indicator" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                  {onboardingConfig.questions.map((_, index) => {
+                    const stepNumber = index + 1;
+                    const isActive = onboarding.step === stepNumber;
+                    const isCompleted = onboarding.step > stepNumber;
+                    return (
+                      <div
+                        key={stepNumber}
+                        data-cy={`progress-step-${stepNumber}`}
+                        className={isActive ? 'active' : ''}
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          backgroundColor: isCompleted ? '#10b981' : isActive ? '#3b82f6' : '#e5e7eb',
+                          color: isCompleted || isActive ? '#ffffff' : '#6b7280',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.875rem',
+                          fontWeight: 'bold',
+                          transition: 'all 0.3s ease'
+                        }}
+                      >
+                        {isCompleted ? '✓' : stepNumber}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {onboardingConfig.questions.map((question, index) => {
                 const step = index + 1;
                 if (onboarding.step !== step) return null;
@@ -500,28 +616,29 @@ const ChatInterfaceTesting = () => {
                   return (
                     <div key={question.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <div style={{ fontWeight: '600' }}>{question.question}</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      <select
+                        data-cy={`${question.id}-select`}
+                        value={onboarding.answers[question.id] || ''}
+                        onChange={(e) => setOnboardingAnswer(question.id, e.target.value)}
+                        style={{
+                          padding: '8px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '4px',
+                          backgroundColor: '#ffffff'
+                        }}
+                      >
+                        <option value="">Selecione uma opção</option>
                         {question.options.map(opt => (
-                          <button
-                            key={opt.value}
-                            onClick={() => setOnboardingAnswer(question.id, opt.value)}
-                            style={{
-                              padding: '8px 12px',
-                              border: '1px solid #d1d5db',
-                              backgroundColor: onboarding.answers[question.id] === opt.value ? '#3b82f6' : '#ffffff',
-                              color: onboarding.answers[question.id] === opt.value ? '#ffffff' : '#374151',
-                              borderRadius: '4px',
-                              cursor: 'pointer'
-                            }}
-                          >
+                          <option key={opt.value} value={opt.value}>
                             {opt.label}
-                          </button>
+                          </option>
                         ))}
-                      </div>
+                      </select>
                       {onboarding.answers[question.id] && (
                         <button
-                          onClick={() => setOnboarding(prev => ({ ...prev, step: step + 1 }))}
-                          style={{
+                           data-cy="onboarding-next"
+                           onClick={() => setOnboarding(prev => ({ ...prev, step: step + 1 }))}
+                           style={{
                             padding: '8px 16px',
                             backgroundColor: '#3b82f6',
                             color: '#ffffff',
@@ -557,25 +674,28 @@ const ChatInterfaceTesting = () => {
                       <div style={{ fontWeight: '600' }}>{question.question}</div>
                       {question.fields.map(field => (
                         <input
-                          key={field.id}
-                          type={field.type}
-                          placeholder={field.placeholder}
-                          value={onboarding.answers[field.id] || ''}
-                          onChange={(e) => setOnboardingAnswer(field.id, e.target.value)}
-                          style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }}
-                        />
+                         key={field.id}
+                         data-cy={`${field.id}-input`}
+                         type={field.type}
+                         placeholder={field.placeholder}
+                         value={onboarding.answers[field.id] || ''}
+                         onChange={(e) => setOnboardingAnswer(field.id, e.target.value)}
+                         style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }}
+                       />
                       ))}
                       {question.consent && (
                         <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <input
-                            type="checkbox"
-                            checked={onboarding.answers.consent_marketing || false}
-                            onChange={(e) => setOnboardingAnswer('consent_marketing', e.target.checked)}
-                          />
-                          {question.consent.text}
-                        </label>
+                           <input
+                             data-cy="consent-checkbox"
+                             type="checkbox"
+                             checked={onboarding.answers.consent_marketing || false}
+                             onChange={(e) => setOnboardingAnswer('consent_marketing', e.target.checked)}
+                           />
+                           {question.consent.text}
+                         </label>
                       )}
                       <button
+                        data-cy="onboarding-complete"
                         onClick={submitOnboarding}
                         disabled={!question.fields.every(field => onboarding.answers[field.id])}
                         style={{
@@ -620,9 +740,10 @@ const ChatInterfaceTesting = () => {
           )}
 
           {suggestedQuestions.length > 0 && (
-            <div style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end', padding: '0 16px 0 16px' }}>
+            <div data-cy="suggested-questions" style={{ marginBottom: '12px', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end', padding: '0 16px 0 16px' }}>
               {suggestedQuestions.map((question, index) => (
                 <div
+                  data-cy="question-button"
                   key={index}
                   onClick={() => handleSuggestedClick(question)}
                   style={{
@@ -645,6 +766,7 @@ const ChatInterfaceTesting = () => {
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px' }}>
             <input
+              data-cy="chat-input"
               type="text"
               placeholder="Type your message..."
               value={input}
@@ -654,6 +776,7 @@ const ChatInterfaceTesting = () => {
               style={{ flexGrow: 1, padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px' }}
             />
             <button
+              data-cy="send-button"
               onClick={() => handleSend()}
               disabled={isLoading || !visitorId} // Disable if loading or visitorId is not set
               style={{

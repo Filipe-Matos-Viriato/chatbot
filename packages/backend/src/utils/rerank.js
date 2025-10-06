@@ -20,6 +20,36 @@ export function reRankMatches({
 }) {
   if (!Array.isArray(matches) || matches.length === 0) return { rankedMatches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
 
+  // Filter out non-listing results (visitor profiles, chat history, etc.)
+  // Only keep results that are actual property listings
+  const listingMatches = matches.filter(match => {
+    const meta = match.metadata || {};
+    const matchId = meta.listing_id || meta.development_id || match.id || '';
+
+    // Exclude visitor profiles (IDs starting with "visitor_profile_")
+    if (matchId.startsWith('visitor_profile_')) {
+      return false;
+    }
+
+    // Exclude results without proper listing metadata
+    // Must have either listing_id or development_id to be considered a valid listing
+    if (!meta.listing_id && !meta.development_id) {
+      return false;
+    }
+
+    // Additional validation: exclude results that look like chat history or user data
+    if (meta.visitor_id || meta.session_id || meta.user_id) {
+      return false;
+    }
+
+    return true;
+  });
+
+  console.log(`[rerank] Filtered out ${matches.length - listingMatches.length} non-listing results, keeping ${listingMatches.length} actual listings`);
+
+  // Use filtered matches for the rest of the reranking logic
+  matches = listingMatches;
+
   let contextualMatchStatus = 'NOT_APPLICABLE';
   const hasFeatureQueryWithContext = contextListingId && queryFilters?.generated_tags;
 
@@ -261,15 +291,31 @@ export function reRankMatches({
       // For non-contextual GENERAL_FILTERED queries
       if (isOnboardingRecommendation) {
         // FLEXIBLE filtering for onboarding recommendations - strict typology, flexible price
-        console.log(`[rerank] Applying flexible filter-based filtering for onboarding recommendations`);
+        console.log(`[rerank] 🎯 ONBOARDING DEBUG - Applying flexible filter-based filtering for onboarding recommendations`);
+        console.log(`[rerank] 🎯 ONBOARDING DEBUG - Initial matches before filtering: ${reRanked.length}`);
+        console.log(`[rerank] 🎯 ONBOARDING DEBUG - Query filters:`, JSON.stringify(queryFilters, null, 2));
+
+        // Log details of available listings before filtering
+        console.log(`[rerank] 🎯 ONBOARDING DEBUG - Available listings before filtering:`);
+        reRanked.slice(0, 10).forEach((m, idx) => {
+          const meta = m.metadata || {};
+          const listingId = meta.listing_id || meta.development_id || m.id;
+          console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${idx + 1}: ID=${listingId}, beds=${meta.beds}, price=${meta.price}€, typology=${meta.typology}, filterMatchCount=${m.filterMatchCount}`);
+          console.log(`[rerank] 🎯 ONBOARDING DEBUG - Full metadata for listing ${idx + 1}:`, JSON.stringify(meta, null, 2));
+        });
+
         const beforeCount = reRanked.length;
 
         reRanked = reRanked.filter(m => {
           const meta = m.metadata || {};
+          const listingId = meta.listing_id || meta.development_id || m.id;
 
           // For onboarding, use a two-tier approach:
           // Tier 1: Listings that pass ALL filters (strict matching) - these were working before
-          if (m.filterMatchCount > 0) return true;
+          if (m.filterMatchCount > 0) {
+            console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} PASSED strict filtering (filterMatchCount: ${m.filterMatchCount})`);
+            return true;
+          }
 
           // Tier 2: Additional listings that are close matches but didn't pass all filters
           // This adds flexibility for onboarding while preserving the working strict matches
@@ -281,12 +327,19 @@ export function reRankMatches({
             // Use the same typology checking logic as the main filtering
             if (meta.beds === expectedBeds) {
               hasTypologyMatch = true;
+              console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} has typology match (beds: ${meta.beds}, expected: ${expectedBeds})`);
             } else if (meta.typology === queryFilters.typology || meta.type === queryFilters.typology) {
               hasTypologyMatch = true;
+              console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} has typology match (typology: ${meta.typology}, expected: ${queryFilters.typology})`);
+            } else {
+              console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} FAILED typology check (beds: ${meta.beds}, typology: ${meta.typology}, expected: ${queryFilters.typology})`);
             }
           }
 
-          if (!hasTypologyMatch) return false;
+          if (!hasTypologyMatch) {
+            console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} EXCLUDED: no typology match`);
+            return false;
+          }
 
           // For price ranges, be flexible - allow listings reasonably close to user budget
           if (queryFilters.price_eur && typeof queryFilters.price_eur === 'object') {
@@ -301,14 +354,20 @@ export function reRankMatches({
               const expandedMax = lte + tolerance;
 
               if (listingPrice < expandedMin || listingPrice > expandedMax) {
+                console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} EXCLUDED: price ${listingPrice}€ outside expanded range [${expandedMin}€-${expandedMax}€] (original: [${gte}€-${lte}€])`);
                 return false;
+              } else {
+                console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} PASSED price check (${listingPrice}€ in expanded range [${expandedMin}€-${expandedMax}€])`);
               }
+            } else {
+              console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} has no price data, allowing through`);
             }
           }
 
           // For other filters like buying_timeframe, be flexible for onboarding
           // Don't exclude listings just because they don't match timeframe
 
+          console.log(`[rerank] 🎯 ONBOARDING DEBUG - Listing ${listingId} PASSED flexible filtering`);
           return true;
         });
 
