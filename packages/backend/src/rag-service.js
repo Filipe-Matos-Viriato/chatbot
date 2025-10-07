@@ -539,12 +539,10 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 
      // Transform onboarding answers into query filters
      const onboardingFilters = convertOnboardingToFilters(onboardingContext);
-     console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Raw onboarding context:`, JSON.stringify(onboardingContext, null, 2));
-     console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Generated filters:`, JSON.stringify(onboardingFilters, null, 2));
+     console.log(`[${clientConfig.clientName}] Onboarding filters:`, JSON.stringify(onboardingFilters, null, 2));
 
-     // Override query with onboarding-specific query that targets individual listings
-     // Use "listing" to avoid matching development records that mention multiple typologies
-     query = `listing ${onboardingContext.typology} para venda preço entre ${onboardingContext.budget_bucket.replace('€', '').replace('–', ' e ')}`;
+     // Override query with onboarding-specific query
+     query = transformOnboardingToQuery(onboardingContext);
      console.log(`[${clientConfig.clientName}] Transformed query: "${query}"`);
    }
 
@@ -657,17 +655,6 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   let queryResponse = { matches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
   try {
     queryResponse = await performHybridSearch(queryEmbeddingVector, clientConfig, externalContext, query, userContext, queryFilters, queryScope, visitorId, isOnboardingRecommendation);
-
-    // DEBUG: Log detailed search results for onboarding
-    if (isOnboardingRecommendation) {
-      console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING SEARCH RESULTS:`);
-      console.log(`[${clientConfig.clientName}] 🎯 Query: "${query}"`);
-      console.log(`[${clientConfig.clientName}] 🎯 Raw matches returned: ${queryResponse.matches.length}`);
-      queryResponse.matches.slice(0, 10).forEach((match, idx) => {
-        const meta = match.metadata || {};
-        console.log(`[${clientConfig.clientName}] 🎯 Match ${idx + 1}: ID=${match.id}, listing_id=${meta.listing_id}, beds=${meta.beds}, price=${meta.price}, score=${match.score.toFixed(4)}`);
-      });
-    }
   } catch (error) {
     console.error(`[${clientConfig.clientName}] Error in performHybridSearch:`, error);
     // Return empty matches if search fails due to invalid embedding
@@ -753,52 +740,6 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   } catch (_) {}
   let remainingTokens = CONTEXT_TOKEN_BUDGET;
   
-  // DEBUG: Check what listings exist in Pinecone that could match onboarding criteria
-  if (isOnboardingRecommendation) {
-    console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Checking what listings exist in Pinecone for client ${clientConfig.clientId}`);
-    try {
-      const clientPineconeIndex = getPineconeIndex(clientConfig);
-      const namespacedIndex = clientPineconeIndex.namespace(clientConfig.clientId);
-
-      // Query for all listings (no filters) to see what's available
-      const allListingsQuery = await namespacedIndex.query({
-        vector: queryEmbeddingVector,
-        topK: 50,
-        includeMetadata: true,
-        filter: { client_id: clientConfig.clientId }
-      });
-
-      const listingsOnly = allListingsQuery.matches?.filter(match => {
-        const meta = match.metadata || {};
-        return meta.listing_id && !meta.visitor_id && !meta.session_id && !meta.user_id;
-      }) || [];
-
-      console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Found ${listingsOnly.length} total listings in Pinecone`);
-      listingsOnly.slice(0, 10).forEach((match, idx) => {
-        const meta = match.metadata || {};
-        console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Listing ${idx + 1}: ID=${meta.listing_id}, beds=${meta.beds}, price=${meta.price}, typology=${meta.typology}`);
-      });
-
-      // Check specifically for T1 listings
-      const t1Listings = listingsOnly.filter(match => {
-        const meta = match.metadata || {};
-        return meta.beds === 1 || meta.typology === 'T1' || meta.type === 'T1';
-      });
-      console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Found ${t1Listings.length} T1 listings`);
-
-      // Check for listings in price range
-      const priceRangeListings = listingsOnly.filter(match => {
-        const meta = match.metadata || {};
-        const price = meta.price;
-        return price && price >= 200000 && price <= 300000;
-      });
-      console.log(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Found ${priceRangeListings.length} listings in €200k-300k range`);
-
-    } catch (error) {
-      console.error(`[${clientConfig.clientName}] 🎯 ONBOARDING DEBUG - Error querying Pinecone:`, error);
-    }
-  }
-
   // Handle empty search results with enhanced no-matches scenario
   if (queryResponse.matches.length === 0) {
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found - implementing no-matches scenario`);
