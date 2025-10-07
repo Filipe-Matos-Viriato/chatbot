@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../../config/apiClient';
 import { getListingLeadDistributionMetrics } from '../../../config/supabaseClient';
@@ -29,6 +29,14 @@ const ListingDetailsPage = () => {
     const [individualLeads, setIndividualLeads] = useState([]); // New state for individual leads
     const [currentView, setCurrentView] = useState('listing'); // 'listing' or 'chat-history'
     const [selectedVisitorId, setSelectedVisitorId] = useState(null); // Selected visitor ID for chat history view
+
+    // Use ref to store the function to ensure it's stable
+    const handleOpenChatHistoryRef = useRef();
+
+    // Debug state changes
+    useEffect(() => {
+        console.log('ListingDetailsPage state changed - currentView:', currentView, 'selectedVisitorId:', selectedVisitorId);
+    }, [currentView, selectedVisitorId]);
 
     useEffect(() => {
         const fetchListingDetails = async () => {
@@ -112,10 +120,19 @@ const ListingDetailsPage = () => {
         fetchListingDetails();
     }, [id, clientId, navigate]); // Add navigate to dependency array
 
-    const handleOpenChatHistory = (visitorId) => {
-        setSelectedVisitorId(visitorId);
-        setCurrentView('chat-history');
-    };
+    // Assign function to ref to ensure stability
+    useEffect(() => {
+        handleOpenChatHistoryRef.current = (visitorId) => {
+            console.log('handleOpenChatHistory called with visitorId:', visitorId);
+            console.log('Current state before update - currentView:', currentView, 'selectedVisitorId:', selectedVisitorId);
+            setSelectedVisitorId(visitorId);
+            setCurrentView('chat-history');
+            console.log('State updated - should now show chat history');
+        };
+        console.log('ListingDetailsPage - function assigned to ref');
+    }, [currentView, selectedVisitorId]);
+
+    console.log('ListingDetailsPage render - handleOpenChatHistoryRef.current defined:', !!handleOpenChatHistoryRef.current);
 
     const handleBackToListing = () => {
         setCurrentView('listing');
@@ -127,10 +144,12 @@ const ListingDetailsPage = () => {
     }
 
     if (currentView === 'chat-history' && selectedVisitorId) {
+        console.log('Rendering chat history view for visitor:', selectedVisitorId);
         // Find visitor contact information
         const visitorData = individualLeads.find(lead => lead.visitor_id === selectedVisitorId);
         const hasContactInfo = visitorData && (visitorData.email || visitorData.phone);
 
+        console.log('ListingDetailsPage - about to render main content, currentView:', currentView);
         return (
             <div className="space-y-8 w-full">
                 <div className="bg-white p-6 rounded-lg shadow">
@@ -211,7 +230,19 @@ const ListingDetailsPage = () => {
                 </div>
 
                 <div className="mt-8">
-                    <IndividualLeadsTable listingName={listingData.name} leads={individualLeads} onOpenChatHistory={handleOpenChatHistory} />
+                    {(() => {
+                        console.log('About to render IndividualLeadsTable - currentView:', currentView, 'hasLeads:', !!individualLeads);
+                        console.log('handleOpenChatHistoryRef.current exists:', !!handleOpenChatHistoryRef.current);
+                        console.log('handleOpenChatHistoryRef.current type:', typeof handleOpenChatHistoryRef.current);
+                        console.log('individualLeads data:', individualLeads);
+                        return (
+                            <IndividualLeadsTable
+                                listingName={listingData.name}
+                                leads={individualLeads}
+                                onOpenChatHistory={handleOpenChatHistoryRef.current}
+                            />
+                        );
+                    })()}
                 </div>
 
                 <div className="mt-8">

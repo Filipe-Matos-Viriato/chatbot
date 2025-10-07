@@ -11,11 +11,16 @@ const ChatHistory = ({ chatHistory }) => {
         );
     }
 
+    // Sort chat history from newest to oldest
+    const sortedChatHistory = [...chatHistory].sort((a, b) =>
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
+
     return (
         <div className="card-standard">
             <h3 className="text-xl font-semibold text-gray-800 mb-4">Chat History</h3>
             <div className="space-y-4 max-h-96 overflow-y-auto">
-                {chatHistory.map((entry, index) => {
+                {sortedChatHistory.map((entry, index) => {
                     return (
                     <div key={index} className="border-b pb-2">
                         <p className="text-gray-700 font-medium">

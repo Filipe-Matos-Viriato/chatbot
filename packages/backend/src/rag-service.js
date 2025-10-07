@@ -333,6 +333,16 @@ function extractFeatureFromQuery(query) {
  }
 
 /**
+ * Maps buying timeframe to appropriate current_state values for availability filtering
+ */
+const TIMEFRAME_AVAILABILITY_MAP = {
+  'asap': ['finished'],                    // Only completed properties
+  '1-3 months': ['finished', 'building'], // Completed or near completion
+  '3-6 months': ['finished', 'building'], // Allow building phase
+  '6+ months': ['finished', 'building', 'project'] // Include projects
+};
+
+/**
  * Converts onboarding answers into query filters for RAG search
  * @param {Object} onboardingAnswers - User's onboarding responses
  * @returns {Object} Query filters compatible with extractQueryFilters
@@ -357,10 +367,14 @@ function convertOnboardingToFilters(onboardingAnswers) {
      }
    }
 
-   // Convert buying timeframe (could be used for urgency scoring in future)
+   // Convert buying timeframe to availability filtering
    if (onboardingAnswers.buying_timeframe) {
-     // For now, we'll store this as metadata but not use it in filtering
-     // Could be used for lead scoring or agent assignment
+     const allowedStates = TIMEFRAME_AVAILABILITY_MAP[onboardingAnswers.buying_timeframe.toLowerCase()];
+     if (allowedStates) {
+       filters.current_state = { $in: allowedStates };
+       console.log(`[convertOnboardingToFilters] Timeframe "${onboardingAnswers.buying_timeframe}" mapped to current_state filter: ${allowedStates.join(', ')}`);
+     }
+     // Keep timeframe for lead scoring
      filters.buying_timeframe = onboardingAnswers.buying_timeframe;
    }
 
@@ -427,10 +441,8 @@ function transformOnboardingToQuery(onboardingAnswers) {
      queryParts.push(`na faixa de preço ${onboardingAnswers.budget_bucket}`);
    }
 
-   // Add timeframe context
-   if (onboardingAnswers.buying_timeframe) {
-     queryParts.push(`para ${onboardingAnswers.buying_timeframe.toLowerCase()}`);
-   }
+   // Removed: timeframe textual appendage (causing LLM misinterpretation as rental duration)
+   // Timeframe now used for structured availability filtering instead
 
    return queryParts.join(" ");
  }
@@ -898,11 +910,26 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     systemPrompt += `\n\nINSTRUÇÃO CRÍTICA: Não há imóveis com ${queriedFeature} na nossa base de dados. Responda dizendo "Desculpe, não encontramos imóveis com ${queriedFeature} no momento."`;
   }
 
-  // Add guidance for GENERAL_FILTERED queries to encourage natural, informative responses
-  if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query)) {
-    if (isBroadOverview) {
-      systemPrompt += `\n\nINSTRUÇÃO PARA VISÃO GERAL ABRANGENTE: O utilizador está pedindo uma visão geral de múltiplas opções. Apresente 8-12 imóveis relevantes de forma organizada mas conversacional, destacando as principais características de cada um. Foque em dar uma visão abrangente das opções disponíveis.`;
-    } else {
+  // Add guidance for multi-listing responses to improve readability
+  if (queryResponse.matches.length > 1 && !isAggregativePriceQuery(query)) {
+    console.log(`[${clientConfig.clientName}] 🎨 Applying multi-listing formatting instruction (queryScope: ${queryScope}, matches: ${queryResponse.matches.length}, isOnboarding: ${isOnboardingRecommendation})`);
+
+    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA PARA APRESENTAÇÃO DE IMÓVEIS: Apresente 5-8 imóveis do contexto fornecido, nunca menos de 5 se houver 5 ou mais imóveis. Separe CADA imóvel com uma linha em branco. Use este formato estruturado:
+
+**Nome do Imóvel**
+- Característica 1
+- Característica 2
+
+**Nome do Próximo Imóvel**
+- Característica 1
+- Característica 2
+
+IMPORTANTE: Sempre use uma linha completamente em branco entre imóveis para separá-los visualmente.`;
+  } else {
+    console.log(`[${clientConfig.clientName}] 🚫 Skipping multi-listing formatting (queryScope: ${queryScope}, matches: ${queryResponse.matches.length}, isPriceQuery: ${isAggregativePriceQuery(query)})`);
+
+    // Add guidance for GENERAL_FILTERED queries to encourage natural, informative responses
+    if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query)) {
       systemPrompt += `\n\nINSTRUÇÃO PARA RESPOSTAS NATURAIS: Para consultas sobre imóveis filtrados, gere uma resposta conversacional e informativa em português. Apresente os imóveis de forma natural, destacando características especiais e fornecendo comentários inteligentes sobre cada opção. Adapte o estilo da resposta ao tipo de consulta do utilizador.`;
     }
   }

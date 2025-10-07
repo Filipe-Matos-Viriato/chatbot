@@ -1,6 +1,9 @@
 import React, { useState, useMemo } from 'react';
 
-const IndividualLeadsTable = ({ listingName, leads, onOpenChatHistory }) => {
+const IndividualLeadsTable = (props) => {
+    console.log('IndividualLeadsTable COMPONENT START - received props:', props);
+    const { listingName, leads, onOpenChatHistory } = props;
+    console.log('IndividualLeadsTable destructured:', { listingName, leadsCount: leads?.length, hasOnOpenChatHistory: !!onOpenChatHistory, onOpenChatHistoryType: typeof onOpenChatHistory });
     const [sortColumn, setSortColumn] = useState(null);
     const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
 
@@ -59,7 +62,7 @@ const IndividualLeadsTable = ({ listingName, leads, onOpenChatHistory }) => {
                         <thead>
                             <tr>
                                 <th className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                                    Visitor ID
+                                    Name / Visitor ID
                                 </th>
                                 <th
                                     className="py-2 px-4 border-b border-gray-200 bg-gray-50 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider cursor-pointer"
@@ -87,20 +90,21 @@ const IndividualLeadsTable = ({ listingName, leads, onOpenChatHistory }) => {
                                 <tr
                                     key={lead.visitor_id}
                                     className="cursor-pointer hover:bg-gray-50"
-                                    onClick={() => onOpenChatHistory && onOpenChatHistory(lead.visitor_id)}
+                                    onClick={() => {
+                                        console.log('Row clicked for visitor:', lead.visitor_id);
+                                        console.log('onOpenChatHistory function:', typeof onOpenChatHistory, onOpenChatHistory);
+                                        if (onOpenChatHistory) {
+                                            console.log('Calling onOpenChatHistory with:', lead.visitor_id);
+                                            onOpenChatHistory(lead.visitor_id);
+                                        } else {
+                                            console.log('onOpenChatHistory is falsy');
+                                        }
+                                    }}
                                 >
-                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900">
-                                        {lead.visitor_id}
-                                    </td>
-                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center">
-                                        {lead.lead_score}
-                                    </td>
-                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center">
-                                        {new Date(lead.created_at).toLocaleString()}
-                                    </td>
-                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center align-middle">
-                                        <span className="material-symbols-sharp text-gray-500 relative top-[5px]">forum</span> {/* Chat Info icon */}
-                                    </td>
+                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900">{lead.name || lead.visitor_id}</td>
+                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center">{lead.lead_score}</td>
+                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center">{new Date(lead.created_at).toLocaleString()}</td>
+                                    <td className="py-2 px-4 border-b border-gray-200 text-sm text-gray-900 text-center align-middle"><span className="material-symbols-sharp text-gray-500 relative top-[5px]">forum</span></td>
                                 </tr>
                             ))}
                         </tbody>

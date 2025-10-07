@@ -51,7 +51,7 @@ const ChatHistoryPage = ({ visitorId, onClose }) => {
 
     return (
         <div>
-            <div className="flex flex-col space-y-4 max-h-96 overflow-y-auto mt-10">
+            <div className="flex flex-col space-y-4 max-h-[calc(100vh-375px)] overflow-y-auto mt-10">
                 {chatHistory.map((message, index) => (
                     <div
                         key={index}

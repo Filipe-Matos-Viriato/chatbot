@@ -134,9 +134,7 @@ const OverallListingPerformance = ({ listings, listingMetrics, searchTerm, hideC
                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <button
                                         onClick={() => {
-                                            const upInvestmentsClientId = "e6f484a3-c3cb-4e01-b8ce-a276f4b7355c";
-                                            const basePath = listing.client_id === upInvestmentsClientId ? '/dashboard-up-investments/listagem' : '/dashboard/listing';
-                                            navigate(`${basePath}/${listing.id}?clientId=${listing.client_id}`);
+                                            navigate(`/dashboard/listing/${listing.id}?clientId=${listing.client_id}`);
                                         }}
                                         className="text-blue-600 hover:text-blue-900 hover:cursor-pointer"
                                     >

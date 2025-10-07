@@ -90,6 +90,18 @@ export function buildContextFromMatches(matches, contextListingId = null, contex
       if (mMeta.type) summary += `, **Tipo:** ${mMeta.type}`;
       if (mMeta.beds) summary += `, **Quartos:** ${mMeta.beds}`;
       if (mMeta.price_eur) summary += `, **Preço:** €${Number(mMeta.price_eur).toLocaleString('pt-PT')}`;
+
+      // For broad overview queries (like onboarding), include amenity information from generated_tags
+      if (isBroadOverview && Array.isArray(mMeta.generated_tags) && mMeta.generated_tags.length > 0) {
+        const amenityTags = mMeta.generated_tags
+          .filter(tag => tag.startsWith('comodidade:'))
+          .map(tag => tag.replace('comodidade:', ''))
+          .join(', ');
+        if (amenityTags) {
+          summary += `, **Comodidades:** ${amenityTags}`;
+        }
+      }
+
       structuredSummary += summary + '\n';
     });
   }

@@ -655,7 +655,7 @@ class VisitorService {
     // Fetch the actual visitor data for these unique visitor_ids
     const { data: visitors, error: visitorError } = await supabase
       .from('visitors')
-      .select('visitor_id, lead_score, previous_lead_score, created_at, updated_at') // Include previous_lead_score
+      .select('visitor_id, lead_score, previous_lead_score, created_at, updated_at, name, email, phone') // Include previous_lead_score, name, email, phone
       .in('visitor_id', visitorIds);
 
     if (visitorError) {
@@ -885,47 +885,6 @@ class VisitorService {
     return capped;
   }
 
-  async upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, onboarding) {
-    try {
-      // Non-PII content summary
-      const summary = [
-        onboarding?.typology ? `Typology: ${onboarding.typology}` : null,
-        onboarding?.budget_bucket ? `Budget: ${onboarding.budget_bucket}` : null,
-        onboarding?.buying_timeframe ? `Timeframe: ${onboarding.buying_timeframe}` : null,
-      ].filter(Boolean).join(', ');
-
-      if (!summary) return;
-
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-
-      const embed = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: `Visitor preference profile for personalization. ${summary}`,
-      });
-      const vector = embed?.data?.[0]?.embedding;
-      if (!vector) return;
-
-      const indexName = process.env.PINECONE_INDEX || 'rachatbot-1536';
-      const index = pinecone.index(indexName).namespace(clientId);
-      await index.upsert([
-        {
-          id: `visitor_profile_${visitorId}`,
-          values: vector,
-          metadata: {
-            client_id: clientId,
-            visitor_id: visitorId,
-            typology: onboarding?.typology || null,
-            budget_bucket: onboarding?.budget_bucket || null,
-            buying_timeframe: onboarding?.buying_timeframe || null,
-            category: 'visitor_profile',
-          },
-        },
-      ]);
-    } catch (error) {
-      console.error('Failed to upsert visitor preference profile to Pinecone:', error);
-    }
-  }
 
   /**
    * Get user preferences from onboarding data for persistent context enrichment
@@ -1071,8 +1030,8 @@ class VisitorService {
       throw new Error('Failed to save onboarding');
     }
 
-    // Fire-and-forget: upsert non-PII preference profile to Pinecone
-    this.upsertVisitorPreferenceProfileToPinecone(clientId, visitorId, onboardingPayload).catch(() => {});
+    // Removed: visitor profile upsert to Pinecone (causing knowledge base contamination)
+    // Preferences are used via structured filtering in rerank.js instead
 
     return updated?.[0];
   }

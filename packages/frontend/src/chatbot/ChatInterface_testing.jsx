@@ -457,9 +457,12 @@ const ChatInterfaceTesting = () => {
                 backgroundColor: message.from === 'user' ? '#3b82f6' : '#e5e7eb',
                 color: message.from === 'user' ? '#ffffff' : '#1f2937'
               }}>
-                <div style={{ fontSize: '0.875rem' }}>
-                  <ReactMarkdown>{message.text}</ReactMarkdown>
-                </div>
+                <div
+                  style={{ fontSize: '0.875rem', whiteSpace: 'pre-line' }}
+                  dangerouslySetInnerHTML={{
+                    __html: message.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                  }}
+                />
               </div>
               {message.from === 'user' && (
                 <div style={{
