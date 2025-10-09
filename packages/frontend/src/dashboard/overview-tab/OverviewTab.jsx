@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import HotLeadsAlert from './HotLeadsAlert';
 import ChartPlaceholder from './ChartPlaceholder';
 import TopListings from './TopListings';
+import VisitorsWithEventsTable from './VisitorsWithEventsTable';
 import TotalLeadsGeneratedMetric from './metrics/TotalLeadsGeneratedMetric';
 import ChatbotResolutionRateMetric from './metrics/ChatbotResolutionRateMetric';
 import NewHotLeadsMetric from './metrics/NewHotLeadsMetric';
@@ -13,16 +14,18 @@ import { supabase, getLeadDistributionMetrics } from '../../config/supabaseClien
 import { useClient } from '../../context/ClientContext'; // Import useClient
 
 
-const OverviewTab = ({ onViewHotLeads, topInquiredListings, hiddenMetrics = [] }) => {
-    const { selectedClientId } = useClient(); // Get selectedClientId from context
+const OverviewTab = ({ clientId, onViewHotLeads, hiddenMetrics = [] }) => {
     const [leadDistributionData, setLeadDistributionData] = useState(null);
     const [newHotLeadsCount, setNewHotLeadsCount] = useState(0);
     const [newHotLeadVisitorIds, setNewHotLeadVisitorIds] = useState([]);
+    const [topInquiredListings, setTopInquiredListings] = useState([]);
 
     useEffect(() => {
-        const fetchLeadData = async () => {
-            if (!selectedClientId) return; // Don't fetch if no client is selected
-            const metrics = await getLeadDistributionMetrics(selectedClientId);
+        const fetchOverviewData = async () => {
+            if (!clientId) return;
+
+            // Fetch lead distribution data
+            const metrics = await getLeadDistributionMetrics(clientId);
             if (metrics) {
                 setLeadDistributionData({
                     labels: ['Hot Leads', 'Warm Leads', 'Cold Leads'],
@@ -35,15 +38,12 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings, hiddenMetrics = [] }
                     ],
                 });
             }
-        };
 
-        const fetchNewHotLeads = async () => {
-            if (!selectedClientId) return; // Don't fetch if no client is selected
-
+            // Fetch new hot leads
             const { data, count, error } = await supabase
                 .from('visitors')
                 .select('visitor_id', { count: 'exact' })
-                .eq('client_id', selectedClientId) // Filter by client_id
+                .eq('client_id', clientId)
                 .gte('lead_score', 70)
                 .eq('is_acknowledged', false);
 
@@ -53,15 +53,35 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings, hiddenMetrics = [] }
                 setNewHotLeadVisitorIds([]);
             } else {
                 console.log('Fetched new hot leads count:', count);
-                console.log('Fetched new hot leads data:', data);
                 setNewHotLeadsCount(count);
                 setNewHotLeadVisitorIds(data.map(v => v.visitor_id));
             }
+
+            // Fetch top inquired listings
+            const [listingsResult, metricsResult] = await Promise.all([
+                supabase.from('listings').select('*').eq('client_id', clientId),
+                supabase.from('listing_metrics').select('*').eq('client_id', clientId)
+            ]);
+
+            if (listingsResult.data && metricsResult.data) {
+                const combinedListings = listingsResult.data.map(listing => {
+                    const metrics = metricsResult.data.find(m => m.listing_id === listing.id);
+                    return {
+                        ...listing,
+                        inquiries: metrics ? metrics.inquiries : 0,
+                        engaged_users: metrics ? metrics.engaged_users : 0,
+                        total_conversions: metrics ? metrics.total_conversions : 0,
+                        conversion_rate: metrics ? metrics.conversion_rate : 0
+                    };
+                });
+
+                const sortedListings = combinedListings.sort((a, b) => b.inquiries - a.inquiries);
+                setTopInquiredListings(sortedListings.slice(0, 5));
+            }
         };
 
-        fetchLeadData();
-        fetchNewHotLeads();
-    }, [selectedClientId]);
+        fetchOverviewData();
+    }, [clientId]);
 
     const handleAcknowledgeHotLeads = async () => {
         if (newHotLeadVisitorIds.length > 0) {
@@ -71,7 +91,7 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings, hiddenMetrics = [] }
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ visitorIds: newHotLeadVisitorIds, clientId: selectedClientId }), // Pass clientId
+                    body: JSON.stringify({ visitorIds: newHotLeadVisitorIds, clientId }), // Pass clientId
                 });
 
                 if (response.ok) {
@@ -159,8 +179,10 @@ const OverviewTab = ({ onViewHotLeads, topInquiredListings, hiddenMetrics = [] }
                     chartData={leadDistributionData}
                     chartOptions={chartOptions}
                 />
-                <TopListings listings={topInquiredListings} clientId={selectedClientId} />
+                <TopListings listings={topInquiredListings} clientId={clientId} />
             </div>
+
+            <VisitorsWithEventsTable />
         </div>
     );
 };

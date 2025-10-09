@@ -107,6 +107,7 @@ const ChatInterfaceTesting = () => {
         const data = await response.json();
         setListings(data);
         if (data.length > 0) {
+          console.log('[DEBUG] Setting default listing to:', data[0].id, 'from listings:', data.map(l => l.id));
           setSelectedListingId(data[0].id); // Select the first listing by default
         }
       } catch (error) {
@@ -256,6 +257,12 @@ const ChatInterfaceTesting = () => {
         if (visitorId) {
           // 1. Log the question-based event
           const eventType = detectEventType(textToSend);
+          console.log('[DEBUG] About to log event:', {
+            eventType,
+            selectedListingId,
+            dropdownValue: selectedListingId,
+            availableListings: listings.map(l => ({ id: l.id, name: l.name || l.id }))
+          });
           await logEvent(visitorId, eventType, TEST_CLIENT_ID, selectedListingId, setCurrentLeadScore);
 
           // 2. Update question count and log engagement events
@@ -429,7 +436,10 @@ const ChatInterfaceTesting = () => {
               <select
                 id="listing-select"
                 value={selectedListingId}
-                onChange={(e) => setSelectedListingId(e.target.value)}
+                onChange={(e) => {
+                  console.log('[DEBUG] Dropdown changed from', selectedListingId, 'to', e.target.value);
+                  setSelectedListingId(e.target.value);
+                }}
                 style={{ padding: '5px', borderRadius: '4px', border: '1px solid #d1d5db' }}
               >
                 <option value="">No Listing Selected</option>

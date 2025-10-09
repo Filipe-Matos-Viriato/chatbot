@@ -3,7 +3,7 @@
 // Why this file exists: To provide a dedicated view for the full conversation history of a visitor, without filtering by listing.
 // Relevant files: packages/frontend/src/dashboard/VisitantesTable.jsx, packages/frontend/src/config/supabaseClient.js, packages/frontend/src/dashboard/DashboardUpInvestments.jsx
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../../config/supabaseClient';
 import { useClient } from '../../../../context/ClientContext';
@@ -16,6 +16,7 @@ const CompleteChatHistoryPage = () => {
     const [visitorData, setVisitorData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [chatContainerHeight, setChatContainerHeight] = useState('600px'); // Default fallback height
 
     useEffect(() => {
         const fetchData = async () => {
@@ -67,6 +68,72 @@ const CompleteChatHistoryPage = () => {
         }
     }, [visitorId, selectedClientId]);
 
+    // Hybrid height calculation: viewport-based with conservative fallbacks
+    const calculateOptimalHeight = useCallback(() => {
+        try {
+            const viewportHeight = window.innerHeight;
+
+            // Accurate estimates for fixed UI elements (in pixels)
+            const headerHeight = 64; // DashboardHeader + padding (actual measurement)
+            const navigationHeight = 48; // NavigationTabs + margins (actual measurement)
+            const containerPadding = 48; // py-container-padding (24px * 2)
+            const mainMargin = 32; // mt-8
+            const cardPadding = 48; // p-6 (24px * 2)
+            const cardHeaderHeight = 80; // Title, button, contact info area (reduced from 120)
+            const bottomBuffer = 24; // Reduced buffer to allow more height
+
+            // Calculate available height for chat container
+            const fixedHeights = headerHeight + navigationHeight + containerPadding +
+                               mainMargin + cardPadding + cardHeaderHeight + bottomBuffer;
+
+            const availableHeight = viewportHeight - fixedHeights;
+
+            // Apply constraints: minimum 400px, maximum 85% of viewport
+            const minHeight = 400;
+            const maxHeight = Math.floor(viewportHeight * 0.85);
+            const optimalHeight = Math.max(minHeight, Math.min(availableHeight, maxHeight));
+
+            // DEBUG: Log height calculations
+            console.log('[ChatHeight] Viewport:', viewportHeight, 'Fixed:', fixedHeights, 'Available:', availableHeight, 'Max:', maxHeight, 'Optimal:', optimalHeight);
+
+            return `${optimalHeight}px`;
+        } catch (error) {
+            console.warn('[CompleteChatHistoryPage] Height calculation failed, using fallback:', error);
+            // Fallback heights based on common screen sizes
+            const viewportHeight = window.innerHeight || 768;
+            if (viewportHeight >= 1200) return '700px'; // Large screens
+            if (viewportHeight >= 900) return '600px';  // Medium screens
+            if (viewportHeight >= 768) return '500px';  // Tablets
+            return '400px'; // Small screens / fallback
+        }
+    }, []);
+
+    // Update height on mount and window resize
+    useEffect(() => {
+        const updateHeight = () => {
+            const newHeight = calculateOptimalHeight();
+            setChatContainerHeight(newHeight);
+        };
+
+        // Initial calculation
+        updateHeight();
+
+        // Update on window resize with debouncing
+        let resizeTimeout;
+        const handleResize = () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(updateHeight, 100);
+        };
+
+        window.addEventListener('resize', handleResize);
+
+        // Cleanup
+        return () => {
+            clearTimeout(resizeTimeout);
+            window.removeEventListener('resize', handleResize);
+        };
+    }, [calculateOptimalHeight]);
+
     if (loading) {
         return <div className="text-center py-8">Loading chat history...</div>;
     }
@@ -103,7 +170,10 @@ const CompleteChatHistoryPage = () => {
                     )}
                 </div>
                 {chatMessages.length > 0 ? (
-                    <div className="flex flex-col space-y-4 max-h-96 overflow-y-auto mt-10">
+                    <div
+                        className="flex flex-col space-y-4 overflow-y-auto mt-10"
+                        style={{ maxHeight: chatContainerHeight }}
+                    >
                         {chatMessages.map((message) => (
                             <div
                                 key={message.id}

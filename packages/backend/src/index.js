@@ -846,6 +846,107 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to get visitors with events for dashboard
+  app.get('/api/dashboard/visitors-with-events/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    const endpointStart = performance.now();
+    console.log(`[TIMING] VisitorsWithEvents endpoint started for client: ${req.params.clientId}`);
+
+    try {
+      const { clientId } = req.params;
+      const { page = 1, limit = 50, sortBy = 'updated_at', sortOrder = 'desc' } = req.query;
+      const { clientConfig } = req;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client visitors.' });
+      }
+
+      console.log(`[Dashboard API] Fetching visitors with events for client: ${clientId}, page: ${page}, limit: ${limit}, sort: ${sortBy} ${sortOrder}`);
+
+      // PHASE 1 OPTIMIZATION: Single optimized query with JOIN (now that we have proper indexes)
+      // EMERGENCY FIX: Limit events to most recent 10 per visitor to prevent massive payloads
+      const queryStart = performance.now();
+      const { data, error, count } = await supabase
+        .from('visitors')
+        .select(`
+          id, visitor_id, client_id, lead_score, created_at, updated_at,
+          is_acknowledged, name, email, budget, tipologia,
+          development_preference, phone, previous_lead_score,
+          events!inner(
+            event_type, timestamp, score_impact, listing_id
+          )
+        `, { count: 'exact' })
+        .eq('client_id', clientId)
+        .order(sortBy === 'lead_score' ? 'lead_score' : sortBy,
+               { ascending: sortOrder === 'asc' })
+        .order('updated_at', { ascending: false }) // Secondary sort for stability
+        .range((page - 1) * limit, page * limit - 1);
+      const queryEnd = performance.now();
+      console.log(`[TIMING] Database query completed in ${queryEnd - queryStart}ms, returned ${data?.length || 0} visitors, total count: ${count}`);
+
+      // EMERGENCY FIX: Limit events to most recent 10 per visitor after query
+      // This prevents visitors with hundreds of events from creating massive payloads
+      const processingStart = performance.now();
+      if (data) {
+        let totalEventsBefore = 0;
+        let totalEventsAfter = 0;
+
+        data.forEach(visitor => {
+          if (visitor.events) {
+            totalEventsBefore += visitor.events.length;
+            if (visitor.events.length > 10) {
+              // Sort events by timestamp descending (most recent first) and take top 10
+              visitor.events = visitor.events
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .slice(0, 10);
+            }
+            totalEventsAfter += visitor.events.length;
+          }
+        });
+
+        console.log(`[TIMING] Event processing: ${totalEventsBefore} events before → ${totalEventsAfter} events after (saved ${totalEventsBefore - totalEventsAfter} events)`);
+      }
+      const processingEnd = performance.now();
+      console.log(`[TIMING] Event processing completed in ${processingEnd - processingStart}ms`);
+
+      if (error) {
+        console.error('Error fetching visitors with events:', error);
+        return res.status(500).json({ error: 'Failed to fetch visitor data.' });
+      }
+
+      // Group events by visitor (Supabase returns events as nested array)
+      const visitorsWithEvents = data.map(visitor => ({
+        ...visitor,
+        events: visitor.events || []
+      }));
+
+      const totalPages = Math.ceil(count / limit);
+
+      console.log(`[Dashboard API] Returning ${visitorsWithEvents.length} visitors (${count} total), page ${page}/${totalPages}`);
+
+      const responseStart = performance.now();
+      res.json({
+        visitors: visitorsWithEvents,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: count,
+          totalPages
+        }
+      });
+      const responseEnd = performance.now();
+      console.log(`[TIMING] Response sent in ${responseEnd - responseStart}ms`);
+
+      const endpointEnd = performance.now();
+      console.log(`[TIMING] VisitorsWithEvents endpoint completed in ${endpointEnd - endpointStart}ms total`);
+    } catch (error) {
+      console.error('Error in /api/dashboard/visitors-with-events endpoint:', error);
+      const endpointEnd = performance.now();
+      console.log(`[TIMING] VisitorsWithEvents endpoint failed after ${endpointEnd - endpointStart}ms`);
+      res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
   // API endpoint to save onboarding answers for a visitor
   app.post('/v1/visitors/:visitorId/onboarding', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {

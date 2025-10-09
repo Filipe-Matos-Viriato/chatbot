@@ -4,7 +4,7 @@ import UnansweredQuestionsAnalysis from './components/UnansweredQuestionsAnalysi
 import CommonUserIntentionsTopics from './components/CommonUserIntentionsTopics';
 import ChatHandoffsToHumanAgents from './components/ChatHandoffsToHumanAgents';
 
-const ChatbotAnalyticsTab = () => {
+const ChatbotAnalyticsTab = ({ clientId }) => {
     return (
         <div className="space-y-8 w-full">
             <h2 className="text-2xl font-bold text-gray-800">Chatbot Analytics</h2>

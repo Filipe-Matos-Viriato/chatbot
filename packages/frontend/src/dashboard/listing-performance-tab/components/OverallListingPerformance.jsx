@@ -1,16 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 const OverallListingPerformance = ({ listings, listingMetrics, searchTerm, hideConversionMetrics = false }) => {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // Initialize sorting state from URL parameters or defaults
+    const [sortColumn, setSortColumn] = useState(searchParams.get('sortColumn') || null);
+    const [sortDirection, setSortDirection] = useState(searchParams.get('sortDirection') || 'asc');
     const [currentPage, setCurrentPage] = useState(1);
-    const [sortColumn, setSortColumn] = useState(null);
-    const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
     const itemsPerPage = 10;
 
+    // Sync component state with URL parameters
+    useEffect(() => {
+        const urlSortColumn = searchParams.get('sortColumn');
+        const urlSortDirection = searchParams.get('sortDirection');
+
+        if (urlSortColumn !== sortColumn) {
+            setSortColumn(urlSortColumn);
+        }
+        if (urlSortDirection !== sortDirection) {
+            setSortDirection(urlSortDirection || 'asc');
+        }
+    }, [searchParams, sortColumn, sortDirection]);
+
     // Combine listings and metrics data
-    const combinedData = listings.map(listing => {
-        const metrics = listingMetrics.find(m => m.listing_id === listing.id);
+    const combinedData = (listings || []).map(listing => {
+        const metrics = (listingMetrics || []).find(m => m.listing_id === listing.id);
         return {
             id: listing.id,
             name: listing.name,
@@ -55,12 +71,26 @@ const OverallListingPerformance = ({ listings, listingMetrics, searchTerm, hideC
     const currentListings = sortedData.slice(startIndex, endIndex);
 
     const handleSort = (column) => {
+        let newDirection;
         if (sortColumn === column) {
-            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+            newDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            setSortDirection(newDirection);
         } else {
             setSortColumn(column);
-            setSortDirection('asc');
+            newDirection = 'asc';
+            setSortDirection(newDirection);
         }
+
+        // Update URL parameters
+        const newParams = new URLSearchParams(searchParams);
+        if (column) {
+            newParams.set('sortColumn', column);
+            newParams.set('sortDirection', newDirection);
+        } else {
+            newParams.delete('sortColumn');
+            newParams.delete('sortDirection');
+        }
+        setSearchParams(newParams);
     };
 
     const handlePageChange = (newPage) => {

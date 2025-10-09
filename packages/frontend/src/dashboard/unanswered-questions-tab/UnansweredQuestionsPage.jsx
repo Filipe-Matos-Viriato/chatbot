@@ -10,9 +10,8 @@ import ReplyModal from './components/ReplyModal';
 import { apiRequest } from '../../config/apiClient';
 import { useClient } from '../../context/ClientContext';
 
-const UnansweredQuestionsPage = () => {
+const UnansweredQuestionsPage = ({ clientId }) => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { selectedClientId } = useClient();
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -38,7 +37,7 @@ const UnansweredQuestionsPage = () => {
       setError(null);
 
       // Don't fetch if clientId is not available
-      if (!selectedClientId) {
+      if (!clientId) {
         console.log('Waiting for clientId to be available...');
         setLoading(false);
         return;
@@ -47,7 +46,7 @@ const UnansweredQuestionsPage = () => {
       const queryParams = new URLSearchParams({
         page: pagination.page,
         pageSize: pagination.pageSize,
-        clientId: selectedClientId,
+        clientId: clientId,
         ...Object.fromEntries(
           Object.entries(filters).filter(([_, value]) => value !== '' && value !== null)
         )
@@ -61,7 +60,7 @@ const UnansweredQuestionsPage = () => {
       const response = await apiRequest(`/api/unanswered-questions?${queryParams}`, {
         method: 'GET',
         headers: {
-          'X-Client-Id': selectedClientId,
+          'X-Client-Id': clientId,
         },
       });
       setQuestions(response.questions || []);
@@ -96,7 +95,7 @@ const UnansweredQuestionsPage = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Client-Id': selectedClientId,
+          'X-Client-Id': clientId,
         },
         body: JSON.stringify({
           status,
@@ -122,7 +121,7 @@ const UnansweredQuestionsPage = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Client-Id': selectedClientId,
+          'X-Client-Id': clientId,
         },
         body: JSON.stringify({
           channel,
@@ -150,10 +149,10 @@ const UnansweredQuestionsPage = () => {
 
   // Effect to fetch questions when filters, pagination, or clientId change
   useEffect(() => {
-    if (selectedClientId) {
+    if (clientId) {
       fetchQuestions();
     }
-  }, [filters, pagination.page, pagination.pageSize, selectedClientId]);
+  }, [filters, pagination.page, pagination.pageSize, clientId]);
 
   // Effect to update URL when listingId filter changes
   useEffect(() => {
@@ -174,7 +173,7 @@ const UnansweredQuestionsPage = () => {
           filters={filters}
           onFilterChange={handleFilterChange}
           showListingFilter={true}
-          clientId={selectedClientId}
+          clientId={clientId}
         />
       </div>
 
@@ -221,7 +220,7 @@ const UnansweredQuestionsPage = () => {
               setSelectedQuestion(null);
             }}
             onSendReply={handleReply}
-            clientId={selectedClientId}
+            clientId={clientId}
           />
         )}
       </div>

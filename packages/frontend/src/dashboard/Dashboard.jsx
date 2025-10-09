@@ -24,12 +24,6 @@ const Dashboard = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const { selectedClientId } = useClient(); // Get selectedClientId from context
-    const [visitors, setVisitors] = useState([]);
-    const [listings, setListings] = useState([]);
-    const [listingMetrics, setListingMetrics] = useState([]);
-    const [clusteredQuestions, setClusteredQuestions] = useState([]);
-    const [topInquiredListings, setTopInquiredListings] = useState([]);
-    const [clientConfig, setClientConfig] = useState(null);
     const [customCriteria, setCustomCriteria] = useState(() => {
         // Try to load from localStorage first
         const saved = localStorage.getItem('customLeadCriteria');
@@ -49,158 +43,6 @@ const Dashboard = () => {
     };
 
     const activeTab = getActiveTabFromPath(location.pathname);
-
-    // Fetch data from Supabase
-    useEffect(() => {
-        const fetchData = async () => {
-            if (!selectedClientId) return; // Don't fetch if no client is selected
-            console.log('Fetching data for client ID:', selectedClientId, 'Type:', typeof selectedClientId); // Add this line
-
-            try {
-                // Fetch visitors
-                const { data: visitorsData, error: visitorsError } = await supabase
-                    .from('visitors')
-                    .select('*, previous_lead_score')
-                    .eq('client_id', selectedClientId);
-                if (visitorsError) {
-                    console.error('Error fetching visitors:', visitorsError);
-                } else {
-                    // Fetch events for these visitors
-                    const visitorIds = visitorsData.map(v => v.visitor_id);
-                    if (visitorIds.length > 0) {
-                        const { data: eventsData, error: eventsError } = await supabase
-                            .from('events')
-                            .select('visitor_id, event_type, timestamp, score_impact')
-                            .in('visitor_id', visitorIds)
-                            .order('timestamp', { ascending: false });
-
-                        if (eventsError) {
-                            console.error('Error fetching events:', eventsError);
-                        } else {
-                            // Group events by visitor_id
-                            const eventsByVisitor = eventsData.reduce((acc, event) => {
-                                if (!acc[event.visitor_id]) {
-                                    acc[event.visitor_id] = [];
-                                }
-                                acc[event.visitor_id].push(event);
-                                return acc;
-                            }, {});
-
-                            // Combine visitors with their events
-                            const visitorsWithEvents = visitorsData.map(visitor => ({
-                                ...visitor,
-                                events: eventsByVisitor[visitor.visitor_id] || []
-                            }));
-
-                            // Fetch score history for each visitor
-                            const visitorsWithScoreHistory = await Promise.all(
-                                visitorsWithEvents.map(async (visitor) => {
-                                    try {
-                                        // Use the correct API base URL for backend calls
-                                        const apiBaseUrl = import.meta.env.DEV ? 'http://localhost:3007' : `${window.location.origin}/api`;
-                                        const response = await fetch(`${apiBaseUrl}/v1/visitors/${visitor.visitor_id}/score-history?maxPoints=15`, {
-                                            headers: {
-                                                'x-client-id': selectedClientId,
-                                                'Content-Type': 'application/json'
-                                            }
-                                        });
-                                        if (response.ok) {
-                                            const { scoreHistory } = await response.json();
-                                            return { ...visitor, scoreHistory };
-                                        }
-                                        return visitor;
-                                    } catch (error) {
-                                        console.error(`Error fetching score history for visitor ${visitor.visitor_id}:`, error);
-                                        return visitor;
-                                    }
-                                })
-                            );
-
-                            setVisitors(visitorsWithScoreHistory);
-                            console.log('Fetched visitors with events and score history:', visitorsWithScoreHistory);
-                        }
-                    } else {
-                        setVisitors(visitorsData || []);
-                        console.log('Fetched visitors:', visitorsData);
-                    }
-                }
-
-                // Fetch listings
-                const { data: listingsData, error: listingsError } = await supabase
-                    .from('listings')
-                    .select('*')
-                    .eq('client_id', selectedClientId);
-                if (listingsError) {
-                    console.error('Error fetching listings:', listingsError);
-                } else {
-                    setListings(listingsData || []);
-                    console.log('Fetched listings:', listingsData);
-                }
-
-                // Fetch listing metrics
-                const { data: metricsData, error: metricsError } = await supabase
-                    .from('listing_metrics')
-                    .select('*')
-                    .eq('client_id', selectedClientId);
-                if (metricsError) {
-                    console.error('Error fetching listing metrics:', metricsError);
-                } else {
-                    setListingMetrics(metricsData || []);
-                    console.log('Fetched listing metrics:', metricsData);
-
-                    // Calculate top 5 inquired-about listings
-                    const combinedListings = (listingsData || []).map(listing => {
-                        const metrics = (metricsData || []).find(m => m.listing_id === listing.id);
-                        return {
-                            ...listing,
-                            inquiries: metrics ? metrics.inquiries : 0,
-                            engaged_users: metrics ? metrics.engaged_users : 0,
-                            total_conversions: metrics ? metrics.total_conversions : 0,
-                            conversion_rate: metrics ? metrics.conversion_rate : 0
-                        };
-                    });
-                    console.log('Combined listings data:', combinedListings);
-
-                    const sortedListings = combinedListings.sort((a, b) => b.inquiries - a.inquiries);
-                    setTopInquiredListings(sortedListings.slice(0, 5));
-                }
-
-                // Fetch clustered questions
-                const { data: clusteredData, error: clusteredError } = await supabase
-                    .from('clustered_questions')
-                    .select('*')
-                    .eq('client_id', selectedClientId);
-                if (clusteredError) {
-                    console.error('Error fetching clustered questions:', clusteredError);
-                } else {
-                    setClusteredQuestions(clusteredData || []);
-                    console.log('Fetched clustered questions:', clusteredData);
-                }
-
-                // Fetch client config
-                const { data: configData, error: configError } = await supabase
-                    .from('clients')
-                    .select('lead_scoring_rules')
-                    .eq('client_id', selectedClientId)
-                    .single();
-                if (configError) {
-                    console.error('Error fetching client config:', configError);
-                } else {
-                    setClientConfig(configData?.lead_scoring_rules || null);
-                    console.log('Fetched client config:', configData);
-                }
-            } catch (error) {
-                console.error('Error fetching dashboard data:', error);
-            }
-        };
-
-        fetchData();
-    }, [selectedClientId]);
-
-    // Save custom criteria to localStorage whenever it changes
-    useEffect(() => {
-        localStorage.setItem('customLeadCriteria', JSON.stringify(customCriteria));
-    }, [customCriteria]);
 
     const handleTabClick = (tabId) => {
         navigate(`/dashboard/${tabId}`);
@@ -226,15 +68,15 @@ const Dashboard = () => {
 
                 <main className="w-full mt-8">
                     <Routes>
-                        <Route index element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
-                        <Route path="overview" element={<OverviewTab onViewHotLeads={handleViewHotLeads} topInquiredListings={topInquiredListings} />} />
-                        <Route path="lead-performance" element={<LeadPerformanceTab visitors={visitors} listings={listings} listingMetrics={listingMetrics} clientConfig={clientConfig} onOpenChatHistory={handleOpenChatHistory} customCriteria={customCriteria} setCustomCriteria={setCustomCriteria} />} />
-                        <Route path="chatbot-analytics" element={<ChatbotAnalyticsTab />} />
-                        <Route path="listing-performance" element={<ListingPerformanceTab listings={listings} listingMetrics={listingMetrics} clusteredQuestions={clusteredQuestions} />} />
-                        <Route path="listing/:id" element={<ListingDetailsPage />} />
+                        <Route index element={<OverviewTab clientId={selectedClientId} onViewHotLeads={handleViewHotLeads} />} />
+                        <Route path="overview" element={<OverviewTab clientId={selectedClientId} onViewHotLeads={handleViewHotLeads} />} />
+                        <Route path="lead-performance" element={<LeadPerformanceTab clientId={selectedClientId} onOpenChatHistory={handleOpenChatHistory} />} />
+                        <Route path="chatbot-analytics" element={<ChatbotAnalyticsTab clientId={selectedClientId} />} />
+                        <Route path="listing-performance" element={<ListingPerformanceTab clientId={selectedClientId} />} />
+                        <Route path="listing/:id" element={<ListingDetailsPage clientId={selectedClientId} />} />
                         <Route path="chat-history/:visitorId" element={<CompleteChatHistoryPage />} />
-                        <Route path="unanswered-questions" element={<UnansweredQuestionsPage />} />
-                        <Route path="user-insights" element={<UserInsightsTab visitors={visitors} onOpenChatHistory={handleOpenChatHistory} />} />
+                        <Route path="unanswered-questions" element={<UnansweredQuestionsPage clientId={selectedClientId} />} />
+                        <Route path="user-insights" element={<UserInsightsTab clientId={selectedClientId} onOpenChatHistory={handleOpenChatHistory} />} />
                         <Route path="*" element={
                             <div className="text-center py-12">
                                 <h3 className="text-lg font-medium text-gray-600">

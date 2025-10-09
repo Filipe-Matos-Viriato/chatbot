@@ -1,12 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
 const IndividualLeadProgression = ({ visitors, clientConfig, onOpenChatHistory, activeFilter, onFilterChange, newHotFromUrl, customCriteria }) => {
-    const [sortColumn, setSortColumn] = useState(null);
-    const [sortDirection, setSortDirection] = useState('asc');
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // Initialize sorting state from URL parameters or defaults
+    const [sortColumn, setSortColumn] = useState(searchParams.get('sortColumn') || null);
+    const [sortDirection, setSortDirection] = useState(searchParams.get('sortDirection') || 'asc');
     const [isAnimating, setIsAnimating] = useState(false);
     const [isBadgeAnimating, setIsBadgeAnimating] = useState(false);
     const [newHotButtonState, setNewHotButtonState] = useState('inactive'); // 'inactive', 'animated', 'pale-red', 'active-red'
@@ -16,6 +20,19 @@ const IndividualLeadProgression = ({ visitors, clientConfig, onOpenChatHistory, 
         if (!visitors) return 0;
         return visitors.filter(visitor => visitor.lead_score >= 70 && !visitor.is_acknowledged).length;
     }, [visitors]);
+
+    // Sync component state with URL parameters
+    useEffect(() => {
+        const urlSortColumn = searchParams.get('sortColumn');
+        const urlSortDirection = searchParams.get('sortDirection');
+
+        if (urlSortColumn !== sortColumn) {
+            setSortColumn(urlSortColumn);
+        }
+        if (urlSortDirection !== sortDirection) {
+            setSortDirection(urlSortDirection || 'asc');
+        }
+    }, [searchParams, sortColumn, sortDirection]);
 
     // Control animation timing and button states
     useEffect(() => {
@@ -132,12 +149,26 @@ const IndividualLeadProgression = ({ visitors, clientConfig, onOpenChatHistory, 
     }, [visitors, sortColumn, sortDirection, activeFilter, customCriteria]);
 
     const handleSort = (column) => {
+        let newDirection;
         if (sortColumn === column) {
-            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+            newDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            setSortDirection(newDirection);
         } else {
             setSortColumn(column);
-            setSortDirection('asc');
+            newDirection = 'asc';
+            setSortDirection(newDirection);
         }
+
+        // Update URL parameters
+        const newParams = new URLSearchParams(searchParams);
+        if (column) {
+            newParams.set('sortColumn', column);
+            newParams.set('sortDirection', newDirection);
+        } else {
+            newParams.delete('sortColumn');
+            newParams.delete('sortDirection');
+        }
+        setSearchParams(newParams);
     };
 
     const getSortIndicator = (column) => {
@@ -364,7 +395,19 @@ const IndividualLeadProgression = ({ visitors, clientConfig, onOpenChatHistory, 
                                     {visitor.lead_score} {getEvolutionIcon(visitor.lead_score, visitor.previous_lead_score, visitor.updated_at)}
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                    {visitor.events && visitor.events.length > 0 ? visitor.events[visitor.events.length - 1].event_type : 'N/A'} ({(new Date() - new Date(visitor.updated_at)) / (1000 * 60 * 60 * 24) < 1 ? `${Math.round((new Date() - new Date(visitor.updated_at)) / (1000 * 60 * 60))}h ago` : `${Math.round((new Date() - new Date(visitor.updated_at)) / (1000 * 60 * 60 * 24))}d ago`})
+                                    <div className="flex items-center space-x-2">
+                                        <span>
+                                            {visitor.events && visitor.events.length > 0 ? visitor.events[visitor.events.length - 1].event_type : 'N/A'}
+                                        </span>
+                                        {visitor.events && visitor.events.length > 0 && visitor.events[visitor.events.length - 1].score_impact && (
+                                            <span className={`px-1 py-0.5 rounded text-xs ${visitor.events[visitor.events.length - 1].score_impact > 0 ? 'bg-green-100 text-green-800' : visitor.events[visitor.events.length - 1].score_impact < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
+                                                {visitor.events[visitor.events.length - 1].score_impact > 0 ? '+' : ''}{visitor.events[visitor.events.length - 1].score_impact}
+                                            </span>
+                                        )}
+                                        <span className="text-gray-400">
+                                            ({(new Date() - new Date(visitor.updated_at)) / (1000 * 60 * 60 * 24) < 1 ? `${Math.round((new Date() - new Date(visitor.updated_at)) / (1000 * 60 * 60))}h ago` : `${Math.round((new Date() - new Date(visitor.updated_at)) / (1000 * 60 * 60 * 24))}d ago`})
+                                        </span>
+                                    </div>
                                 </td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                     {visitor.events && visitor.events.length >= 1 ? (

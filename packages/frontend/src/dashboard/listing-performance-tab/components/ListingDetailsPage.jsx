@@ -192,7 +192,7 @@ const ListingDetailsPage = () => {
                         Listing Details: {listingData.name} ({listingData.propId})
                     </h2>
                     <button
-                        onClick={() => navigate('/dashboard/listing-performance')}
+                        onClick={() => window.history.back()}
                         className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 focus:outline-none"
                     >
                         Back to All Listings
