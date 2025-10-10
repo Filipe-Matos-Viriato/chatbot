@@ -4,6 +4,8 @@
 // Relevant files: rag-service.js
 // Shared parsing utilities for the RAG system
 
+import IntentUnderstandingEngine from './intent-understanding-engine.js';
+
 // Query scope constants
 export const QUERY_SCOPE = {
   LISTING_SPECIFIC: 'LISTING_SPECIFIC',
@@ -78,10 +80,30 @@ export function isAggregativePriceQuery(query) {
 
 /**
  * Extracts soft filters from a user query for heuristic re-ranking.
+ * Enhanced with intent-aware processing using IntentUnderstandingEngine.
  */
-export function extractQueryFilters(query, currentListingPrice = null, clientConfig = null, userPreferences = null) {
+export async function extractQueryFilters(query, currentListingPrice = null, clientConfig = null, userPreferences = null, context = {}) {
   const filters = {};
   const lowerCaseQuery = String(query || '').toLowerCase();
+
+  // Enhanced intent analysis using IntentUnderstandingEngine
+  let intentAnalysis = null;
+  if (clientConfig) {
+    try {
+      const intentEngine = new IntentUnderstandingEngine(clientConfig);
+      intentAnalysis = await intentEngine.analyzeIntent(query, {
+        userHistory: context.userHistory || [],
+        sessionData: context.sessionData || {}
+      });
+
+      // Store intent analysis in filters for downstream use
+      filters.intentAnalysis = intentAnalysis;
+
+      console.log(`[rag-parsing] Intent analysis: ${intentAnalysis.primaryIntent} (confidence: ${intentAnalysis.confidence.toFixed(2)})`);
+    } catch (error) {
+      console.warn('[rag-parsing] Intent analysis failed, continuing with traditional parsing:', error.message);
+    }
+  }
 
   const naturalListingId = extractListingIdFromQuery(query);
   if (naturalListingId) filters.listing_id = naturalListingId;

@@ -5,6 +5,7 @@
 // Heuristic re-ranking with a simple scoring function and pluggable interface
 
 import { QUERY_SCOPE } from './rag-parsing.js';
+import ContextPrioritizationEngine from './context-prioritization-engine.js';
 
 export function reRankMatches({
   matches,
@@ -17,8 +18,57 @@ export function reRankMatches({
   targetedMatches = [],
   userPreferences = null,
   isOnboardingRecommendation = false,
+  clientConfig = null,
+  intentAnalysis = null,
 }) {
   if (!Array.isArray(matches) || matches.length === 0) return { rankedMatches: [], contextualMatchStatus: 'NOT_APPLICABLE' };
+
+  // Enhanced context prioritization using ContextPrioritizationEngine
+  let prioritizedMatches = matches;
+  if (clientConfig && intentAnalysis) {
+    try {
+      const prioritizationEngine = new ContextPrioritizationEngine(clientConfig);
+      prioritizedMatches = prioritizationEngine.prioritizeChunks(matches, intentAnalysis, {
+        userPreferences,
+        sessionData: {
+          currentListingId: contextListingId,
+          currentDevelopmentId: contextDevelopmentId
+        }
+      });
+
+      // Log prioritization statistics
+      const stats = prioritizationEngine.getStatistics(prioritizedMatches);
+      console.log(`[rerank] Context prioritization applied: ${stats.high} high, ${stats.medium} medium, ${stats.low} low relevance chunks`);
+
+      // Intent-aware filtering: preserve tag-matched chunks for feature queries
+      if (intentAnalysis?.primaryIntent === 'feature_inquiry' && queryFilters?.generated_tags) {
+        const requiredTags = queryFilters.generated_tags.$all || [];
+        const tagMatchedChunks = prioritizedMatches.filter(chunk => {
+          const chunkTags = chunk.metadata?.generated_tags || [];
+          return requiredTags.every(tag =>
+            chunkTags.some(chunkTag => chunkTag.includes(tag))
+          );
+        });
+
+        console.log(`[rerank] Feature query detected: preserving ${tagMatchedChunks.length} tag-matched chunks`);
+
+        // Keep all tag-matched chunks + high-scoring others (less aggressive filtering)
+        prioritizedMatches = [
+          ...tagMatchedChunks,
+          ...prioritizedMatches.filter(chunk =>
+            chunk.totalScore >= 0.5 && !tagMatchedChunks.find(tc => tc.id === chunk.id)
+          )
+        ];
+      } else {
+        // Standard filtering for non-feature queries
+        prioritizedMatches = prioritizationEngine.filterByRelevance(prioritizedMatches, 0.3);
+      }
+
+    } catch (error) {
+      console.warn('[rerank] Context prioritization failed, using original matches:', error.message);
+      prioritizedMatches = matches;
+    }
+  }
 
   let contextualMatchStatus = 'NOT_APPLICABLE';
   const hasFeatureQueryWithContext = contextListingId && queryFilters?.generated_tags;
@@ -34,7 +84,19 @@ export function reRankMatches({
     if (contextualListingHasMatchingFeature) {
       contextualMatchStatus = 'MATCH_IN_CONTEXT';
     } else {
-      contextualMatchStatus = 'NO_MATCH_IN_CONTEXT';
+      // For feature queries, be more conservative about declaring "no match"
+      // If we have tag-matched results from other listings, don't assume the contextual one lacks the feature
+      const hasAnyTagMatches = matches.some(m =>
+        Array.isArray(m.metadata?.generated_tags) &&
+        filterTags.every(tag => m.metadata.generated_tags.some(metaTag => metaTag.includes(tag)))
+      );
+
+      if (hasAnyTagMatches) {
+        contextualMatchStatus = 'MATCH_IN_CONTEXT'; // Treat as match to avoid filtering
+        console.log(`[rerank] Feature query with tag matches from other listings - treating as contextual match`);
+      } else {
+        contextualMatchStatus = 'NO_MATCH_IN_CONTEXT';
+      }
     }
   }
 
@@ -44,7 +106,7 @@ export function reRankMatches({
   const isLookingForStudio = qLower.includes('estúdio') || qLower.includes('studio');
 
   const debugBoostLogs = [];
-  let reRanked = matches.map((match, idx) => {
+  let reRanked = prioritizedMatches.map((match, idx) => {
     let score = match.score;
     const meta = match.metadata || {};
 

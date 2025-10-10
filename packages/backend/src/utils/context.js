@@ -118,9 +118,28 @@ export function truncateByTokenBudget(text, budget) {
   return { text: text.slice(0, cut), tokenCount: budget };
 }
 
-export function buildStructuredListingSummary(matches, queryFilters) {
+export function buildStructuredListingSummary(matches, queryFilters, isOnboarding = false) {
   if (!matches || matches.length === 0) {
     return null;
+  }
+
+  // DEBUG: Log metadata fields for first few matches to understand data structure
+  if (isOnboarding && matches.length > 0) {
+    console.log('[buildStructuredListingSummary] DEBUG: Analyzing metadata fields for onboarding');
+    matches.slice(0, 2).forEach((match, index) => {
+      const metadata = match.metadata || {};
+      console.log(`[buildStructuredListingSummary] Match ${index + 1} metadata keys:`, Object.keys(metadata));
+      console.log(`[buildStructuredListingSummary] Match ${index + 1} location fields:`, {
+        address: metadata.address,
+        location: metadata.location,
+        neighborhood: metadata.neighborhood,
+        zone: metadata.zone,
+        city: metadata.city,
+        bairro: metadata.bairro,
+        localizacao: metadata.localizacao
+      });
+      console.log(`[buildStructuredListingSummary] Match ${index + 1} generated_tags:`, metadata.generated_tags);
+    });
   }
 
   const listingsMap = new Map();
@@ -132,14 +151,32 @@ export function buildStructuredListingSummary(matches, queryFilters) {
     const listingId = metadata?.listing_id;
 
     if (listingId && !listingsMap.has(listingId)) {
-      listingsMap.set(listingId, {
+      const listing = {
         id: listingId,
-        name: metadata.name || 'Nome não disponível',
-        type: metadata.type || 'Tipo não disponível',
-        beds: metadata.beds || 'N/A',
-        price_eur: metadata.price || 'Preço não disponível',
+        name: metadata.name || metadata.listing_id || 'Nome não disponível',
+        type: metadata.type || metadata.typology || 'Tipo não disponível',
+        beds: metadata.beds || metadata.num_bedrooms || 'N/A',
+        baths: metadata.baths || metadata.num_bathrooms || 'N/A',
+        price_eur: metadata.price_eur || metadata.price || 'Preço não disponível',
+        area_sqm: metadata.total_area_sqm || metadata.area_sqm || metadata.gross_area_sqm,
+        location: metadata.location || metadata.neighborhood || metadata.zone ||
+                 metadata.address || metadata.city || metadata.bairro ||
+                 metadata.localizacao || 'Não especificada',
+        features: [],
+        description: metadata.description || '',
         hasFeature: true // Since filtering ensures the feature is present
-      });
+      };
+
+      // Extract amenities from generated_tags for richer context
+      if (Array.isArray(metadata.generated_tags)) {
+        const amenities = metadata.generated_tags
+          .filter(tag => tag.startsWith('comodidade:'))
+          .map(tag => tag.replace('comodidade:', ''))
+          .slice(0, 6); // Top 6 amenities
+        listing.features = amenities;
+      }
+
+      listingsMap.set(listingId, listing);
     }
   }
 
@@ -147,6 +184,33 @@ export function buildStructuredListingSummary(matches, queryFilters) {
     return null;
   }
 
+  // Enhanced summary with rich details for onboarding
+  if (isOnboarding) {
+    let summary = `Encontramos ${listingsMap.size} imóvel(is) que correspondem às suas preferências:\n\n`;
+
+    for (const listing of Array.from(listingsMap.values())) {
+      summary += `**${listing.name}**\n`;
+      summary += `• Tipo: ${listing.type}\n`;
+      summary += `• Quartos: ${listing.beds}`;
+      if (listing.baths && listing.baths !== 'N/A') summary += ` | Casas de banho: ${listing.baths}`;
+      if (listing.area_sqm) summary += ` | Área: ${listing.area_sqm}m²`;
+      summary += `\n`;
+      summary += `• Preço: €${typeof listing.price_eur === 'number' ? listing.price_eur.toLocaleString('pt-PT') : listing.price_eur}\n`;
+      if (listing.location) summary += `• Localização: ${listing.location}\n`;
+      if (listing.features && listing.features.length > 0) {
+        summary += `• Comodidades: ${listing.features.join(', ')}\n`;
+      }
+      if (listing.description && listing.description.length > 50) {
+        const shortDesc = listing.description.substring(0, 150) + '...';
+        summary += `• Descrição: ${shortDesc}\n`;
+      }
+      summary += `\n`;
+    }
+
+    return summary;
+  }
+
+  // Original format for non-onboarding queries
   let summary = `Característica solicitada: ${requestedFeature.replace(/comodidade:|feature:/, '')}\n\n`;
   summary += 'Imóveis correspondentes:\n';
   for (const listing of Array.from(listingsMap.values())) {

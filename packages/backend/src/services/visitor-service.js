@@ -11,6 +11,7 @@ class VisitorService {
   constructor() {
     // No longer using in-memory map, data will be stored in Supabase
     this.preferencesCache = new Map();
+    this.onboardingStatusCache = new Map();
     this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
   }
 
@@ -948,8 +949,73 @@ class VisitorService {
   }
 
   /**
-    * Save onboarding answers into visitors table individual columns and compute/update lead_score.
-    */
+   * Get onboarding status for a visitor (cached)
+   * @param {string} visitorId - Visitor ID
+   * @param {string} clientId - Client ID
+   * @returns {Promise<Object>} Onboarding status object
+   */
+  async getOnboardingStatus(visitorId, clientId) {
+    const cacheKey = `${clientId}:${visitorId}`;
+    const cached = this.onboardingStatusCache.get(cacheKey);
+
+    // Return cached data if still valid
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.data;
+    }
+
+    try {
+      const { data: visitor, error } = await supabase
+        .from('visitors')
+        .select('visitor_id, tipologia, budget, name, email')
+        .eq('visitor_id', visitorId)
+        .eq('client_id', clientId)
+        .single();
+
+      if (error || !visitor) {
+        console.warn(`[getOnboardingStatus] No visitor found for ${visitorId}`);
+        const emptyStatus = {
+          onboarding_completed: false,
+          onboarding_data: null
+        };
+        this.onboardingStatusCache.set(cacheKey, { data: emptyStatus, timestamp: Date.now() });
+        return emptyStatus;
+      }
+
+      // Check if onboarding is completed by verifying key fields are populated
+      const onboardingCompleted = Boolean(
+        visitor.tipologia &&
+        visitor.budget &&
+        visitor.name &&
+        visitor.email
+      );
+
+      const status = {
+        onboarding_completed: onboardingCompleted,
+        onboarding_data: onboardingCompleted ? {
+          typology: visitor.tipologia,
+          budget: visitor.budget,
+          name: visitor.name,
+          email: visitor.email
+        } : null
+      };
+
+      // Cache the result
+      this.onboardingStatusCache.set(cacheKey, { data: status, timestamp: Date.now() });
+      return status;
+    } catch (error) {
+      console.error('[getOnboardingStatus] Error:', error);
+      const emptyStatus = {
+        onboarding_completed: false,
+        onboarding_data: null
+      };
+      this.onboardingStatusCache.set(cacheKey, { data: emptyStatus, timestamp: Date.now() });
+      return emptyStatus;
+    }
+  }
+
+  /**
+     * Save onboarding answers into visitors table individual columns and compute/update lead_score.
+     */
   async saveOnboarding(visitorId, clientId, onboardingPayload) {
     console.log('[saveOnboarding] Starting save for visitor:', visitorId, 'client:', clientId);
     console.log('[saveOnboarding] Onboarding payload:', JSON.stringify(onboardingPayload, null, 2));
@@ -963,9 +1029,36 @@ class VisitorService {
 
     console.log('[saveOnboarding] Fetch result - existing:', !!existing, 'error:', fetchError);
 
+    let visitor = existing;
     if (fetchError || !existing) {
-      console.error('[saveOnboarding] Visitor not found:', fetchError);
-      throw new Error('Visitor not found');
+      console.log('[saveOnboarding] Visitor not found, creating new visitor for onboarding');
+
+      // Create new visitor record for onboarding
+      const newVisitor = {
+        visitor_id: visitorId,
+        client_id: clientId,
+        lead_score: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: created, error: createError } = await supabase
+        .from('visitors')
+        .insert([newVisitor])
+        .select();
+
+      if (createError) {
+        console.error('[saveOnboarding] Failed to create visitor:', createError);
+        throw new Error('Failed to create visitor for onboarding');
+      }
+
+      if (!created || created.length === 0) {
+        console.error('[saveOnboarding] No visitor data returned after creation');
+        throw new Error('Failed to create visitor for onboarding');
+      }
+
+      visitor = created[0];
+      console.log('[saveOnboarding] Created new visitor:', visitor.visitor_id);
     }
 
     // Load client config to get onboarding scoring rules
@@ -978,12 +1071,12 @@ class VisitorService {
     }
 
     const newScore = this.computeLeadScoreFromOnboarding(onboardingPayload, onboardingRules);
-    const previousScore = existing.lead_score;
+    const previousScore = visitor.lead_score;
 
     // Prepare update data using individual fields that exist in the database
     const updateData = {
       // Use the higher of the two to avoid double-counting with events
-      lead_score: Math.max(existing.lead_score || 0, newScore),
+      lead_score: Math.max(visitor.lead_score || 0, newScore),
       previous_lead_score: previousScore,
       updated_at: new Date().toISOString(),
     };
@@ -994,6 +1087,9 @@ class VisitorService {
     }
     if (onboardingPayload.name) {
       updateData.name = onboardingPayload.name;
+    }
+    if (onboardingPayload.email) {
+      updateData.email = onboardingPayload.email;
     }
     // Parse budget_bucket to numeric value for storage
     if (onboardingPayload.budget_bucket) {
@@ -1029,6 +1125,11 @@ class VisitorService {
       console.error('[saveOnboarding] Database update error:', JSON.stringify(updateError, null, 2));
       throw new Error('Failed to save onboarding');
     }
+
+    // Clear onboarding status cache to ensure immediate consistency
+    const cacheKey = `${clientId}:${visitorId}`;
+    this.onboardingStatusCache.delete(cacheKey);
+    console.log('[saveOnboarding] Cleared onboarding status cache for immediate consistency');
 
     // Removed: visitor profile upsert to Pinecone (causing knowledge base contamination)
     // Preferences are used via structured filtering in rerank.js instead

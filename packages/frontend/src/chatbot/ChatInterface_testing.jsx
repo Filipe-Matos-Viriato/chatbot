@@ -67,6 +67,20 @@ const ChatInterfaceTesting = () => {
         setVisitorId(session.visitorId);
         setSessionId(session.sessionId);
         setSessionHealth('healthy');
+
+        // Set onboarding completion status from session data
+        console.log('[ChatInterface] Session onboarding status:', {
+          onboarding_completed: session.onboarding_completed,
+          onboarding_data: session.onboarding_data
+        });
+
+        if (session.onboarding_completed) {
+          setOnboarding(prev => ({ ...prev, completed: true }));
+          console.log('[ChatInterface] Onboarding already completed for visitor:', session.visitorId);
+        } else {
+          console.log('[ChatInterface] Onboarding not completed, will start when user sends message');
+        }
+
         console.log('[ChatInterface] Session initialized:', session.visitorId);
       } catch (error) {
         console.error('[ChatInterface] Failed to initialize session:', error);
@@ -81,8 +95,13 @@ const ChatInterfaceTesting = () => {
     // Load onboarding config
     const loadOnboardingConfig = async () => {
       try {
+        console.log('[ChatInterface] Loading onboarding config for client:', TEST_CLIENT_ID);
         const response = await fetch(`${API_BASE_URL}/api/v1/widget/config/${TEST_CLIENT_ID}`);
         const config = await response.json();
+        console.log('[ChatInterface] Full widget config response:', config);
+        console.log('[ChatInterface] Loaded onboarding config:', config.onboardingConfig);
+        console.log('[ChatInterface] Onboarding enabled:', config.onboardingConfig?.enabled);
+        console.log('[ChatInterface] Onboarding questions:', config.onboardingConfig?.questions);
         setOnboardingConfig(config.onboardingConfig || null);
       } catch (error) {
         console.error('Failed to load onboarding config:', error);
@@ -132,6 +151,13 @@ const ChatInterfaceTesting = () => {
           setVisitorId(currentSession.visitorId);
           setSessionId(currentSession.sessionId);
           setSessionHealth('recovered');
+
+          // Set onboarding completion status from recovered session data
+          if (currentSession.onboarding_completed) {
+            setOnboarding(prev => ({ ...prev, completed: true }));
+            console.log('[ChatInterface] Onboarding already completed for recovered session:', currentSession.visitorId);
+          }
+
           console.log('[ChatInterface] Session recovered:', currentSession.visitorId);
         }
       }
@@ -205,7 +231,10 @@ const ChatInterfaceTesting = () => {
     const textToSend = messageText || input.trim();
     if (textToSend) {
       // Check if onboarding should start
-      if (!onboarding.completed && !onboarding.started && onboardingConfig?.enabled !== false) {
+      // For testing interface, always allow onboarding unless explicitly completed
+      const onboardingEnabled = TEST_CLIENT_ID === 'e6f484a3-c3cb-4e01-b8ce-a276f4b7355c' ? true : (onboardingConfig?.enabled !== false);
+
+      if (!onboarding.completed && !onboarding.started && onboardingEnabled) {
         setOnboarding(prev => ({ ...prev, started: true, step: 1 }));
 
         const introMsg = {
@@ -243,7 +272,7 @@ const ChatInterfaceTesting = () => {
         if (data.debug) {
           console.log("🔍 SERVER-SIDE DEBUG PAYLOAD:", data.debug);
         }
-        const botMessage = { from: 'bot', text: data.response };
+        const botMessage = { from: 'bot', text: data.response || 'Desculpe, ocorreu um erro ao processar a sua pergunta.' };
         setMessages(prev => [...prev, botMessage]);
 
         // Store suggested questions at bottom instead of as messages
@@ -339,6 +368,23 @@ const ChatInterfaceTesting = () => {
 
       setOnboarding(prev => ({ ...prev, completed: true }));
 
+      // Update session data to reflect completed onboarding
+      const currentSession = sessionManager.getCurrentSession();
+      if (currentSession) {
+        const updatedSession = {
+          ...currentSession,
+          onboarding_completed: true,
+          onboarding_data: {
+            typology: onboarding.answers.typology,
+            budget: onboarding.answers.budget_bucket,
+            name: onboarding.answers.name,
+            email: onboarding.answers.email
+          }
+        };
+        sessionManager.saveSession(updatedSession);
+        console.log('[ChatInterface] Session updated with completed onboarding');
+      }
+
       // Show recommendations
       await showRecommendationsFromOnboarding();
     } catch (error) {
@@ -380,7 +426,7 @@ const ChatInterfaceTesting = () => {
       // Replace loading message with actual response
       setMessages(prev => {
         const newMessages = [...prev];
-        newMessages[newMessages.length - 1] = { from: 'bot', text: data.response };
+        newMessages[newMessages.length - 1] = { from: 'bot', text: data.response || 'Desculpe, ocorreu um erro ao processar a sua pergunta.' };
         return newMessages;
       });
 
@@ -456,7 +502,7 @@ const ChatInterfaceTesting = () => {
           </div>
         </div>
         <div style={{ padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {messages.map((message, index) => (
+          {messages.filter(message => message && typeof message === 'object' && message.text).map((message, index) => (
             <div key={index} style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', justifyContent: message.from === 'user' ? 'flex-end' : 'flex-start' }}>
               {message.from === 'bot' && (
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#d1d5db', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#4b5563', fontWeight: 'bold' }}>CB</div>
@@ -470,7 +516,7 @@ const ChatInterfaceTesting = () => {
                 <div
                   style={{ fontSize: '0.875rem', whiteSpace: 'pre-line' }}
                   dangerouslySetInnerHTML={{
-                    __html: message.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    __html: (message.text || 'Message content unavailable').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                   }}
                 />
               </div>

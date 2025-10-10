@@ -19,6 +19,7 @@ import express from 'express';
 import cors from 'cors';
 import OpenAI from 'openai';
 import multer from 'multer';
+import { encode } from 'gpt-3-encoder';
 
 import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
 import * as clientConfigServiceModule from './services/client-config-service.js';
@@ -545,15 +546,12 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
               client_id: clientConfig.clientId, // Add client_id here
               ...(context?.listingId && { listing_id: context.listingId }),
             };
-            console.log('Attempting to insert question embedding:', embeddingData);
             const { error: insertEmbeddingError } = await supabase
               .from('question_embeddings')
               .insert([embeddingData]);
 
             if (insertEmbeddingError) {
               console.error('Error inserting question embedding into Supabase:', insertEmbeddingError);
-            } else {
-              console.log('Question embedding inserted successfully.');
             }
           } catch (embeddingError) {
             console.error('Error generating or inserting question embedding:', embeddingError);
@@ -808,12 +806,89 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       }
       const visitor = await visitorService.getVisitor(visitorId);
       if (!visitor) {
-        return res.status(404).json({ error: 'Visitor not found' });
+        // Return valid: false instead of 404 for validation purposes
+        return res.json({ valid: false });
       }
       res.json({ valid: true, visitor_id: visitor.visitor_id });
     } catch (error) {
       console.error('Error validating visitor:', error);
       res.status(500).json({ error: 'Failed to validate visitor.' });
+    }
+  });
+
+  // Debug endpoint to check Pinecone metadata for listings
+  app.get('/debug/pinecone-metadata', async (req, res) => {
+    try {
+      const { listingId, limit = 5 } = req.query;
+
+      if (!listingId) {
+        return res.status(400).json({ error: 'listingId parameter is required' });
+      }
+
+      // Get Pinecone index
+      const pinecone = (await import('./config/pinecone.js')).default;
+      const indexName = clientConfig?.pineconeIndex || 'rachatbot-1536';
+      const index = pinecone.index(indexName);
+      const namespacedIndex = index.namespace(clientConfig.clientId);
+
+      // Query for specific listing
+      const queryResponse = await namespacedIndex.query({
+        vector: new Array(1536).fill(0.1), // Dummy vector for metadata-only query
+        topK: parseInt(limit),
+        includeMetadata: true,
+        filter: {
+          client_id: clientConfig.clientId,
+          listing_id: listingId
+        }
+      });
+
+      const results = queryResponse.matches.map(match => ({
+        id: match.id,
+        score: match.score,
+        metadata: match.metadata,
+        metadataKeys: Object.keys(match.metadata || {}),
+        address: match.metadata?.address,
+        location: match.metadata?.location,
+        generated_tags: match.metadata?.generated_tags
+      }));
+
+      res.json({
+        listingId,
+        totalMatches: results.length,
+        results
+      });
+    } catch (error) {
+      console.error('Error querying Pinecone metadata:', error);
+      res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
+  });
+
+  // API endpoint to check onboarding status for a visitor
+  app.get('/v1/visitors/:visitorId/onboarding-status', async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const clientId = req.headers['x-client-id'] || req.query.clientId;
+
+      if (!visitorId) {
+        return res.status(400).json({ error: 'Visitor ID is required' });
+      }
+
+      if (!clientId) {
+        return res.status(400).json({ error: 'Client ID is required' });
+      }
+
+      const status = await visitorService.getOnboardingStatus(visitorId, clientId);
+
+      console.log(`[Onboarding Status] Visitor ${visitorId} onboarding completed: ${status.onboarding_completed}`);
+
+      res.json({
+        visitor_id: visitorId,
+        onboarding_completed: status.onboarding_completed,
+        onboarding_data: status.onboarding_data
+      });
+    } catch (error) {
+      console.error('Error checking onboarding status:', error);
+      res.status(500).json({ error: 'Failed to check onboarding status.' });
     }
   });
 

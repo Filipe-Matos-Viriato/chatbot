@@ -232,7 +232,15 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
   let reRankedResult = { contextualMatchStatus: 'NOT_APPLICABLE' };
 
   if (matches.length > 0) {
-    const reRankQueryFilters = extractQueryFilters(originalQuery, currentListingPrice, clientConfig);
+    const reRankQueryFilters = await extractQueryFilters(originalQuery, currentListingPrice, clientConfig, null, {
+      userHistory: [], // TODO: Pass actual user history when available
+      sessionData: {
+        currentListingId: contextListingId,
+        currentDevelopmentId: contextDevelopmentId,
+        sessionDuration: 0, // TODO: Calculate actual session duration
+        pageViews: 1
+      }
+    });
 
     // Determine queryScope based on externalContext and filters
     let queryScope = QUERY_SCOPE.GENERAL_UNFILTERED;
@@ -256,6 +264,9 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
     // Get user preferences for re-ranking logic
     const userPreferencesForReRanking = visitorId ? await visitorService.getUserPreferences(visitorId, clientConfig.clientId) : null;
 
+    // Extract intent analysis from query filters if available
+    const intentAnalysis = reRankQueryFilters.intentAnalysis;
+
     reRankedResult = reRankMatches({
       matches,
       contextListingId,
@@ -267,6 +278,8 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
       targetedMatches: targetedResponse?.matches || [],
       userPreferences: userPreferencesForReRanking,
       isOnboardingRecommendation,
+      clientConfig,
+      intentAnalysis,
     });
     matches = reRankedResult.rankedMatches;
   }
@@ -674,7 +687,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   }
 
   const structuredListingSummary = queryScope === QUERY_SCOPE.GENERAL_FILTERED
-    ? buildStructuredListingSummary(queryResponse.matches, queryFilters)
+    ? buildStructuredListingSummary(queryResponse.matches, queryFilters, isOnboardingRecommendation)
     : null;
   
   // Concise match summary
@@ -914,7 +927,37 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
   if (queryResponse.matches.length > 1 && !isAggregativePriceQuery(query)) {
     console.log(`[${clientConfig.clientName}] 🎨 Applying multi-listing formatting instruction (queryScope: ${queryScope}, matches: ${queryResponse.matches.length}, isOnboarding: ${isOnboardingRecommendation})`);
 
-    systemPrompt += `\n\nINSTRUÇÃO CRÍTICA PARA APRESENTAÇÃO DE IMÓVEIS: Apresente 5-8 imóveis do contexto fornecido, nunca menos de 5 se houver 5 ou mais imóveis. Separe CADA imóvel com uma linha em branco. Use este formato estruturado:
+    if (isOnboardingRecommendation) {
+      // TOKEN OPTIMIZATION: Limit detailed listings to prevent token overflow
+      const maxDetailedListings = 3; // Limit to 3 detailed listings for onboarding
+      const totalMatches = queryResponse.matches.length;
+
+      console.log(`[${clientConfig.clientName}] 📊 TOKEN OPTIMIZATION: Limiting detailed listings to ${maxDetailedListings}/${totalMatches} for onboarding`);
+
+      // Calculate additional properties count
+      const additionalCount = Math.max(0, totalMatches - maxDetailedListings);
+
+      // Special enhanced formatting for onboarding recommendations with token limits
+      systemPrompt += `\n\nINSTRUÇÃO ESPECIAL PARA RECOMENDAÇÕES DE ONBOARDING: Apresente ATÉ ${maxDetailedListings} imóveis com informações COMPLETAS. Se houver mais imóveis disponíveis, mencione que há opções adicionais sem listar todas.
+
+ **Formato Detalhado para os Primeiros ${maxDetailedListings} Imóveis:**
+
+ **Nome do Imóvel**
+ • Tipo: [T2, T3, etc.]
+ • Quartos: [X] | Casas de banho: [Y] | Área: [Zm²]
+ • Preço: [€XXX.XXX]
+ • Localização: [Zona específica]
+ • Comodidades: [Lista de comodidades principais]
+ • Descrição: [Breve descrição das características especiais]
+
+ IMPORTANTE PARA ECONOMIA DE TOKENS:
+ - Liste NO MÁXIMO ${maxDetailedListings} imóveis em detalhe
+ - Se houver mais opções, diga "Além destas opções, temos ${additionalCount} imóveis adicionais disponíveis"
+ - Mantenha descrições concisas mas informativas
+ - Destaque características que correspondam às preferências do utilizador`;
+    } else {
+      // Standard multi-listing formatting for other queries
+      systemPrompt += `\n\nINSTRUÇÃO CRÍTICA PARA APRESENTAÇÃO DE IMÓVEIS: Apresente 5-8 imóveis do contexto fornecido, nunca menos de 5 se houver 5 ou mais imóveis. Separe CADA imóvel com uma linha em branco. Use este formato estruturado:
 
 **Nome do Imóvel**
 - Característica 1
@@ -925,12 +968,17 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
 - Característica 2
 
 IMPORTANTE: Sempre use uma linha completamente em branco entre imóveis para separá-los visualmente.`;
+    }
   } else {
     console.log(`[${clientConfig.clientName}] 🚫 Skipping multi-listing formatting (queryScope: ${queryScope}, matches: ${queryResponse.matches.length}, isPriceQuery: ${isAggregativePriceQuery(query)})`);
 
     // Add guidance for GENERAL_FILTERED queries to encourage natural, informative responses
     if (queryScope === QUERY_SCOPE.GENERAL_FILTERED && queryResponse.matches.length > 0 && !isAggregativePriceQuery(query)) {
-      systemPrompt += `\n\nINSTRUÇÃO PARA RESPOSTAS NATURAIS: Para consultas sobre imóveis filtrados, gere uma resposta conversacional e informativa em português. Apresente os imóveis de forma natural, destacando características especiais e fornecendo comentários inteligentes sobre cada opção. Adapte o estilo da resposta ao tipo de consulta do utilizador.`;
+      if (isOnboardingRecommendation) {
+        systemPrompt += `\n\nINSTRUÇÃO PARA RECOMENDAÇÕES DE ONBOARDING: Forneça uma descrição DETALHADA e INFORMATIVA do imóvel, incluindo todas as características disponíveis (quartos, casas de banho, área, localização, comodidades, preço). Destaque aspectos que correspondam às preferências do utilizador expressas no onboarding. Use um tom profissional e informativo.`;
+      } else {
+        systemPrompt += `\n\nINSTRUÇÃO PARA RESPOSTAS NATURAIS: Para consultas sobre imóveis filtrados, gere uma resposta conversacional e informativa em português. Apresente os imóveis de forma natural, destacando características especiais e fornecendo comentários inteligentes sobre cada opção. Adapte o estilo da resposta ao tipo de consulta do utilizador.`;
+      }
     }
   }
 
@@ -1023,7 +1071,43 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPR
 
   // Removed: systemPrompt += "\n\nEstilo de Resposta (OBRIGATÓRIO): Seja extremamente conciso. Use 1–3 frases ou no máximo 3 bullets. Evite redundâncias, qualificações desnecessárias e texto promocional. Inclua apenas a informação estritamente necessária para responder à pergunta.";
   
-  console.log(`[${clientConfig.clientName || clientConfig.clientId}] Using enhanced system prompt. Final token estimate: ${MAX_TOTAL_TOKENS - remainingTokens}`);
+  // Detailed token analysis - breakdown by component
+  const systemPromptTokens = encode(systemPrompt).length;
+  const contextTokensAnalysis = encode(context).length;
+  const chatHistoryTokens = encode(truncatedChatHistory).length;
+  const aggregativeContextTokens = encode(aggregativeContext || '').length;
+  const questionContextTokens = encode(questionGenerationContext || '').length;
+
+  // Calculate context components
+  const retrievedContentTokens = contextTokensAnalysis - aggregativeContextTokens;
+  const totalContextTokens = contextTokensAnalysis + chatHistoryTokens;
+
+  const totalInputTokens = systemPromptTokens + totalContextTokens;
+  const estimatedTotalTokens = totalInputTokens + MAX_RESPONSE_TOKENS;
+
+  console.log(`[${clientConfig.clientName}] 📊 DETAILED TOKEN BREAKDOWN:`);
+  console.log(`[${clientConfig.clientName}]   ══ INPUT COMPONENTS ══`);
+  console.log(`[${clientConfig.clientName}]   System Prompt: ${systemPromptTokens} tokens (${((systemPromptTokens/totalInputTokens)*100).toFixed(1)}%)`);
+  console.log(`[${clientConfig.clientName}]   Retrieved Content: ${retrievedContentTokens} tokens`);
+  console.log(`[${clientConfig.clientName}]   Aggregative Data: ${aggregativeContextTokens} tokens`);
+  console.log(`[${clientConfig.clientName}]   Chat History: ${chatHistoryTokens} tokens`);
+  console.log(`[${clientConfig.clientName}]   Question Context: ${questionContextTokens} tokens`);
+  console.log(`[${clientConfig.clientName}]   Total Input: ${totalInputTokens} tokens`);
+
+  console.log(`[${clientConfig.clientName}]   ══ TOKEN BUDGET ══`);
+  console.log(`[${clientConfig.clientName}]   Max Response: ${MAX_RESPONSE_TOKENS} tokens`);
+  console.log(`[${clientConfig.clientName}]   Estimated Total: ${estimatedTotalTokens}/${MAX_TOTAL_TOKENS} tokens (${((estimatedTotalTokens/MAX_TOTAL_TOKENS)*100).toFixed(1)}%)`);
+  console.log(`[${clientConfig.clientName}]   Budget Remaining: ${Math.max(0, MAX_TOTAL_TOKENS - estimatedTotalTokens)} tokens`);
+
+  // Cost estimation (rough, based on gpt-3.5-turbo rates: $0.0015/input token, $0.002/output token)
+  const inputCost = (totalInputTokens * 0.0015) / 1000;
+  const outputCost = (MAX_RESPONSE_TOKENS * 0.002) / 1000;
+  const totalEstimatedCost = inputCost + outputCost;
+  console.log(`[${clientConfig.clientName}]   💰 Cost Estimate: $${totalEstimatedCost.toFixed(6)} (Input: $${inputCost.toFixed(6)}, Output: $${outputCost.toFixed(6)})`);
+
+  // Efficiency metrics
+  const tokenEfficiency = totalInputTokens > 0 ? (contextTokensAnalysis / totalInputTokens) * 100 : 0;
+  console.log(`[${clientConfig.clientName}]   📈 Efficiency: ${tokenEfficiency.toFixed(1)}% context utilization`);
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -1047,10 +1131,29 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPR
       timer.end({ model: generativeModel, maxTokens: MAX_RESPONSE_TOKENS });
       const raw = completion.choices[0].message.content;
 
-      // Monitor response completeness (reduced verbosity)
+      // Monitor response completeness and token usage (basic analysis before parsing)
       const responseTokens = encode(raw).length;
       const isComplete = !raw.endsWith('...') && !raw.endsWith(':') && raw.length > 50;
-      console.log(`[${clientConfig.clientName}] Response: ${responseTokens} tokens, complete: ${isComplete}`);
+
+      // Calculate actual total tokens used
+      const actualTotalTokens = totalInputTokens + responseTokens;
+
+      console.log(`[${clientConfig.clientName}] 📊 RESPONSE ANALYSIS:`);
+      console.log(`[${clientConfig.clientName}]   Raw Response: ${responseTokens} tokens`);
+      console.log(`[${clientConfig.clientName}]   Actual Total: ${actualTotalTokens}/${MAX_TOTAL_TOKENS} tokens (${((actualTotalTokens/MAX_TOTAL_TOKENS)*100).toFixed(1)}%)`);
+      console.log(`[${clientConfig.clientName}]   Complete: ${isComplete}`);
+      console.log(`[${clientConfig.clientName}]   Response Efficiency: ${responseTokens >= MAX_RESPONSE_TOKENS ? 'MAXED' : 'UNDER'} (${((responseTokens/MAX_RESPONSE_TOKENS)*100).toFixed(1)}% of budget)`);
+
+      // Cost calculation for actual usage
+      const actualInputCost = (totalInputTokens * 0.0015) / 1000;
+      const actualOutputCost = (responseTokens * 0.002) / 1000;
+      const actualTotalCost = actualInputCost + actualOutputCost;
+      console.log(`[${clientConfig.clientName}]   💰 Actual Cost: $${actualTotalCost.toFixed(6)} (Input: $${actualInputCost.toFixed(6)}, Output: $${actualOutputCost.toFixed(6)})`);
+
+      // Token density analysis
+      const responseChars = raw.length;
+      const tokenDensity = responseChars > 0 ? (responseTokens / responseChars) * 1000 : 0;
+      console.log(`[${clientConfig.clientName}]   📏 Token Density: ${tokenDensity.toFixed(2)} tokens per 1000 chars`);
 
       // Parse suggested questions from JSON format at the end of response
       let suggestedQuestions = [];
@@ -1121,6 +1224,16 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPR
         console.warn(`[${clientConfig.clientName}] Incomplete response detected: complete=${isCompleteResponse}, questions=${hasQuestions}`);
         // Could trigger retry with simplified prompt
       }
+
+      // Detailed response analysis after parsing
+      const cleanedResponseTokens = encode(cleanedResponse).length;
+      const questionsTokens = encode(JSON.stringify(suggestedQuestions)).length;
+
+      console.log(`[${clientConfig.clientName}] 📊 DETAILED RESPONSE BREAKDOWN:`);
+      console.log(`[${clientConfig.clientName}]   Cleaned Response: ${cleanedResponseTokens} tokens`);
+      console.log(`[${clientConfig.clientName}]   Questions JSON: ${questionsTokens} tokens`);
+      console.log(`[${clientConfig.clientName}]   Questions Generated: ${suggestedQuestions.length}`);
+      console.log(`[${clientConfig.clientName}]   Response Quality: ${isCompleteResponse ? 'COMPLETE' : 'INCOMPLETE'} | ${hasQuestions ? 'HAS_QUESTIONS' : 'NO_QUESTIONS'}`);
 
       const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';
       const processedResponse = removeRedundantClosingCTA(cleanedResponse, previousAssistantText);
