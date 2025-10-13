@@ -1,16 +1,135 @@
 // packages/backend/src/utils/context.js
 // Utility functions for building and managing context from vector search results.
 // To prepare contextual information for LLM prompts in the RAG system.
-// Relevant files: rag-service.js
+// Relevant files: rag-service.js, context-hierarchy-engine.js, semantic-deduplication-engine.js, context-compression-engine.js
 import { encode } from 'gpt-3-encoder';
+import ContextHierarchyEngine from './context-hierarchy-engine.js';
+import SemanticDeduplicationEngine from './semantic-deduplication-engine.js';
+import ContextCompressionEngine from './context-compression-engine.js';
+import ContextWindowManager from './context-window-manager.js';
 
 export function pickText(meta) {
   return (meta?.chunk_text || meta?.text || meta?.chunk || meta?.content || meta?.body || meta?.page_text || '').toString();
 }
 
+/**
+ * Builds optimized context using advanced compression and hierarchy
+ * @param {Object} options - Context building options
+ * @param {string} options.pageContext - Page context
+ * @param {Array} options.matches - Search result matches
+ * @param {Object} options.queryAnalysis - Query analysis results
+ * @param {Object} options.userContext - User context information
+ * @param {number} options.tokenBudget - Token budget for context
+ * @param {boolean} options.enableOptimization - Whether to use advanced optimization
+ * @returns {Promise<Object>} Optimized context result
+ */
+export async function buildOptimizedContext({
+  pageContext = '',
+  matches = [],
+  queryAnalysis = {},
+  userContext = {},
+  tokenBudget = 1500,
+  enableOptimization = true
+}) {
+  if (!enableOptimization || matches.length === 0) {
+    // Fallback to simple context building
+    const simpleContext = buildContext({ pageContext, matches });
+    return {
+      context: simpleContext,
+      tokens: encode(simpleContext).length,
+      optimizationApplied: false,
+      compressionRatio: 1.0
+    };
+  }
+
+  try {
+    console.log(`[buildOptimizedContext] Optimizing context for ${matches.length} matches, budget: ${tokenBudget} tokens`);
+
+    // Initialize optimization engines
+    const hierarchyEngine = new ContextHierarchyEngine();
+    const deduplicationEngine = new SemanticDeduplicationEngine();
+    const compressionEngine = new ContextCompressionEngine();
+    const windowManager = new ContextWindowManager();
+
+    // Step 1: Determine optimal window configuration
+    const windowConfig = windowManager.determineOptimalWindow(
+      queryAnalysis,
+      userContext,
+      { availableTokens: tokenBudget }
+    );
+
+    // Step 2: Organize chunks hierarchically
+    const hierarchy = hierarchyEngine.organizeIntoHierarchy(matches, {
+      queryIntent: queryAnalysis.intent,
+      userContext,
+      maxTotalChunks: 30
+    });
+
+    // Step 3: Flatten hierarchy for processing (prioritize by level)
+    const prioritizedChunks = [
+      ...hierarchy.summary,
+      ...hierarchy.keyPoints,
+      ...hierarchy.details,
+      ...hierarchy.fullText
+    ];
+
+    // Step 4: Apply semantic deduplication if enabled
+    let processedChunks = prioritizedChunks;
+    if (windowConfig.enableDeduplication) {
+      processedChunks = await deduplicationEngine.deduplicateChunks(prioritizedChunks);
+      console.log(`[buildOptimizedContext] Deduplication: ${prioritizedChunks.length} → ${processedChunks.length} chunks`);
+    }
+
+    // Step 5: Apply compression
+    const compressionResult = await compressionEngine.compressContext(
+      processedChunks,
+      Math.min(windowConfig.maxTokens, tokenBudget),
+      {
+        queryIntent: queryAnalysis.intent,
+        compressionLevel: windowConfig.compressionLevel,
+        preserveStructuredData: true
+      }
+    );
+
+    // Step 6: Add page context if provided
+    const finalContext = pageContext ?
+      `${pageContext}\n\n--- Context ---\n\n${compressionResult.compressedContext}` :
+      compressionResult.compressedContext;
+
+    const finalTokens = encode(finalContext).length;
+
+    console.log(`[buildOptimizedContext] Optimization complete: ${compressionResult.originalTokens} → ${finalTokens} tokens (${Math.round(compressionResult.compressionRatio * 100)}% ratio)`);
+
+    return {
+      context: finalContext,
+      tokens: finalTokens,
+      optimizationApplied: true,
+      compressionRatio: compressionResult.compressionRatio,
+      informationPreserved: compressionResult.informationPreserved,
+      tokenSavings: compressionResult.tokenSavings,
+      hierarchyStats: hierarchyEngine.getHierarchyStats(hierarchy),
+      deduplicationStats: windowConfig.enableDeduplication ?
+        deduplicationEngine.getDeduplicationStats(prioritizedChunks, processedChunks) : null,
+      windowConfig
+    };
+
+  } catch (error) {
+    console.error('[buildOptimizedContext] Error during optimization:', error);
+    // Fallback to simple context building
+    const fallbackContext = buildContext({ pageContext, matches });
+    return {
+      context: fallbackContext,
+      tokens: encode(fallbackContext).length,
+      optimizationApplied: false,
+      compressionRatio: 1.0,
+      error: error.message
+    };
+  }
+}
+
 export function buildContext({ pageContext = '', matches = [] }) {
-  const texts = matches.map(m => pickText(m.metadata)).filter(Boolean);
-  return pageContext + texts.join('\n\n---\n\n');
+   const texts = matches.map(m => pickText(m.metadata)).filter(Boolean);
+   return pageContext + texts.join('\n\n---\n\n');
 }
 
 export function buildContextFromMatches(matches, contextListingId = null, contextDevelopmentId = null, isBroadOverview = false) {

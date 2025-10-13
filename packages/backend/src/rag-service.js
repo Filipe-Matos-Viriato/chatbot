@@ -11,12 +11,13 @@ import * as developmentService from './services/development-service.js';
 import visitorService from './services/visitor-service.js';
 import { withTimeout } from './utils/async-timeout.js';
 import { reRankMatches } from './utils/rerank.js';
-import { buildContext, pickText, buildContextFromMatches, buildStructuredListingSummary } from './utils/context.js';
+import { buildContext, pickText, buildContextFromMatches, buildStructuredListingSummary, buildOptimizedContext } from './utils/context.js';
 import { renderTemplate } from './utils/prompt.js';
 import { createLogger } from './utils/structured-logger.js';
 import { extractListingIdFromUrl, extractListingIdFromQuery, extractQueryFilters, isAggregativePriceQuery, QUERY_SCOPE } from './utils/rag-parsing.js';
 import { removeRedundantClosingCTA } from './utils/postprocess.js';
 import { generateHybridQuestions } from './utils/question-strategies.js';
+import AdaptivePresentationEngine from './utils/adaptive-presentation-engine.js';
 import supabase from './config/supabase.js';
 
 // Initialize clients
@@ -702,7 +703,99 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
     console.log(`[${clientConfig.clientName}] ⚠️ No matches found in Pinecone. The chatbot may generate generic responses or hallucinate listings.`);
   }
   
-  let context = buildContextFromMatches(queryResponse.matches, preferredListingId, contextDevelopmentId, isBroadOverview);
+  // Initialize Adaptive Presentation Engine
+  const presentationEngine = new AdaptivePresentationEngine(clientConfig);
+
+  // Analyze intent for presentation strategy selection
+  const intentAnalysis = {
+    primaryIntent: queryFilters.intentAnalysis?.intent || 'general_information',
+    intents: queryFilters.intentAnalysis?.intents || [],
+    urgencyLevel: queryFilters.intentAnalysis?.urgencyLevel || 'medium',
+    entities: queryFilters.intentAnalysis?.entities || []
+  };
+
+  // Prepare user context for presentation engine
+  const userContextForPresentation = {
+    engagementLevel: enrichedUserContext.engagementLevel,
+    leadScore: enrichedUserContext.leadScore,
+    hasHistory: enrichedUserContext.hasHistory,
+    preferences: enrichedUserContext.preferences
+  };
+
+  // Prepare session data
+  const sessionData = {
+    currentListingId: externalContext?.value,
+    currentDevelopmentId: externalContext?.developmentId,
+    sessionDuration: 0, // TODO: Calculate actual session duration
+    pageViews: 1
+  };
+
+  // Use advanced context optimization for better token efficiency
+  const queryAnalysis = {
+    query: query,
+    intent: queryFilters.intentAnalysis?.intent,
+    availableChunks: queryResponse.matches.length,
+    filters: queryFilters
+  };
+
+  const userContextForOptimization = {
+    leadScore: enrichedUserContext.leadScore,
+    isNewUser: enrichedUserContext.leadScore < 10,
+    conversationTurns: chatHistory ? chatHistory.split('\n').filter(line => line.startsWith('Utilizador:')).length : 0,
+    conversationComplexity: enrichedUserContext.engagementLevel === 'high' ? 'high' : 'low'
+  };
+
+  // Determine token budget based on query complexity and system constraints
+  const tokenBudget = Math.min(CONTEXT_TOKEN_BUDGET, 2000); // Conservative budget for optimization
+
+  const optimizedContextResult = await buildOptimizedContext({
+    pageContext: '',
+    matches: queryResponse.matches,
+    queryAnalysis,
+    userContext: userContextForOptimization,
+    tokenBudget,
+    enableOptimization: true
+  });
+
+  let context = optimizedContextResult.context;
+
+  // Apply adaptive presentation strategy to context chunks
+  const prioritizedChunks = queryResponse.matches.map(match => ({
+    id: match.id,
+    score: match.score,
+    text: pickText(match.metadata),
+    metadata: match.metadata
+  }));
+
+  const presentationResult = await presentationEngine.presentContext(
+    prioritizedChunks,
+    intentAnalysis,
+    userContextForPresentation,
+    sessionData
+  );
+
+  // Log presentation strategy selection
+  console.log(`[${clientConfig.clientName}] 🎨 Selected Presentation Strategy: ${presentationResult.strategy}`);
+
+  // Use formatted context from presentation engine
+  context = presentationResult.formattedContext;
+
+  // Log optimization metrics
+  if (optimizedContextResult.optimizationApplied) {
+    console.log(`[${clientConfig.clientName}] 🎯 Context Optimization Applied:`);
+    console.log(`[${clientConfig.clientName}]   Token Savings: ${optimizedContextResult.tokenSavings} (${optimizedContextResult.compressionRatio.toFixed(2)}x ratio)`);
+    console.log(`[${clientConfig.clientName}]   Information Preserved: ${(optimizedContextResult.informationPreserved * 100).toFixed(1)}%`);
+    console.log(`[${clientConfig.clientName}]   Hierarchy Chunks: ${optimizedContextResult.hierarchyStats.totalChunks}`);
+    if (optimizedContextResult.deduplicationStats) {
+      console.log(`[${clientConfig.clientName}]   Deduplication: ${optimizedContextResult.deduplicationStats.duplicatesRemoved} removed`);
+    }
+  }
+
+  // Fallback to original method if optimization fails
+  if (!optimizedContextResult.optimizationApplied) {
+    console.log(`[${clientConfig.clientName}] ⚠️ Context optimization failed, using fallback method`);
+    context = buildContextFromMatches(queryResponse.matches, preferredListingId, contextDevelopmentId, isBroadOverview);
+  }
 
   // Add structured listing summary to context if available
   if (structuredListingSummary) {
@@ -1243,9 +1336,16 @@ ESTA INSTRUÇÃO SOBREPÕE TODAS AS OUTRAS INSTRUÇÕES - DEVE SER SEGUIDA SEMPR
         response: processedResponse,
         suggestedQuestions: suggestedQuestions,
         debug: {
-          openaiPayload: messages
+          openaiPayload: messages,
+          presentationStrategy: presentationResult.strategy,
+          personalizationElements: presentationResult.personalizationElements
         },
-        isUnanswered: queryResponse.matches.length === 0 // Flag to indicate if this was an unanswered question
+        isUnanswered: queryResponse.matches.length === 0, // Flag to indicate if this was an unanswered question
+        presentationMetadata: {
+          strategy: presentationResult.strategy,
+          callToActions: presentationResult.responseStructure.callToActions,
+          followUpSuggestions: presentationResult.responseStructure.followUpSuggestions
+        }
       };
     } catch (error) {
       if (error.status === 503 && retries > 1) {

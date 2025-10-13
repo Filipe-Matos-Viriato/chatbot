@@ -3,6 +3,34 @@
 
 import IntentUnderstandingEngine from '../src/utils/intent-understanding-engine.js';
 
+// Mock OpenAI to avoid API calls in tests
+import sinon from 'sinon';
+
+// Mock the OpenAI module
+const mockOpenAI = {
+  chat: {
+    completions: {
+      create: sinon.stub().resolves({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              primary_intent: 'property_search',
+              confidence: 0.85,
+              sub_intents: ['feature_inquiry'],
+              entities: ['T2'],
+              urgency_level: 'medium',
+              query_type: 'informational'
+            })
+          }
+        }]
+      })
+    }
+  }
+};
+
+// Stub the OpenAI constructor
+sinon.stub(require('openai'), 'default').returns(mockOpenAI);
+
 describe('IntentUnderstandingEngine', () => {
   let engine;
   const mockClientConfig = {
@@ -19,27 +47,27 @@ describe('IntentUnderstandingEngine', () => {
       const query = 'Quero ver apartamentos T2 disponíveis';
       const result = await engine.analyzeIntent(query);
 
-      expect(result.primaryIntent).toBe('property_search');
-      expect(result.confidence).toBeGreaterThan(0.5);
-      expect(result.entities).toContain('T2');
-      expect(result.queryType).toBe('informational');
+      expect(result.primaryIntent).to.equal('property_search');
+      expect(result.confidence).to.be.greaterThan(0.5);
+      expect(result.entities).to.include('T2');
+      expect(result.queryType).to.equal('informational');
     });
 
     it('should analyze feature inquiry intent', async () => {
       const query = 'Este apartamento tem piscina?';
       const result = await engine.analyzeIntent(query);
 
-      expect(result.primaryIntent).toBe('feature_inquiry');
-      expect(result.entities).toContain('pool');
-      expect(result.contextType).toBe('listing_specific');
+      expect(result.primaryIntent).to.equal('feature_inquiry');
+      expect(result.entities).to.include('pool');
+      expect(result.contextType).to.equal('listing_specific');
     });
 
     it('should analyze pricing questions', async () => {
       const query = 'Quanto custa este imóvel?';
       const result = await engine.analyzeIntent(query);
 
-      expect(result.primaryIntent).toBe('pricing_question');
-      expect(result.queryType).toBe('informational');
+      expect(result.primaryIntent).to.equal('pricing_question');
+      expect(result.queryType).to.equal('informational');
     });
 
     it('should handle behavioral context', async () => {
@@ -53,8 +81,8 @@ describe('IntentUnderstandingEngine', () => {
 
       const result = await engine.analyzeIntent(query, context);
 
-      expect(result.behavioralPattern).toBe('conversion_ready');
-      expect(result.journeyStage).toBe('decision');
+      expect(result.behavioralPattern).to.equal('conversion_ready');
+      expect(result.journeyStage).to.equal('decision');
     });
 
     it('should handle contextual information', async () => {
@@ -69,8 +97,8 @@ describe('IntentUnderstandingEngine', () => {
 
       const result = await engine.analyzeIntent(query, context);
 
-      expect(result.contextType).toBe('listing_specific');
-      expect(result.hasContextShift).toBe(false);
+      expect(result.contextType).to.equal('listing_specific');
+      expect(result.hasContextShift).to.equal(false);
     });
 
     it('should detect context shifts', async () => {
@@ -83,7 +111,7 @@ describe('IntentUnderstandingEngine', () => {
 
       const result = await engine.analyzeIntent(query, context);
 
-      expect(result.hasContextShift).toBe(true);
+      expect(result.hasContextShift).to.equal(true);
     });
 
     it('should cache results for performance', async () => {
@@ -100,8 +128,8 @@ describe('IntentUnderstandingEngine', () => {
       const result2 = await engine.analyzeIntent(query, context);
       const secondCallTime = Date.now() - secondStartTime;
 
-      expect(result1.primaryIntent).toBe(result2.primaryIntent);
-      expect(secondCallTime).toBeLessThan(firstCallTime); // Cached call should be faster
+      expect(result1.primaryIntent).to.equal(result2.primaryIntent);
+      expect(secondCallTime).to.be.lessThan(firstCallTime); // Cached call should be faster
     });
 
     it('should handle fallback gracefully on LLM failure', async () => {
@@ -118,9 +146,9 @@ describe('IntentUnderstandingEngine', () => {
       const query = 'Test query';
       const result = await engine.analyzeIntent(query);
 
-      expect(result.isFallback).toBe(true);
-      expect(result.primaryIntent).toBe('general_information');
-      expect(result.confidence).toBe(0.3);
+      expect(result.isFallback).to.equal(true);
+      expect(result.primaryIntent).to.equal('general_information');
+      expect(result.confidence).to.equal(0.3);
 
       // Restore original
       global.openai = originalOpenAI;
@@ -138,7 +166,7 @@ describe('IntentUnderstandingEngine', () => {
       };
 
       const result = await engine.analyzeIntent('Quanto custa?', context);
-      expect(result.behavioralPattern).toBe('price_sensitive');
+      expect(result.behavioralPattern).to.equal('price_sensitive');
     });
 
     it('should identify feature-focused users', async () => {
@@ -151,7 +179,7 @@ describe('IntentUnderstandingEngine', () => {
       };
 
       const result = await engine.analyzeIntent('Quais comodidades?', context);
-      expect(result.behavioralPattern).toBe('feature_focused');
+      expect(result.behavioralPattern).to.equal('feature_focused');
     });
 
     it('should calculate engagement scores correctly', () => {
@@ -162,7 +190,7 @@ describe('IntentUnderstandingEngine', () => {
       ];
 
       const score = engine.calculateEngagementScore(interactions);
-      expect(score).toBeGreaterThan(0.5); // High engagement
+      expect(score).to.be.greaterThan(0.5); // High engagement
     });
 
     it('should determine journey stages', () => {
@@ -170,9 +198,9 @@ describe('IntentUnderstandingEngine', () => {
       const midInteractions = Array(5).fill({ type: 'question' });
       const lateInteractions = Array(15).fill({ type: 'question' }).concat([{ type: 'contact' }]);
 
-      expect(engine.determineJourneyStage(earlyInteractions)).toBe('awareness');
-      expect(engine.determineJourneyStage(midInteractions)).toBe('consideration');
-      expect(engine.determineJourneyStage(lateInteractions)).toBe('action');
+      expect(engine.determineJourneyStage(earlyInteractions)).to.equal('awareness');
+      expect(engine.determineJourneyStage(midInteractions)).to.equal('consideration');
+      expect(engine.determineJourneyStage(lateInteractions)).to.equal('action');
     });
   });
 
@@ -186,8 +214,8 @@ describe('IntentUnderstandingEngine', () => {
       };
 
       const result = await engine.analyzeIntent('Quanto custa?', context);
-      expect(result.contextType).toBe('listing_specific');
-      expect(result.contextRelevance).toBeGreaterThan(0.8);
+      expect(result.contextType).to.equal('listing_specific');
+      expect(result.contextRelevance).to.be.greaterThan(0.8);
     });
 
     it('should handle development-specific context', async () => {
@@ -199,7 +227,7 @@ describe('IntentUnderstandingEngine', () => {
       };
 
       const result = await engine.analyzeIntent('Quais apartamentos estão disponíveis?', context);
-      expect(result.contextType).toBe('development_specific');
+      expect(result.contextType).to.equal('development_specific');
     });
   });
 
@@ -211,7 +239,7 @@ describe('IntentUnderstandingEngine', () => {
       await engine.analyzeIntent(query);
 
       const duration = Date.now() - startTime;
-      expect(duration).toBeLessThan(5000); // Should complete within 5 seconds
+      expect(duration).to.be.lessThan(5000); // Should complete within 5 seconds
     });
 
     it('should handle concurrent requests', async () => {
@@ -225,10 +253,10 @@ describe('IntentUnderstandingEngine', () => {
       const promises = queries.map(query => engine.analyzeIntent(query));
       const results = await Promise.all(promises);
 
-      expect(results).toHaveLength(4);
+      expect(results).to.have.length(4);
       results.forEach(result => {
-        expect(result.primaryIntent).toBeDefined();
-        expect(result.confidence).toBeDefined();
+        expect(result.primaryIntent).to.be.defined;
+        expect(result.confidence).to.be.defined;
       });
     });
   });

@@ -7,7 +7,7 @@ import { createLogger } from './structured-logger.js';
 
 // Initialize OpenAI client for intent analysis
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY || 'test-key', // Allow test key for development
 });
 
 /**

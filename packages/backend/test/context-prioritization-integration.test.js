@@ -58,9 +58,9 @@ describe('ContextPrioritizationEngine Integration', () => {
 
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
 
-      expect(prioritized[0].metadata.typology).toBe('T2'); // T2 should be prioritized
-      expect(prioritized[0].totalScore).toBeGreaterThan(prioritized[1].totalScore);
-      expect(prioritized[0].relevanceCategory).toBe('high');
+      expect(prioritized[0].metadata.typology).to.equal('T2'); // T2 should be prioritized
+      expect(prioritized[0].totalScore).to.be.greaterThan(prioritized[1].totalScore);
+      expect(prioritized[0].relevanceCategory).to.equal('high');
     });
 
     it('should prioritize chunks for feature inquiry intent', async () => {
@@ -100,8 +100,8 @@ describe('ContextPrioritizationEngine Integration', () => {
 
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
 
-      expect(prioritized[0].metadata.generated_tags).toContain('comodidade:piscina');
-      expect(prioritized[0].relevanceCategory).toBe('high');
+      expect(prioritized[0].metadata.generated_tags).to.contain('comodidade:piscina');
+      expect(prioritized[0].relevanceCategory).to.equal('high');
     });
 
     it('should prioritize chunks for pricing questions', async () => {
@@ -132,8 +132,8 @@ describe('ContextPrioritizationEngine Integration', () => {
 
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
 
-      expect(prioritized[0].metadata.price_eur).toBe(250000);
-      expect(prioritized[0].relevanceCategory).toBe('high');
+      expect(prioritized[0].metadata.price_eur).to.equal(250000);
+      expect(prioritized[0].relevanceCategory).to.equal('high');
     });
 
     it('should consider user preferences in prioritization', async () => {
@@ -189,8 +189,8 @@ describe('ContextPrioritizationEngine Integration', () => {
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis, context);
 
       // T2 should be prioritized over T3 and T1 due to user preference
-      expect(prioritized[0].metadata.typology).toBe('T2');
-      expect(prioritized[0].totalScore).toBeGreaterThan(prioritized[1].totalScore);
+      expect(prioritized[0].metadata.typology).to.equal('T2');
+      expect(prioritized[0].totalScore).to.be.greaterThan(prioritized[1].totalScore);
     });
 
     it('should consider behavioral patterns', async () => {
@@ -229,7 +229,7 @@ describe('ContextPrioritizationEngine Integration', () => {
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
 
       // Price info should be prioritized for price-sensitive users
-      expect(prioritized[0].metadata.price_eur).toBe(250000);
+      expect(prioritized[0].metadata.price_eur).to.equal(250000);
     });
 
     it('should filter out low relevance chunks', async () => {
@@ -270,7 +270,7 @@ describe('ContextPrioritizationEngine Integration', () => {
       const filtered = prioritizationEngine.filterByRelevance(prioritized, 0.3);
 
       expect(filtered.length).toBe(1); // Only the T2 apartment should remain
-      expect(filtered[0].metadata.typology).toBe('T2');
+      expect(filtered[0].metadata.typology).to.equal('T2');
     });
 
     it('should handle empty chunks gracefully', () => {
@@ -283,7 +283,7 @@ describe('ContextPrioritizationEngine Integration', () => {
       };
 
       const prioritized = prioritizationEngine.prioritizeChunks([], mockIntentAnalysis);
-      expect(prioritized).toEqual([]);
+      expect(prioritized).to.deep.equal([]);
     });
 
     it('should handle chunks without metadata', async () => {
@@ -297,9 +297,9 @@ describe('ContextPrioritizationEngine Integration', () => {
 
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
 
-      expect(prioritized.length).toBe(2);
-      expect(prioritized[0].totalScore).toBeDefined();
-      expect(prioritized[0].relevanceCategory).toBeDefined();
+      expect(prioritized.length).to.equal(2);
+      expect(prioritized[0].totalScore).to.be.defined;
+      expect(prioritized[0].relevanceCategory).to.be.defined;
     });
   });
 
@@ -318,12 +318,12 @@ describe('ContextPrioritizationEngine Integration', () => {
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
       const stats = prioritizationEngine.getStatistics(prioritized);
 
-      expect(stats.total).toBe(4);
-      expect(stats.high).toBeGreaterThanOrEqual(2);
-      expect(stats.medium).toBeGreaterThanOrEqual(1);
-      expect(stats.low).toBeGreaterThanOrEqual(0);
-      expect(stats.avgScore).toBeDefined();
-      expect(stats.topScore).toBeDefined();
+      expect(stats.total).to.equal(4);
+      expect(stats.high).to.be.greaterThanOrEqual(2);
+      expect(stats.medium).to.be.greaterThanOrEqual(1);
+      expect(stats.low).to.be.greaterThanOrEqual(0);
+      expect(stats.avgScore).to.be.defined;
+      expect(stats.topScore).to.be.defined;
     });
   });
 
@@ -345,8 +345,8 @@ describe('ContextPrioritizationEngine Integration', () => {
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
       const duration = Date.now() - startTime;
 
-      expect(duration).toBeLessThan(1000); // Should complete within 1 second
-      expect(prioritized.length).toBe(50);
+      expect(duration).to.be.lessThan(1000); // Should complete within 1 second
+      expect(prioritized.length).to.equal(50);
     });
 
     it('should handle malformed chunks gracefully', async () => {
@@ -362,8 +362,8 @@ describe('ContextPrioritizationEngine Integration', () => {
 
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
 
-      expect(prioritized.length).toBe(2); // Only valid chunks should be processed
-      expect(prioritized[0].id).toBe('valid');
+      expect(prioritized.length).to.equal(2); // Only valid chunks should be processed
+      expect(prioritized[0].id).to.equal('valid');
     });
 
     it('should maintain chunk order and properties', async () => {
@@ -381,11 +381,11 @@ describe('ContextPrioritizationEngine Integration', () => {
 
       const prioritized = prioritizationEngine.prioritizeChunks(mockChunks, intentAnalysis);
 
-      expect(prioritized[0].id).toBe('chunk-1');
-      expect(prioritized[0].metadata.customProp).toBe('value1');
-      expect(prioritized[0].customField).toBe('custom1');
-      expect(prioritized[0].prioritizationScores).toBeDefined();
-      expect(prioritized[0].totalScore).toBeDefined();
+      expect(prioritized[0].id).to.equal('chunk-1');
+      expect(prioritized[0].metadata.customProp).to.equal('value1');
+      expect(prioritized[0].customField).to.equal('custom1');
+      expect(prioritized[0].prioritizationScores).to.be.defined;
+      expect(prioritized[0].totalScore).to.be.defined;
     });
   });
 });

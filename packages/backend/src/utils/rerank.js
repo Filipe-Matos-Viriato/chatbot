@@ -6,6 +6,7 @@
 
 import { QUERY_SCOPE } from './rag-parsing.js';
 import ContextPrioritizationEngine from './context-prioritization-engine.js';
+import ContextHierarchyEngine from './context-hierarchy-engine.js';
 
 export function reRankMatches({
   matches,
@@ -70,6 +71,32 @@ export function reRankMatches({
     }
   }
 
+  // Apply hierarchical organization for better context structure
+  let hierarchicallyOrganizedMatches = prioritizedMatches;
+  try {
+    const hierarchyEngine = new ContextHierarchyEngine();
+    const hierarchy = hierarchyEngine.organizeIntoHierarchy(prioritizedMatches, {
+      queryIntent: intentAnalysis,
+      userContext: userPreferences,
+      maxTotalChunks: 30
+    });
+
+    // Flatten hierarchy with priority ordering for downstream processing
+    hierarchicallyOrganizedMatches = [
+      ...hierarchy.summary,
+      ...hierarchy.keyPoints,
+      ...hierarchy.details,
+      ...hierarchy.fullText
+    ];
+
+    const hierarchyStats = hierarchyEngine.getHierarchyStats(hierarchy);
+    console.log(`[rerank] Hierarchical organization applied: ${hierarchyStats.totalChunks} chunks organized (${hierarchyStats.levelDistribution.summary} summary, ${hierarchyStats.levelDistribution.keyPoints} key points, ${hierarchyStats.levelDistribution.details} details)`);
+
+  } catch (error) {
+    console.warn('[rerank] Hierarchical organization failed, using prioritized matches:', error.message);
+    hierarchicallyOrganizedMatches = prioritizedMatches;
+  }
+
   let contextualMatchStatus = 'NOT_APPLICABLE';
   const hasFeatureQueryWithContext = contextListingId && queryFilters?.generated_tags;
 
@@ -106,7 +133,7 @@ export function reRankMatches({
   const isLookingForStudio = qLower.includes('estúdio') || qLower.includes('studio');
 
   const debugBoostLogs = [];
-  let reRanked = prioritizedMatches.map((match, idx) => {
+  let reRanked = hierarchicallyOrganizedMatches.map((match, idx) => {
     let score = match.score;
     const meta = match.metadata || {};
 
@@ -299,9 +326,9 @@ export function reRankMatches({
 
         let finalRanked = [];
         if (contextualMatches.length > 0) {
-          // Take the top 1-2 best contextual matches that satisfy the filters
+          // Take the top 5 best contextual matches that satisfy the filters
           contextualMatches.sort((a, b) => b.score - a.score);
-          finalRanked.push(...contextualMatches.slice(0, 2)); // Take top 2 contextual matches
+          finalRanked.push(...contextualMatches.slice(0, 5)); // Take top 5 contextual matches
         }
 
         // Add other matching listings, ensuring diversity
