@@ -21,7 +21,7 @@ import OpenAI from 'openai';
 import multer from 'multer';
 import { encode } from 'gpt-3-encoder';
 
-import { generateResponse, generateSuggestedQuestions, embeddingModel } from './rag-service.js';
+import { generateResponse, generateSuggestedQuestions } from './rag-service.js';
 import * as clientConfigServiceModule from './services/client-config-service.js';
 // Simple PDF/Text ingestion service
 import { processDocument } from './services/ingestion-service-pdf.js';
@@ -33,6 +33,7 @@ import * as developmentService from './services/development-service.js';
 import userService from './services/user-service.js';
 import unansweredQuestionService from './services/unanswered_question_service.js';
 import communicationService from './services/communication_service.js';
+import analyticsDashboardService from './services/analytics-dashboard-service.js';
 import { extractListingIdFromUrl as parseListingFromUrl, extractListingIdFromQuery as parseListingFromQuery } from './utils/rag-parsing.js';
 import scoreDecayScheduler from './schedulers/score-decay-scheduler.js';
 
@@ -2111,6 +2112,122 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error('Error in /api/metrics/new-vs-returning-users endpoint:', error);
       res.status(500).json({ error: 'Internal server error.' });
+    }
+  });
+
+  // LLM Analytics Dashboard API endpoints
+  app.get('/api/analytics/dashboard/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { clientConfig } = req;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client analytics.' });
+      }
+
+      console.log(`[Analytics API] Fetching dashboard data for client: ${clientId}`);
+
+      const analyticsData = await analyticsDashboardService.getClientAnalytics(clientId);
+
+      if (!analyticsData) {
+        return res.status(404).json({ error: 'Analytics data not found for this client.' });
+      }
+
+      res.json(analyticsData);
+    } catch (error) {
+      console.error(`Error fetching analytics dashboard for client ${req.params.clientId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch analytics dashboard data.' });
+    }
+  });
+
+  // API endpoint to get analytics summary for admin dashboard
+  app.get('/api/analytics/dashboard-summary', async (req, res) => {
+    try {
+      console.log('[Analytics API] Fetching dashboard summary for admin');
+
+      const summary = await analyticsDashboardService.getDashboardSummary();
+
+      if (!summary) {
+        return res.status(500).json({ error: 'Failed to generate dashboard summary.' });
+      }
+
+      res.json(summary);
+    } catch (error) {
+      console.error('Error fetching analytics dashboard summary:', error);
+      res.status(500).json({ error: 'Failed to fetch dashboard summary.' });
+    }
+  });
+
+  // API endpoint for real-time analytics streaming
+  app.get('/api/analytics/stream/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { clientConfig } = req;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client analytics stream.' });
+      }
+
+      console.log(`[Analytics API] Setting up streaming for client: ${clientId}`);
+
+      // Set headers for Server-Sent Events
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+
+      // Send initial data
+      const streamingData = analyticsDashboardService.getStreamingData(clientId);
+      res.write(`data: ${JSON.stringify(streamingData.data)}\n\n`);
+
+      // Set up interval to send updates
+      const interval = setInterval(() => {
+        try {
+          const updatedData = analyticsDashboardService.getStreamingData(clientId);
+          res.write(`data: ${JSON.stringify(updatedData.data)}\n\n`);
+        } catch (error) {
+          console.error('[Analytics API] Error sending streaming update:', error);
+          clearInterval(interval);
+          res.end();
+        }
+      }, 5000); // Update every 5 seconds
+
+      // Clean up on client disconnect
+      req.on('close', () => {
+        console.log(`[Analytics API] Closing stream for client: ${clientId}`);
+        clearInterval(interval);
+        streamingData.cleanup();
+        res.end();
+      });
+
+    } catch (error) {
+      console.error(`Error setting up analytics stream for client ${req.params.clientId}:`, error);
+      res.status(500).json({ error: 'Failed to setup analytics stream.' });
+    }
+  });
+
+  // API endpoint to get client comparison analytics
+  app.post('/api/analytics/compare', async (req, res) => {
+    try {
+      const { clientIds, options = {} } = req.body;
+
+      if (!clientIds || !Array.isArray(clientIds) || clientIds.length === 0) {
+        return res.status(400).json({ error: 'clientIds array is required.' });
+      }
+
+      console.log(`[Analytics API] Comparing analytics for clients: ${clientIds.join(', ')}`);
+
+      const comparison = await analyticsDashboardService.getClientComparison(clientIds, options);
+
+      res.json(comparison);
+    } catch (error) {
+      console.error('Error comparing client analytics:', error);
+      res.status(500).json({ error: 'Failed to compare client analytics.' });
     }
   });
 

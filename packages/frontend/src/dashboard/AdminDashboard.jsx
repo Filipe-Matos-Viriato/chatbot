@@ -20,6 +20,16 @@ const AdminDashboard = () => {
                 Clients
               </NavLink>
             </li>
+            <li className="mb-2">
+              <NavLink
+                to="/admin/llm-analytics"
+                className={({ isActive }) =>
+                  isActive ? "text-blue-800 font-bold" : "text-blue-600 hover:text-blue-800"
+                }
+              >
+                LLM Analytics
+              </NavLink>
+            </li>
             {/* Add other admin tabs here */}
           </ul>
         </nav>

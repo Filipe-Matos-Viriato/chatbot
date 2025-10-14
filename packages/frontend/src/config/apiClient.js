@@ -3,22 +3,42 @@
 // This file exists to centralize API communication logic and handle environment-specific base URLs.
 // packages/frontend/src/chatbot/ChatInterface.jsx, packages/frontend/src/dashboard/Dashboard.jsx, packages/frontend/src/context/ClientContext.jsx, packages/frontend/src/main.jsx
 
+import axios from 'axios';
+
 const getApiBaseUrl = () => {
   // Check if we're in development mode
   if (import.meta.env.DEV) {
     return 'http://localhost:3007';
   }
-  
+
   // For production, use the current origin with /api prefix for serverless functions
   return `${window.location.origin}/api`;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
 
+// Create axios instance with default configuration
+export const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 30000, // 30 second timeout
+});
+
+// Add response interceptor for error handling
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    console.error('API request failed:', error);
+    return Promise.reject(error);
+  }
+);
+
 // Helper function to make API requests with proper URL
 export const apiRequest = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
-  
+
   const defaultOptions = {
     headers: {
       'Content-Type': 'application/json',
@@ -27,20 +47,20 @@ export const apiRequest = async (endpoint, options = {}) => {
   };
 
   const requestOptions = { ...defaultOptions, ...options };
-  
+
   try {
     const response = await fetch(url, requestOptions);
-    
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    
+
     // Handle empty responses
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
       return await response.json();
     }
-    
+
     return response;
   } catch (error) {
     console.error(`API request failed for ${url}:`, error);
@@ -48,4 +68,4 @@ export const apiRequest = async (endpoint, options = {}) => {
   }
 };
 
-export default { API_BASE_URL, apiRequest };
+export default { API_BASE_URL, apiRequest, apiClient };
