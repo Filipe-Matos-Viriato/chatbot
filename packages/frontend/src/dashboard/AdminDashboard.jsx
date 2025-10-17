@@ -30,6 +30,16 @@ const AdminDashboard = () => {
                 LLM Analytics
               </NavLink>
             </li>
+            <li className="mb-2">
+              <NavLink
+                to="/admin/learning-engine"
+                className={({ isActive }) =>
+                  isActive ? "text-blue-800 font-bold" : "text-blue-600 hover:text-blue-800"
+                }
+              >
+                Learning Engine
+              </NavLink>
+            </li>
             {/* Add other admin tabs here */}
           </ul>
         </nav>
