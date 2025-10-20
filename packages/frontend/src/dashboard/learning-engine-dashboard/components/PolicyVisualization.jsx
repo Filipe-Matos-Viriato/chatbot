@@ -20,7 +20,7 @@ const PolicyVisualization = ({ policies, metrics }) => {
 
   const PolicyHeatmap = () => {
     const complexityLevels = Object.keys(complexityBuckets).sort((a, b) => parseFloat(a) - parseFloat(b));
-    const models = ['gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo', 'claude-3-haiku', 'claude-3-sonnet'];
+    const models = ['gpt-5', 'gpt-4.1', 'gpt-5-mini', 'gpt-5-nano'];
 
     return (
       <div className="bg-white p-6 rounded-lg shadow">

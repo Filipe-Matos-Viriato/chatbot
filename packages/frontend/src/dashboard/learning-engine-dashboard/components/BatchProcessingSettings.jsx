@@ -154,8 +154,17 @@ const BatchProcessingSettings = ({ clientId, onRefresh }) => {
     <div className="space-y-6">
       <div className="bg-white shadow rounded-lg">
         <div className="px-4 py-5 sm:p-6">
-          <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">
+          <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4 flex items-center">
             Batch Processing Settings
+            <div className="ml-2 relative group">
+              <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+                <div dangerouslySetInnerHTML={{ __html: 'Configure batch processing thresholds for learning and analytics systems.<br />Higher thresholds reduce processing frequency but may delay learning.<br />Lower thresholds provide more responsive updates but increase system load.<br />Settings are client-specific and take effect immediately.' }} />
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+              </div>
+            </div>
           </h3>
           <p className="text-sm text-gray-600 mb-6">
             Configure batch trigger thresholds for different processing systems. These settings control when batch operations are triggered based on accumulated data.
@@ -201,9 +210,22 @@ const BatchProcessingSettings = ({ clientId, onRefresh }) => {
               return (
                 <div key={system.name} className="border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h4 className="text-md font-medium text-gray-900">{system.label}</h4>
-                      <p className="text-sm text-gray-600">{system.description}</p>
+                    <div className="flex items-center">
+                      <div>
+                        <h4 className="text-md font-medium text-gray-900 flex items-center">
+                          {system.label}
+                          <div className="ml-2 relative group">
+                            <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+                              <div dangerouslySetInnerHTML={{ __html: `${system.label} batch processing configuration.<br />Controls when ${system.name.replace('_', ' ')} operations are triggered.<br />Higher thresholds = less frequent processing, lower thresholds = more responsive updates.<br />Range: ${system.min}-${system.max} accumulated items before processing.` }} />
+                              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                            </div>
+                          </div>
+                        </h4>
+                        <p className="text-sm text-gray-600">{system.description}</p>
+                      </div>
                     </div>
                     {hasUnsavedChanges && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">

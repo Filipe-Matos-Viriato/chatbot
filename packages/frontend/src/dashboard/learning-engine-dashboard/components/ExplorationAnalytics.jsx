@@ -25,19 +25,15 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
       return;
     }
 
-    for (let i = days; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-
-      // Use current exploration rate for all historical data since we don't have historical data yet
-      data.push({
-        date: date.toISOString().split('T')[0],
-        explorationRate: metrics.explorationRate,
-        modelsExplored: 0, // No historical exploration data yet
-        newDiscoveries: 0, // No historical discovery data yet
-        exploitationRate: 1 - metrics.explorationRate
-      });
-    }
+    // Only show current data point if no historical data is available
+    const currentDate = new Date();
+    data.push({
+      date: currentDate.toISOString().split('T')[0],
+      explorationRate: metrics.explorationRate,
+      modelsExplored: 0,
+      newDiscoveries: 0,
+      exploitationRate: 1 - metrics.explorationRate
+    });
 
     setExplorationData(data);
   };
@@ -53,8 +49,8 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
             <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
             </svg>
-            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10 max-w-xs">
-              Historical balance between exploring new models and exploiting known good ones.<br />Orange bars show exploration rate, blue bars show exploitation rate.
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+              <div dangerouslySetInnerHTML={{ __html: 'Historical balance between exploring new models and exploiting known good ones.<br />Orange bars show exploration rate, blue bars show exploitation rate.' }} />
               <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
             </div>
           </div>
@@ -112,16 +108,26 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
   const ModelDiscoveryChart = () => {
     // Show real model discovery data or empty state
     const models = [
-      { name: 'gpt-4o-mini', usage: 0, discovered: false, firstUsed: null },
-      { name: 'gpt-4', usage: 0, discovered: false, firstUsed: null },
-      { name: 'gpt-3.5-turbo', usage: 0, discovered: false, firstUsed: null },
-      { name: 'claude-3-haiku', usage: 0, discovered: false, firstUsed: null },
-      { name: 'claude-3-sonnet', usage: 0, discovered: false, firstUsed: null }
+      { name: 'gpt-5', usage: 0, discovered: false, firstUsed: null },
+      { name: 'gpt-4.1', usage: 0, discovered: false, firstUsed: null },
+      { name: 'gpt-5-mini', usage: 0, discovered: false, firstUsed: null },
+      { name: 'gpt-5-nano', usage: 0, discovered: false, firstUsed: null }
     ];
 
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Model Discovery & Usage</h3>
+        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+          Model Discovery & Usage
+          <div className="ml-2 relative group">
+            <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+              <div dangerouslySetInnerHTML={{ __html: 'Shows which models have been discovered through exploration and their current usage patterns.<br />Models must be explored before they can be effectively used in production.<br />Green dots indicate discovered models, gray dots show available but unexplored models.' }} />
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+            </div>
+          </div>
+        </h3>
         <div className="space-y-4">
           {models.map((model, index) => (
             <div key={model.name} className="flex items-center justify-between">
@@ -175,7 +181,7 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
       },
       {
         label: 'Models Discovered',
-        value: '0/5',
+        value: '0/4',
         status: 'warning',
         description: 'Models found through exploration',
         tooltip: 'Number of available models that have been discovered and tested through the exploration process.<br />Models must be explored before they can be effectively used in production.'
@@ -189,7 +195,7 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
       },
       {
         label: 'Under-explored Models',
-        value: '5',
+        value: '4',
         status: 'warning',
         description: 'Models not yet adequately tested',
         tooltip: 'Number of available models that haven\'t received sufficient testing through exploration.<br />These models represent potential opportunities for performance improvement.'
@@ -209,7 +215,7 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
                       <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                     </svg>
                     <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
-                      {metric.tooltip}
+                      <div dangerouslySetInnerHTML={{ __html: metric.tooltip }} />
                       <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
                     </div>
                   </div>
@@ -243,7 +249,18 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
 
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Exploration Controls</h3>
+        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+          Exploration Controls
+          <div className="ml-2 relative group">
+            <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+              <div dangerouslySetInnerHTML={{ __html: 'Controls for adjusting the exploration rate in the learning engine.<br />Higher exploration rates promote discovery of new models but may reduce short-term performance.<br />Lower rates focus on exploiting known good models for better immediate results.<br />Changes take effect immediately but may take time to show in metrics.' }} />
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+            </div>
+          </div>
+        </h3>
 
         <div className="space-y-4">
           <div>

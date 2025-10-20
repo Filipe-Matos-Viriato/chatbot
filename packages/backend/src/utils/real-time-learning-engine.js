@@ -470,7 +470,8 @@ class RealTimeLearningEngine extends EventEmitter {
       confidence: policy.confidence,
       sampleSize: policy.sampleSize,
       averageReward: policy.averageReward,
-      lastUpdated: policy.lastUpdated
+      lastUpdated: policy.lastUpdated,
+      policyWeights: policy.weights  // Transform weights to policyWeights for frontend compatibility
     }));
   }
 
