@@ -1,493 +1,387 @@
 // packages/backend/src/utils/real-time-learning-engine.js
-// RealTimeLearningEngine - Core reinforcement learning system for intelligent model selection
-// Implements continuous learning, policy optimization, and adaptive model routing based on query characteristics
-// Integrates with model-router.js, performance-tracker.js, and Supabase for persistent learning state
-// LearningEngineDashboard.jsx, model-router.js, performance-tracker.js, Supabase tables: learning_policies, learning_signals
+// Event-driven RealTimeLearningEngine implementation with reinforcement learning for intelligent model selection
+// Provides event-triggered learning from interactions to optimize LLM model routing and performance
+// model-router.js, performance-tracker.js, rag-service.js, supabase.js
+import supabase from '../config/supabase.js';
+import { EventEmitter } from 'events';
+import { createLogger } from './structured-logger.js';
 
-const { createClient } = require('@supabase/supabase-js');
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const log = createLogger('real-time-learning-engine');
 
-class RealTimeLearningEngine {
-  constructor(options = {}) {
-    this.adaptationRate = options.adaptationRate || 0.1;
-    this.explorationRate = options.explorationRate || 0.1;
-    this.confidenceThreshold = options.confidenceThreshold || 0.8;
-    this.retrainingSampleThreshold = options.retrainingSampleThreshold || 1000;
-    this.minRetrainingInterval = options.minRetrainingInterval || 604800000; // 7 days
-    this.windowSize = options.windowSize || 1000;
+/**
+ * RealTimeLearningEngine
+ * Event-driven reinforcement learning system for optimizing model selection through triggered learning
+ */
+class RealTimeLearningEngine extends EventEmitter {
+  constructor(config = {}) {
+    super();
+    this.config = {
+      windowSize: config.windowSize || 1000,
+      adaptationRate: config.adaptationRate || 0.1,
+      explorationRate: config.explorationRate || 0.1,
+      confidenceThreshold: config.confidenceThreshold || 0.8,
+      retrainingSampleThreshold: config.retrainingSampleThreshold || 1000,
+      minRetrainingInterval: config.minRetrainingInterval || 604800000, // 7 days
+      inactivityTimeout: config.inactivityTimeout || 3600000, // 1 hour
+       batchTriggerThreshold: config.batchTriggerThreshold || 100, // Process batch when 100 interactions
+      batchTriggerThreshold: config.batchTriggerThreshold || 100, // Process batch when 100 interactions
+      ...config
+    };
 
     this.policies = new Map();
     this.learningBuffer = [];
+    this.lastRetrainingTime = 0;
+    this.lastActivityTime = Date.now();
+    this.isInitialized = false;
+    this.isActive = false;
     this.explorationState = {
-      underExploredModels: new Set(),
-      lastExplorationBonus: new Map()
+      currentRate: this.config.explorationRate,
+      lastAdjustment: Date.now(),
+      underExploredModels: new Set()
     };
 
-    this.lastRetrainingTime = null;
-    this.isInitialized = false;
+    this.inactivityTimer = null;
+    this.setupInactivityHandler();
   }
 
   /**
-   * Initialize the learning engine with existing policies from database
+   * Lazy initialization - only called when first needed
    */
   async initialize() {
     if (this.isInitialized) return;
 
     try {
-      console.log('[RealTimeLearningEngine] Initializing...');
+      log.info('real_time_learning_engine.lazy_initializing');
 
-      // Load existing policies from Supabase
-      const { data: policies, error } = await supabase
-        .from('learning_policies')
-        .select('*')
-        .order('last_updated', { ascending: false });
+      // Load existing policies from database
+      await this.loadPolicies();
 
-      if (error) {
-        console.error('[RealTimeLearningEngine] Error loading policies:', error);
-        return;
-      }
+      // Initialize exploration state
+      await this.updateExplorationState();
 
-      // Group policies by complexity level (keep only latest version per level)
-      const latestPolicies = new Map();
-      policies.forEach(policy => {
-        if (!latestPolicies.has(policy.complexity_level) ||
-            policy.last_updated > latestPolicies.get(policy.complexity_level).last_updated) {
-          latestPolicies.set(policy.complexity_level, policy);
-        }
-      });
-
-      // Load policies into memory
-      latestPolicies.forEach((policy, complexity) => {
-        this.policies.set(complexity, {
-          complexityLevel: complexity,
-          weights: policy.policy_weights,
-          confidence: policy.confidence_score,
-          sampleSize: policy.sample_size,
-          averageReward: policy.average_reward,
-          rewardVariance: policy.reward_variance,
-          lastUpdated: new Date(policy.last_updated),
-          version: policy.version
-        });
-      });
-
-      console.log(`[RealTimeLearningEngine] Loaded ${this.policies.size} policies`);
       this.isInitialized = true;
+      this.isActive = true;
+      this.lastActivityTime = Date.now();
 
+      log.info('real_time_learning_engine.initialized', {
+        policiesLoaded: this.policies.size,
+        explorationRate: this.explorationState.currentRate
+      });
     } catch (error) {
-      console.error('[RealTimeLearningEngine] Initialization error:', error);
+      log.error('real_time_learning_engine.initialization_failed', { error: error.message });
+      throw error;
     }
   }
 
   /**
-   * Extract learning signals from interaction data
+   * Setup inactivity handler for auto-shutdown
+   */
+  setupInactivityHandler() {
+    this.inactivityTimer = setInterval(() => {
+      const timeSinceActivity = Date.now() - this.lastActivityTime;
+      if (timeSinceActivity > this.config.inactivityTimeout && this.isActive) {
+        this.shutdown();
+      }
+    }, 60000); // Check every minute
+  }
+
+  /**
+   * Learn from an interaction with multi-dimensional signals (event-driven)
+   * @param {Object} interaction - Interaction data with signals
+   */
+  async learnFromInteraction(interaction) {
+    try {
+      // Lazy initialize if not already done
+      await this.initialize();
+
+      // Update activity timestamp
+      this.lastActivityTime = Date.now();
+
+      // Extract and validate learning signals
+      const signals = await this.extractLearningSignals(interaction);
+
+      if (!this.validateSignals(signals)) {
+        log.warn('real_time_learning_engine.invalid_signals', { interactionId: interaction.id });
+        return;
+      }
+
+      // Add to learning buffer
+      this.learningBuffer.push({
+        ...interaction,
+        signals,
+        timestamp: Date.now()
+      });
+
+      // Emit learning event
+      this.emit('learningEvent', {
+        type: 'interaction_processed',
+        interactionId: interaction.id,
+        bufferSize: this.learningBuffer.length
+      });
+
+      // Process learning if buffer reaches trigger threshold
+      if (this.learningBuffer.length >= this.config.batchTriggerThreshold) {
+        await this.processLearningBatch();
+      }
+
+      // Store signals in database asynchronously (don't wait)
+      this.storeLearningSignals(signals).catch(error => {
+        log.error('real_time_learning_engine.signal_storage_failed', { error: error.message });
+      });
+
+      log.info('real_time_learning_engine.learned_from_interaction', {
+        interactionId: interaction.id,
+        signalsExtracted: Object.keys(signals).length,
+        bufferSize: this.learningBuffer.length
+      });
+
+    } catch (error) {
+      log.error('real_time_learning_engine.learning_failed', {
+        error: error.message,
+        interactionId: interaction.id
+      });
+    }
+  }
+
+  /**
+   * Apply learned policy to model selection
+   * @param {Object} selection - Base model selection
+   * @param {Object} context - Selection context
+   * @returns {Object} Policy-adjusted selection
+   */
+  async applyLearnedPolicy(selection, context) {
+    try {
+      const complexity = selection.complexityScore || 0.5;
+      const policy = this.getPolicyForComplexity(complexity);
+
+      if (!policy || policy.confidence < this.config.confidenceThreshold) {
+        // Not enough confidence, use base selection
+        return selection;
+      }
+
+      // Apply exploration
+      if (Math.random() < this.explorationState.currentRate) {
+        return this.applyExploration(selection, context);
+      }
+
+      // Apply learned policy adjustments
+      const adjustedSelection = this.applyPolicyAdjustments(selection, policy);
+
+      log.info('real_time_learning_engine.policy_applied', {
+        originalModel: selection.selectedModel,
+        adjustedModel: adjustedSelection.selectedModel,
+        complexity,
+        confidence: policy.confidence
+      });
+
+      return adjustedSelection;
+
+    } catch (error) {
+      log.error('real_time_learning_engine.policy_application_failed', { error: error.message });
+      return selection; // Fallback to base selection
+    }
+  }
+
+  /**
+   * Extract multi-dimensional learning signals from interaction
+   * @param {Object} interaction - Interaction data
+   * @returns {Object} Extracted signals
    */
   async extractLearningSignals(interaction) {
     const signals = {
-      queryComplexity: this.calculateQueryComplexity(interaction.query),
-      performance: interaction.qualityScore || 0,
+      queryComplexity: interaction.queryComplexity || 0.5,
+      performance: this.calculatePerformanceScore(interaction),
+      userSatisfaction: interaction.userSatisfaction,
       costEfficiency: this.calculateCostEfficiency(interaction),
-      contextUtilization: interaction.contextUtilization || 0,
+      contextUtilization: this.calculateContextUtilization(interaction),
       successRate: interaction.success ? 1 : 0,
-      engagementSignals: {
-        userSatisfaction: interaction.userSatisfaction || 0,
-        conversationDepth: interaction.conversationDepth || 0,
-        userEngagement: interaction.userEngagement || 0,
-        queryDiversity: interaction.queryDiversity || 0
-      }
+      temporalFeatures: this.extractTemporalFeatures(),
+      engagementSignals: this.extractEngagementSignals(interaction)
     };
-
-    // Validate signals
-    if (!this.validateSignals(signals)) {
-      console.warn('[RealTimeLearningEngine] Invalid signals detected:', signals);
-      return null;
-    }
 
     return signals;
   }
 
   /**
-   * Calculate query complexity score
-   */
-  calculateQueryComplexity(query) {
-    if (!query) return 0;
-
-    const complexityFactors = {
-      length: Math.min(query.length / 100, 1), // 0-1 based on length
-      keywords: this.countComplexityKeywords(query),
-      structure: this.analyzeQueryStructure(query),
-      domain: this.assessDomainComplexity(query)
-    };
-
-    // Weighted combination
-    return (
-      complexityFactors.length * 0.2 +
-      complexityFactors.keywords * 0.3 +
-      complexityFactors.structure * 0.3 +
-      complexityFactors.domain * 0.2
-    );
-  }
-
-  /**
-   * Count complexity-indicating keywords
-   */
-  countComplexityKeywords(query) {
-    const complexityKeywords = [
-      'compare', 'versus', 'vs', 'difference', 'best', 'worst',
-      'analyze', 'evaluate', 'assess', 'optimize', 'maximize', 'minimize',
-      'complex', 'advanced', 'sophisticated', 'detailed', 'comprehensive',
-      'multiple', 'various', 'diverse', 'range', 'spectrum'
-    ];
-
-    const lowerQuery = query.toLowerCase();
-    const matches = complexityKeywords.filter(keyword => lowerQuery.includes(keyword));
-    return Math.min(matches.length / 3, 1); // Cap at 1.0
-  }
-
-  /**
-   * Analyze query structure complexity
-   */
-  analyzeQueryStructure(query) {
-    let complexity = 0;
-
-    // Question marks indicate structured queries
-    complexity += (query.match(/\?/g) || []).length * 0.2;
-
-    // Multiple clauses
-    complexity += (query.match(/(and|or|but|however|although)/gi) || []).length * 0.1;
-
-    // Lists or enumerations
-    complexity += (query.match(/(\d+\.|\•|-)/g) || []).length * 0.1;
-
-    // Technical terms
-    complexity += (query.match(/\b(algorithm|methodology|framework|architecture|infrastructure)\b/gi) || []).length * 0.2;
-
-    return Math.min(complexity, 1);
-  }
-
-  /**
-   * Assess domain-specific complexity
-   */
-  assessDomainComplexity(query) {
-    // Domain-specific complexity patterns
-    const domainPatterns = {
-      technical: /\b(api|database|server|cloud|infrastructure|deployment|integration|authentication)\b/gi,
-      business: /\b(roi|kpi|metrics|analytics|optimization|efficiency|scalability|performance)\b/gi,
-      analytical: /\b(analyze|evaluate|compare|benchmark|trend|pattern|correlation|prediction)\b/gi
-    };
-
-    let domainComplexity = 0;
-    Object.values(domainPatterns).forEach(pattern => {
-      const matches = query.match(pattern);
-      if (matches) domainComplexity += 0.2;
-    });
-
-    return Math.min(domainComplexity, 1);
-  }
-
-  /**
-   * Calculate cost efficiency score
-   */
-  calculateCostEfficiency(interaction) {
-    const cost = interaction.actualCost || 0;
-    const quality = interaction.qualityScore || 0;
-
-    if (cost === 0) return 1; // Free is perfectly efficient
-
-    // Cost per quality point (lower is better)
-    const costPerQuality = cost / Math.max(quality, 0.1);
-
-    // Normalize: assume 0.01 cost per quality point is baseline
-    const baseline = 0.01;
-    const efficiency = baseline / costPerQuality;
-
-    return Math.min(Math.max(efficiency, 0), 1);
-  }
-
-  /**
-   * Validate learning signals
+   * Validate learning signals quality
+   * @param {Object} signals - Signals to validate
+   * @returns {boolean} True if signals pass quality gates
    */
   validateSignals(signals) {
-    if (!signals) return false;
+    // Quality gates for signal validation
+    const qualityChecks = [
+      signals.queryComplexity >= 0 && signals.queryComplexity <= 1,
+      signals.performance >= 0 && signals.performance <= 100,
+      signals.costEfficiency >= 0 && signals.costEfficiency <= 1,
+      signals.contextUtilization >= 0 && signals.contextUtilization <= 1,
+      signals.successRate >= 0 && signals.successRate <= 1
+    ];
 
-    const requiredFields = ['queryComplexity', 'performance', 'costEfficiency', 'successRate'];
-    for (const field of requiredFields) {
-      if (typeof signals[field] !== 'number' || isNaN(signals[field])) {
-        return false;
-      }
-    }
-
-    // Range validation
-    if (signals.queryComplexity < 0 || signals.queryComplexity > 1) return false;
-    if (signals.performance < 0 || signals.performance > 100) return false;
-    if (signals.costEfficiency < 0 || signals.costEfficiency > 1) return false;
-    if (signals.successRate < 0 || signals.successRate > 1) return false;
-
-    return true;
+    return qualityChecks.every(check => check);
   }
 
   /**
-   * Learn from interaction data
-   */
-  async learnFromInteraction(interaction) {
-    try {
-      const signals = await this.extractLearningSignals(interaction);
-      if (!signals) return;
-
-      // Add to learning buffer
-      this.learningBuffer.push({
-        signals,
-        timestamp: Date.now(),
-        interaction
-      });
-
-      // Process learning batch if buffer is full
-      if (this.learningBuffer.length >= this.windowSize) {
-        await this.processLearningBatch();
-      }
-
-      // Check if retraining is needed
-      await this.checkRetrainingTrigger();
-
-    } catch (error) {
-      console.error('[RealTimeLearningEngine] Learning error:', error);
-    }
-  }
-
-  /**
-   * Process accumulated learning signals
+   * Process a batch of learning data for policy updates (event-driven)
    */
   async processLearningBatch() {
-    if (this.learningBuffer.length === 0) return;
+    try {
+      log.info('real_time_learning_engine.processing_batch', {
+        batchSize: this.learningBuffer.length
+      });
 
-    console.log(`[RealTimeLearningEngine] Processing learning batch of ${this.learningBuffer.length} signals`);
+      // Emit batch processing event
+      this.emit('learningEvent', {
+        type: 'batch_processing_started',
+        batchSize: this.learningBuffer.length
+      });
 
-    // Group signals by complexity
-    const complexityGroups = new Map();
+      // Group by complexity levels
+      const complexityGroups = this.groupByComplexity(this.learningBuffer);
 
-    this.learningBuffer.forEach(item => {
-      const complexity = Math.round(item.signals.queryComplexity * 10) / 10; // Round to nearest 0.1
-
-      if (!complexityGroups.has(complexity)) {
-        complexityGroups.set(complexity, []);
+      // Update policies for each complexity level
+      for (const [complexity, interactions] of complexityGroups) {
+        await this.updatePolicyForComplexity(complexity, interactions);
       }
-      complexityGroups.get(complexity).push(item);
-    });
 
-    // Update policies for each complexity group
-    for (const [complexity, items] of complexityGroups) {
-      await this.updatePolicyForComplexity(complexity, items);
-    }
+      // Update exploration state (only when processing batch)
+      await this.updateExplorationState();
 
-    // Clear buffer
-    this.learningBuffer = [];
+      // Check for retraining trigger
+      await this.checkRetrainingTrigger();
 
-    console.log(`[RealTimeLearningEngine] Updated policies for ${complexityGroups.size} complexity levels`);
-  }
+      // Emit batch completion event
+      this.emit('learningEvent', {
+        type: 'batch_processing_completed',
+        complexityGroups: complexityGroups.size,
+        policiesUpdated: complexityGroups.size
+      });
 
-  /**
-   * Update policy for specific complexity level
-   */
-  async updatePolicyForComplexity(complexity, items) {
-    const policy = this.getOrCreatePolicy(complexity);
+      // Clear buffer
+      this.learningBuffer = [];
 
-    // Calculate rewards for each model in the batch
-    const modelRewards = new Map();
+      log.info('real_time_learning_engine.batch_processed', {
+        complexityGroups: complexityGroups.size
+      });
 
-    items.forEach(item => {
-      const model = item.interaction.selectedModel;
-      const reward = this.calculateReward(item.signals);
-
-      if (!modelRewards.has(model)) {
-        modelRewards.set(model, []);
-      }
-      modelRewards.get(model).push(reward);
-    });
-
-    // Update policy weights using reinforcement learning
-    for (const [model, rewards] of modelRewards) {
-      const averageReward = rewards.reduce((sum, r) => sum + r, 0) / rewards.length;
-      const currentWeight = policy.weights[model] || 0;
-
-      // Temporal difference learning update
-      const newWeight = currentWeight + this.adaptationRate * (averageReward - currentWeight);
-      policy.weights[model] = Math.max(0, Math.min(1, newWeight)); // Clamp to [0,1]
-    }
-
-    // Update policy statistics
-    policy.sampleSize += items.length;
-    policy.averageReward = this.calculateAverageReward(modelRewards);
-    policy.rewardVariance = this.calculateRewardVariance(modelRewards);
-    policy.confidence = this.calculatePolicyConfidence(policy);
-    policy.lastUpdated = new Date();
-
-    // Persist to database
-    await this.persistPolicy(complexity, policy);
-
-    console.log(`[RealTimeLearningEngine] Updated policy for complexity ${complexity}: confidence=${policy.confidence.toFixed(3)}`);
-  }
-
-  /**
-   * Calculate reward from signals
-   */
-  calculateReward(signals) {
-    // Weighted combination of signal components
-    const weights = {
-      performance: 0.4,
-      costEfficiency: 0.3,
-      successRate: 0.2,
-      contextUtilization: 0.1
-    };
-
-    return (
-      signals.performance * weights.performance / 100 + // Normalize performance to 0-1
-      signals.costEfficiency * weights.costEfficiency +
-      signals.successRate * weights.successRate +
-      signals.contextUtilization * weights.contextUtilization
-    );
-  }
-
-  /**
-   * Get or create policy for complexity level
-   */
-  getOrCreatePolicy(complexity) {
-    if (!this.policies.has(complexity)) {
-      this.policies.set(complexity, {
-        complexityLevel: complexity,
-        weights: {},
-        confidence: 0,
-        sampleSize: 0,
-        averageReward: 0,
-        rewardVariance: 0,
-        lastUpdated: new Date(),
-        version: 1
+    } catch (error) {
+      log.error('real_time_learning_engine.batch_processing_failed', { error: error.message });
+      this.emit('learningEvent', {
+        type: 'batch_processing_failed',
+        error: error.message
       });
     }
-    return this.policies.get(complexity);
   }
 
   /**
-   * Find closest policy for unknown complexity
+   * Update policy for a specific complexity level using reinforcement learning
+   * @param {number} complexity - Complexity level
+   * @param {Array} interactions - Interactions for this complexity
    */
-  getPolicyForComplexity(complexity) {
-    // Exact match
-    if (this.policies.has(complexity)) {
-      return this.policies.get(complexity);
-    }
+  async updatePolicyForComplexity(complexity, interactions) {
+    const policy = this.getOrCreatePolicy(complexity);
 
-    // Find closest complexity level
-    let closestComplexity = null;
-    let minDistance = Infinity;
+    // Calculate rewards for each interaction
+    const rewards = interactions.map(interaction => this.calculateReward(interaction));
 
-    for (const existingComplexity of this.policies.keys()) {
-      const distance = Math.abs(complexity - existingComplexity);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestComplexity = existingComplexity;
-      }
-    }
+    // Update policy using momentum-based policy gradients
+    const learningRate = this.config.adaptationRate;
+    const momentum = 0.9;
 
-    return closestComplexity ? this.policies.get(closestComplexity) : null;
+    // Calculate policy gradients
+    const gradients = this.calculatePolicyGradients(policy, interactions, rewards);
+
+    // Apply momentum and regularization
+    policy.velocity = policy.velocity || {};
+    Object.keys(gradients).forEach(key => {
+      // Momentum update
+      policy.velocity[key] = (policy.velocity[key] || 0) * momentum + gradients[key];
+
+      // Update weights with regularization
+      policy.weights[key] = (policy.weights[key] || 0) + learningRate * policy.velocity[key];
+
+      // Entropy regularization to prevent mode collapse
+      policy.weights[key] *= (1 - 0.01); // Small entropy bonus
+    });
+
+    // Update policy statistics
+    policy.sampleSize += interactions.length;
+    policy.averageReward = this.updateRunningAverage(policy.averageReward, rewards, policy.sampleSize);
+    policy.rewardVariance = this.calculateRewardVariance(rewards, policy.averageReward);
+
+    // Update confidence using Bayesian approach
+    policy.confidence = this.calculateBayesianConfidence(policy);
+
+    // Save updated policy
+    await this.savePolicy(policy);
+
+    log.info('real_time_learning_engine.policy_updated', {
+      complexity,
+      sampleSize: policy.sampleSize,
+      averageReward: policy.averageReward,
+      confidence: policy.confidence
+    });
   }
 
   /**
-   * Apply learned policy to model selection
+   * Apply exploration strategy to model selection
+   * @param {Object} selection - Base selection
+   * @param {Object} context - Selection context
+   * @returns {Object} Exploration-adjusted selection
    */
-  async applyLearnedPolicy(selection, context) {
-    const complexity = selection.complexityScore;
-    const policy = this.getPolicyForComplexity(complexity);
-
-    if (!policy || policy.confidence < this.confidenceThreshold) {
-      // Not confident enough, return base selection
-      return selection;
-    }
-
-    // Apply exploration
-    const exploredSelection = await this.applyExploration(selection, context);
-
-    // Apply policy adjustments
-    return this.applyPolicyAdjustments(exploredSelection, policy);
-  }
-
-  /**
-   * Apply exploration strategy
-   */
-  async applyExploration(selection, context) {
-    if (Math.random() > this.explorationRate) {
-      return selection; // No exploration
-    }
-
-    // Exploration logic
-    const availableModels = context.availableModels || ['gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo', 'claude-3-haiku'];
+  applyExploration(selection, context) {
+    // ε-greedy with intelligent model targeting
+    const availableModels = ['gpt-5', 'gpt-4.1', 'gpt-5-mini', 'gpt-5-nano'];
 
     // Prioritize under-explored models
-    if (this.explorationState.underExploredModels.size > 0) {
-      const underExploredArray = Array.from(this.explorationState.underExploredModels);
-      const randomModel = underExploredArray[Math.floor(Math.random() * underExploredArray.length)];
-
+    const underExploredModels = Array.from(this.explorationState.underExploredModels);
+    if (underExploredModels.length > 0) {
+      const randomUnderExplored = underExploredModels[Math.floor(Math.random() * underExploredModels.length)];
       return {
         ...selection,
-        selectedModel: randomModel,
-        exploration: true,
-        reasoning: `Exploring under-explored model: ${randomModel}`
+        selectedModel: randomUnderExplored,
+        reasoning: `Exploration: Testing under-explored model ${randomUnderExplored}`,
+        exploration: true
       };
     }
 
-    // Random exploration
+    // Random exploration among all models
     const randomModel = availableModels[Math.floor(Math.random() * availableModels.length)];
-
     return {
       ...selection,
       selectedModel: randomModel,
-      exploration: true,
-      reasoning: `Random exploration: ${randomModel}`
+      reasoning: `Exploration: Random model selection ${randomModel}`,
+      exploration: true
     };
   }
 
   /**
-   * Apply policy-based adjustments
+   * Apply policy adjustments to model selection
+   * @param {Object} selection - Base selection
+   * @param {Object} policy - Learned policy
+   * @returns {Object} Adjusted selection
    */
   applyPolicyAdjustments(selection, policy) {
-    const modelWeights = policy.weights;
-    const selectedModel = selection.selectedModel;
+    const weights = policy.weights;
 
-    // Check if current model has learned weights
-    if (modelWeights[selectedModel] && modelWeights[selectedModel] > 0.5) {
-      return {
-        ...selection,
-        confidence: policy.confidence,
-        policyApplied: true,
-        reasoning: `Policy-based selection: ${selectedModel} (weight: ${(modelWeights[selectedModel] * 100).toFixed(1)}%)`
-      };
-    }
+    // Calculate model scores based on policy weights
+    const modelScores = {};
+    const availableModels = ['gpt-5', 'gpt-4.1', 'gpt-5-mini', 'gpt-5-nano'];
 
-    // Find best model according to policy
-    let bestModel = selectedModel;
-    let bestWeight = modelWeights[selectedModel] || 0;
+    availableModels.forEach(model => {
+      modelScores[model] = this.calculateModelScore(model, selection, weights);
+    });
 
-    for (const [model, weight] of Object.entries(modelWeights)) {
-      if (weight > bestWeight) {
-        bestWeight = weight;
-        bestModel = model;
-      }
-    }
-
-    if (bestModel !== selectedModel && bestWeight > 0.6) {
-      return {
-        ...selection,
-        selectedModel: bestModel,
-        confidence: policy.confidence,
-        policyApplied: true,
-        reasoning: `Policy override: ${bestModel} preferred over ${selectedModel} (weight: ${(bestWeight * 100).toFixed(1)}%)`
-      };
-    }
+    // Select model with highest score
+    const bestModel = Object.keys(modelScores).reduce((a, b) =>
+      modelScores[a] > modelScores[b] ? a : b
+    );
 
     return {
       ...selection,
+      selectedModel: bestModel,
       confidence: policy.confidence,
-      policyApplied: true,
-      reasoning: `Policy maintained: ${selectedModel} (weight: ${((modelWeights[selectedModel] || 0) * 100).toFixed(1)}%)`
+      reasoning: `Policy-based selection: ${bestModel} (confidence: ${(policy.confidence * 100).toFixed(1)}%)`,
+      policyApplied: true
     };
   }
 
@@ -496,114 +390,270 @@ class RealTimeLearningEngine {
    */
   async checkRetrainingTrigger() {
     const now = Date.now();
+    const timeSinceLastRetraining = now - this.lastRetrainingTime;
 
-    // Check time-based trigger
-    if (this.lastRetrainingTime &&
-        (now - this.lastRetrainingTime) < this.minRetrainingInterval) {
-      return; // Too soon since last retraining
+    if (timeSinceLastRetraining < this.config.minRetrainingInterval) {
+      return; // Too soon for retraining
     }
 
-    // Check sample-based trigger
-    let totalSamples = 0;
-    for (const policy of this.policies.values()) {
-      totalSamples += policy.sampleSize;
+    // Check sample size threshold
+    const totalSamples = Array.from(this.policies.values())
+      .reduce((sum, policy) => sum + policy.sampleSize, 0);
+
+    if (totalSamples >= this.config.retrainingSampleThreshold) {
+      await this.triggerRetraining();
     }
 
-    if (totalSamples >= this.retrainingSampleThreshold) {
+    // Check for concept drift using KL divergence
+    const driftDetected = await this.detectConceptDrift();
+    if (driftDetected) {
+      log.warn('real_time_learning_engine.concept_drift_detected');
       await this.triggerRetraining();
     }
   }
 
   /**
-   * Trigger comprehensive retraining
+   * Trigger comprehensive model retraining
    */
   async triggerRetraining() {
-    console.log('[RealTimeLearningEngine] Starting retraining process...');
-
     try {
-      // Process any remaining learning buffer
-      if (this.learningBuffer.length > 0) {
-        await this.processLearningBatch();
-      }
+      log.info('real_time_learning_engine.retraining_triggered');
 
-      // Update exploration state
-      await this.updateExplorationState();
+      // Gather comprehensive training data
+      const trainingData = await this.gatherTrainingData();
 
-      // Reset learning buffer for fresh data
-      this.learningBuffer = [];
+      // Perform cross-validation
+      const validationResults = await this.performCrossValidation(trainingData);
+
+      // Update model versions
+      await this.updateModelVersions(validationResults);
 
       this.lastRetrainingTime = Date.now();
 
-      console.log('[RealTimeLearningEngine] Retraining completed');
+      log.info('real_time_learning_engine.retraining_completed', {
+        trainingSamples: trainingData.length,
+        validationScore: validationResults.averageScore
+      });
 
     } catch (error) {
-      console.error('[RealTimeLearningEngine] Retraining error:', error);
+      log.error('real_time_learning_engine.retraining_failed', { error: error.message });
     }
-  }
-
-  /**
-   * Update exploration state based on current policies
-   */
-  async updateExplorationState() {
-    const allModels = new Set(['gpt-4o-mini', 'gpt-4', 'gpt-3.5-turbo', 'claude-3-haiku', 'claude-3-sonnet']);
-    const usedModels = new Set();
-
-    // Collect all models that have been used in policies
-    for (const policy of this.policies.values()) {
-      Object.keys(policy.weights).forEach(model => usedModels.add(model));
-    }
-
-    // Identify under-explored models
-    this.explorationState.underExploredModels = new Set();
-    for (const model of allModels) {
-      if (!usedModels.has(model)) {
-        this.explorationState.underExploredModels.add(model);
-      }
-    }
-
-    console.log(`[RealTimeLearningEngine] Under-explored models: ${Array.from(this.explorationState.underExploredModels).join(', ')}`);
   }
 
   /**
    * Get learning metrics for monitoring
+   * @returns {Object} Learning metrics
    */
   async getMetrics() {
     const metrics = {
-      signalQuality: this.calculateSignalQuality(),
+      signalQuality: await this.calculateSignalQuality(),
       learningSpeed: this.calculateLearningSpeed(),
-      explorationRate: this.explorationRate,
+      explorationRate: this.explorationState.currentRate,
       policyConfidence: this.calculateAveragePolicyConfidence(),
+      retrainingFrequency: this.calculateRetrainingFrequency(),
+      performanceImprovement: await this.calculatePerformanceImprovement(),
       activePolicies: this.policies.size,
       totalSignals: this.learningBuffer.length,
-      lastRetraining: this.lastRetrainingTime,
-      retrainingFrequency: await this.calculateRetrainingFrequency()
+      lastRetraining: this.lastRetrainingTime
     };
 
     return metrics;
   }
 
   /**
-   * Get all policies for visualization
+   * Get current policies
+   * @returns {Array} Policy data
    */
   getPolicies() {
     return Array.from(this.policies.values()).map(policy => ({
       complexityLevel: policy.complexityLevel,
-      weights: policy.weights,
       confidence: policy.confidence,
       sampleSize: policy.sampleSize,
       averageReward: policy.averageReward,
-      lastUpdated: policy.lastUpdated,
-      version: policy.version
+      lastUpdated: policy.lastUpdated
     }));
   }
 
-  /**
-   * Persist policy to database
-   */
-  async persistPolicy(complexity, policy) {
-    try {
-      const policyData = {
-        complexity_level: complexity,
+  // Helper methods
+
+  async loadPolicies() {
+    const { data, error } = await supabase
+      .from('learning_policies')
+      .select('*')
+      .order('complexity_level', { ascending: true });
+
+    if (error) throw error;
+
+    data.forEach(row => {
+      this.policies.set(row.complexity_level, {
+        id: row.id,
+        complexityLevel: row.complexity_level,
+        weights: row.policy_weights,
+        confidence: row.confidence_score,
+        sampleSize: row.sample_size,
+        averageReward: row.average_reward,
+        rewardVariance: row.reward_variance,
+        lastUpdated: new Date(row.last_updated),
+        version: row.version
+      });
+    });
+  }
+
+  getPolicyForComplexity(complexity) {
+    // Find closest complexity level
+    const complexities = Array.from(this.policies.keys());
+    const closest = complexities.reduce((prev, curr) =>
+      Math.abs(curr - complexity) < Math.abs(prev - complexity) ? curr : prev
+    );
+
+    return this.policies.get(closest);
+  }
+
+  getOrCreatePolicy(complexity) {
+    let policy = this.getPolicyForComplexity(complexity);
+
+    if (!policy) {
+      policy = {
+        complexityLevel: complexity,
+        weights: {},
+        confidence: 0,
+        sampleSize: 0,
+        averageReward: 0,
+        rewardVariance: 0,
+        lastUpdated: new Date(),
+        version: 1
+      };
+      this.policies.set(complexity, policy);
+    }
+
+    return policy;
+  }
+
+  calculatePerformanceScore(interaction) {
+    // Composite performance score based on multiple metrics
+    const quality = interaction.qualityScore || 0.5;
+    const time = Math.max(0, 1 - (interaction.responseTime || 3000) / 10000);
+    const success = interaction.success ? 1 : 0;
+
+    return Math.round((quality * 0.5 + time * 0.3 + success * 0.2) * 100);
+  }
+
+  calculateCostEfficiency(interaction) {
+    const cost = interaction.actualCost || 0;
+    const quality = interaction.qualityScore || 0.5;
+    const maxExpectedCost = 0.01; // Maximum expected cost
+
+    return Math.max(0, Math.min(1, quality / Math.max(cost, 0.0001) / maxExpectedCost));
+  }
+
+  calculateContextUtilization(interaction) {
+    // Estimate based on token usage vs available context
+    const usedTokens = interaction.tokenUsage || 0;
+    const availableTokens = 4000; // Approximate context window
+
+    return Math.min(1, usedTokens / availableTokens);
+  }
+
+  extractTemporalFeatures() {
+    const now = new Date();
+    return {
+      hourOfDay: now.getHours(),
+      dayOfWeek: now.getDay(),
+      isWeekend: now.getDay() === 0 || now.getDay() === 6
+    };
+  }
+
+  extractEngagementSignals(interaction) {
+    return {
+      conversationDepth: interaction.conversationDepth || 0,
+      userEngagement: interaction.userEngagement || 0.5,
+      queryDiversity: interaction.queryDiversity || 0.5
+    };
+  }
+
+  groupByComplexity(interactions) {
+    const groups = new Map();
+
+    interactions.forEach(interaction => {
+      const complexity = Math.round(interaction.signals.queryComplexity * 10) / 10; // Round to 1 decimal
+      if (!groups.has(complexity)) {
+        groups.set(complexity, []);
+      }
+      groups.get(complexity).push(interaction);
+    });
+
+    return groups;
+  }
+
+  calculateReward(interaction) {
+    const signals = interaction.signals;
+
+    // Multi-objective reward function
+    const performanceReward = signals.performance / 100;
+    const costReward = signals.costEfficiency;
+    const satisfactionReward = signals.userSatisfaction || 0.5;
+    const utilizationReward = signals.contextUtilization;
+
+    // Weighted combination with dynamic weighting
+    return performanceReward * 0.4 + costReward * 0.3 + satisfactionReward * 0.2 + utilizationReward * 0.1;
+  }
+
+  calculatePolicyGradients(policy, interactions, rewards) {
+    const gradients = {};
+
+    // Simplified policy gradient calculation
+    interactions.forEach((interaction, i) => {
+      const reward = rewards[i];
+      const model = interaction.selectedModel;
+
+      // Update gradients based on reward and model choice
+      gradients[model] = (gradients[model] || 0) + reward;
+    });
+
+    // Normalize gradients
+    const totalReward = Object.values(gradients).reduce((sum, g) => sum + g, 0);
+    if (totalReward > 0) {
+      Object.keys(gradients).forEach(key => {
+        gradients[key] /= totalReward;
+      });
+    }
+
+    return gradients;
+  }
+
+  updateRunningAverage(current, newValues, totalCount) {
+    const newSum = newValues.reduce((sum, val) => sum + val, 0);
+    const newCount = newValues.length;
+    const oldSum = current * (totalCount - newCount);
+
+    return (oldSum + newSum) / totalCount;
+  }
+
+  calculateRewardVariance(rewards, mean) {
+    const squaredDiffs = rewards.map(r => Math.pow(r - mean, 2));
+    return squaredDiffs.reduce((sum, diff) => sum + diff, 0) / rewards.length;
+  }
+
+  calculateBayesianConfidence(policy) {
+    // Simplified Bayesian confidence calculation
+    const sampleSize = policy.sampleSize;
+    const variance = policy.rewardVariance;
+
+    if (sampleSize < 10) return 0.1; // Low confidence with small sample
+
+    // Confidence increases with sample size and decreases with variance
+    const baseConfidence = Math.min(1, sampleSize / 100);
+    const variancePenalty = Math.max(0, 1 - variance * 10);
+
+    return baseConfidence * variancePenalty;
+  }
+
+  async savePolicy(policy) {
+    const { error } = await supabase
+      .from('learning_policies')
+      .upsert({
+        id: policy.id,
+        complexity_level: policy.complexityLevel,
         policy_weights: policy.weights,
         confidence_score: policy.confidence,
         sample_size: policy.sampleSize,
@@ -611,90 +661,229 @@ class RealTimeLearningEngine {
         reward_variance: policy.rewardVariance,
         last_updated: policy.lastUpdated.toISOString(),
         version: policy.version
-      };
+      });
 
-      const { error } = await supabase
-        .from('learning_policies')
-        .upsert(policyData, {
-          onConflict: 'complexity_level',
-          ignoreDuplicates: false
-        });
+    if (error) throw error;
+  }
 
-      if (error) {
-        console.error('[RealTimeLearningEngine] Error persisting policy:', error);
-      }
+  async updateExplorationState() {
+    // Identify under-explored models based on recent interactions
+    const recentInteractions = this.learningBuffer.slice(-100);
+    const modelCounts = {};
 
-    } catch (error) {
-      console.error('[RealTimeLearningEngine] Policy persistence error:', error);
+    recentInteractions.forEach(interaction => {
+      const model = interaction.selectedModel;
+      modelCounts[model] = (modelCounts[model] || 0) + 1;
+    });
+
+    const totalInteractions = recentInteractions.length;
+    const averageCount = totalInteractions / 4; // Assuming 4 models
+
+    this.explorationState.underExploredModels = new Set(
+      Object.keys(modelCounts).filter(model => modelCounts[model] < averageCount * 0.7)
+    );
+
+    // Adjust exploration rate based on learning progress
+    const averageConfidence = this.calculateAveragePolicyConfidence();
+    this.explorationState.currentRate = Math.max(
+      0.05, // Minimum exploration
+      this.config.explorationRate * (1 - averageConfidence)
+    );
+  }
+
+  calculateModelScore(model, selection, weights) {
+    // Base score from model capabilities
+    let score = 0;
+
+    // Performance weight
+    score += (weights[model] || 0) * 0.4;
+
+    // Cost efficiency weight
+    const costWeight = weights[`${model}_cost`] || 0;
+    score += costWeight * 0.3;
+
+    // Complexity fit weight
+    const complexityFit = this.calculateComplexityFit(model, selection.complexityScore);
+    score += complexityFit * 0.3;
+
+    return score;
+  }
+
+  calculateComplexityFit(model, complexity) {
+    // Simplified complexity fit calculation
+    const modelCapabilities = {
+      'gpt-5': 0.9,
+      'gpt-4.1': 0.7,
+      'gpt-5-mini': 0.5,
+      'gpt-5-nano': 0.3
+    };
+
+    const modelComplexity = modelCapabilities[model] || 0.5;
+    return 1 - Math.abs(modelComplexity - complexity);
+  }
+
+  async storeLearningSignals(signals) {
+    const { error } = await supabase
+      .from('learning_signals')
+      .insert({
+        interaction_id: signals.interactionId || null,
+        query_complexity: signals.queryComplexity,
+        selected_model: signals.selectedModel,
+        actual_performance: signals.performance,
+        user_satisfaction: signals.userSatisfaction,
+        cost_efficiency: signals.costEfficiency,
+        context_utilization: signals.contextUtilization,
+        success_rate: signals.successRate,
+        learning_signals: signals
+      });
+
+    if (error) {
+      log.error('real_time_learning_engine.store_signals_failed', { error: error.message });
     }
   }
 
-  // Helper methods for metrics calculation
-  calculateSignalQuality() {
-    if (this.learningBuffer.length === 0) return 1;
+  async detectConceptDrift() {
+    // Simplified concept drift detection using KL divergence
+    // In a real implementation, this would compare recent vs historical distributions
+    return false; // Placeholder
+  }
 
-    const validSignals = this.learningBuffer.filter(item =>
-      this.validateSignals(item.signals)
-    ).length;
+  async gatherTrainingData() {
+    const { data, error } = await supabase
+      .from('learning_signals')
+      .select('*')
+      .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()) // Last 30 days
+      .limit(10000);
 
-    return validSignals / this.learningBuffer.length;
+    if (error) throw error;
+    return data;
+  }
+
+  async performCrossValidation(trainingData) {
+    // Simplified cross-validation
+    // In a real implementation, this would perform proper k-fold cross-validation
+    const averageScore = trainingData.reduce((sum, record) =>
+      sum + record.actual_performance, 0) / trainingData.length;
+
+    return { averageScore };
+  }
+
+  async updateModelVersions(validationResults) {
+    const { error } = await supabase
+      .from('learning_model_versions')
+      .insert({
+        model_type: 'selection_policy',
+        version: Date.now(),
+        training_data_size: validationResults.trainingSize,
+        validation_metrics: validationResults,
+        deployed_at: new Date().toISOString(),
+        status: 'active'
+      });
+
+    if (error) throw error;
+  }
+
+  async calculateSignalQuality() {
+    // Calculate average signal validation pass rate
+    const recentSignals = this.learningBuffer.slice(-100);
+    const validSignals = recentSignals.filter(item => this.validateSignals(item.signals));
+
+    return recentSignals.length > 0 ? validSignals.length / recentSignals.length : 0;
   }
 
   calculateLearningSpeed() {
-    // Policies updated per day (simplified)
-    const recentPolicies = Array.from(this.policies.values())
-      .filter(p => p.lastUpdated > Date.now() - 24 * 60 * 60 * 1000);
+    // Calculate policy update frequency
+    const recentUpdates = Array.from(this.policies.values())
+      .filter(policy => policy.lastUpdated > new Date(Date.now() - 24 * 60 * 60 * 1000));
 
-    return recentPolicies.length;
+    return recentUpdates.length;
   }
 
   calculateAveragePolicyConfidence() {
-    if (this.policies.size === 0) return 0;
+    const policies = Array.from(this.policies.values());
+    if (policies.length === 0) return 0;
 
-    const totalConfidence = Array.from(this.policies.values())
-      .reduce((sum, p) => sum + p.confidence, 0);
-
-    return totalConfidence / this.policies.size;
+    const totalConfidence = policies.reduce((sum, policy) => sum + policy.confidence, 0);
+    return totalConfidence / policies.length;
   }
 
-  async calculateRetrainingFrequency() {
-    // Simplified: retrainings per day over last 30 days
-    if (!this.lastRetrainingTime) return 0;
+  calculateRetrainingFrequency() {
+    if (this.lastRetrainingTime === 0) return 0;
 
-    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const recentRetrainingTime = this.lastRetrainingTime > thirtyDaysAgo ? this.lastRetrainingTime : null;
-
-    return recentRetrainingTime ? 1 / 30 : 0; // Very simplified
+    const daysSinceRetraining = (Date.now() - this.lastRetrainingTime) / (24 * 60 * 60 * 1000);
+    return 1 / daysSinceRetraining; // Retrainings per day
   }
 
-  calculateAverageReward(modelRewards) {
-    const allRewards = [];
-    for (const rewards of modelRewards.values()) {
-      allRewards.push(...rewards);
+  async calculatePerformanceImprovement() {
+    // Calculate improvement in model selection accuracy over time
+    const { data, error } = await supabase
+      .from('learning_signals')
+      .select('actual_performance, created_at')
+      .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: true });
+
+    if (error || !data || data.length < 2) return 0;
+
+    const firstHalf = data.slice(0, Math.floor(data.length / 2));
+    const secondHalf = data.slice(Math.floor(data.length / 2));
+
+    const firstHalfAvg = firstHalf.reduce((sum, r) => sum + r.actual_performance, 0) / firstHalf.length;
+    const secondHalfAvg = secondHalf.reduce((sum, r) => sum + r.actual_performance, 0) / secondHalf.length;
+
+    return ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100; // Percentage improvement
+  }
+
+  /**
+   * Manual retraining trigger for admin operations
+   */
+  async manualRetrain() {
+    await this.initialize(); // Ensure initialized
+    log.info('real_time_learning_engine.manual_retrain_triggered');
+    await this.triggerRetraining();
+    return { success: true, timestamp: new Date().toISOString() };
+  }
+
+  /**
+   * Shutdown the learning engine to free resources
+   */
+  shutdown() {
+    if (!this.isActive) return;
+
+    log.info('real_time_learning_engine.shutting_down');
+
+    // Clear inactivity timer
+    if (this.inactivityTimer) {
+      clearInterval(this.inactivityTimer);
+      this.inactivityTimer = null;
     }
-    return allRewards.length > 0 ? allRewards.reduce((sum, r) => sum + r, 0) / allRewards.length : 0;
+
+    // Clear learning buffer to free memory
+    this.learningBuffer = [];
+
+    this.isActive = false;
+
+    // Emit shutdown event
+    this.emit('shutdown', {
+      timestamp: new Date().toISOString(),
+      policiesCount: this.policies.size
+    });
+
+    log.info('real_time_learning_engine.shutdown_complete');
   }
 
-  calculateRewardVariance(modelRewards) {
-    const avgReward = this.calculateAverageReward(modelRewards);
-    const allRewards = [];
-    for (const rewards of modelRewards.values()) {
-      allRewards.push(...rewards);
-    }
-
-    if (allRewards.length <= 1) return 0;
-
-    const variance = allRewards.reduce((sum, r) => sum + Math.pow(r - avgReward, 2), 0) / (allRewards.length - 1);
-    return variance;
-  }
-
-  calculatePolicyConfidence(policy) {
-    // Confidence based on sample size and reward consistency
-    const sampleConfidence = Math.min(policy.sampleSize / 100, 1); // 100 samples for full confidence
-    const rewardConfidence = policy.rewardVariance < 0.1 ? 1 : Math.max(0, 1 - policy.rewardVariance);
-
-    return (sampleConfidence + rewardConfidence) / 2;
+  /**
+   * Get current status of the learning engine
+   */
+  getStatus() {
+    return {
+      isInitialized: this.isInitialized,
+      isActive: this.isActive,
+      bufferSize: this.learningBuffer.length,
+      policiesCount: this.policies.size,
+      lastActivityTime: this.lastActivityTime,
+      uptime: this.isActive ? Date.now() - this.lastActivityTime : 0
+    };
   }
 }
 
-module.exports = RealTimeLearningEngine;
+export default RealTimeLearningEngine;

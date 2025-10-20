@@ -5,11 +5,16 @@
 import React, { useState, useEffect } from 'react';
 
 const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
+  console.log('[LearningMetricsOverview] Component rendered with:', { metrics, realtimeData });
+
   const [trends, setTrends] = useState({});
 
   useEffect(() => {
+    console.log('[LearningMetricsOverview] useEffect triggered, calculating trends...');
     if (metrics && realtimeData) {
       calculateTrends();
+    } else {
+      console.log('[LearningMetricsOverview] Missing metrics or realtimeData, skipping trend calculation');
     }
   }, [metrics, realtimeData]);
 
@@ -34,7 +39,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
     setTrends(newTrends);
   };
 
-  const MetricCard = ({ title, value, unit, trend, description, status }) => {
+  const MetricCard = ({ title, value, unit, trend, description, status, tooltip }) => {
     const getStatusColor = (status) => {
       switch (status) {
         case 'good': return 'text-green-600 bg-green-50';
@@ -53,9 +58,22 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
     };
 
     return (
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="bg-white rounded-lg shadow p-6 relative group">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium text-gray-500">{title}</h3>
+          <h3 className="text-sm font-medium text-gray-500 flex items-center">
+            {title}
+            {tooltip && (
+              <div className="ml-2 relative">
+                <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+                  {tooltip}
+                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                </div>
+              </div>
+            )}
+          </h3>
           {status && (
             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(status)}`}>
               {status}
@@ -99,6 +117,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
   };
 
   if (!metrics) {
+    console.log('[LearningMetricsOverview] No metrics available, rendering loading state');
     return (
       <div className="text-center py-12">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
@@ -106,6 +125,8 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
       </div>
     );
   }
+
+  console.log('[LearningMetricsOverview] Rendering with metrics:', metrics);
 
   return (
     <div className="p-6">
@@ -125,6 +146,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
           trend={trends.signalQuality}
           description="Percentage of valid learning signals"
           status={getStatusForMetric('signalQuality', metrics.signalQuality)}
+          tooltip="Measures the quality and validity of learning signals processed by the engine.<br />Higher values indicate more reliable data for training policies."
         />
 
         <MetricCard
@@ -134,6 +156,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
           trend={trends.learningSpeed}
           description="New policies learned per day"
           status={metrics.learningSpeed >= 10 ? 'good' : metrics.learningSpeed >= 5 ? 'warning' : 'error'}
+          tooltip="Rate at which new policies are being learned and added to the system.<br />Higher values indicate faster adaptation to new patterns."
         />
 
         <MetricCard
@@ -143,6 +166,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
           trend={trends.policyConfidence}
           description="Average confidence in learned policies"
           status={getStatusForMetric('policyConfidence', metrics.policyConfidence)}
+          tooltip="Statistical confidence level in the learned policies.<br />Higher confidence means more reliable model selection decisions."
         />
 
         <MetricCard
@@ -152,6 +176,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
           trend={trends.explorationRate}
           description="Balance between exploration and exploitation"
           status={getStatusForMetric('explorationRate', metrics.explorationRate)}
+          tooltip="Percentage of decisions that explore new models vs exploiting known good ones.<br />Balances discovery with optimization."
         />
       </div>
 
@@ -164,6 +189,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
           trend={trends.performanceImprovement}
           description="Improvement in model selection accuracy"
           status={getStatusForMetric('performanceImprovement', metrics.performanceImprovement)}
+          tooltip="Percentage improvement in model selection accuracy compared to baseline.<br />Measures how much better the learning system performs over time."
         />
 
         <MetricCard
@@ -173,6 +199,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
           trend={trends.retrainingFrequency}
           description="Policy retraining events per day"
           status={metrics.retrainingFrequency <= 1 ? 'good' : metrics.retrainingFrequency <= 2 ? 'warning' : 'error'}
+          tooltip="How often the system triggers comprehensive retraining of policies.<br />Lower frequency indicates stable learning, higher frequency may indicate concept drift."
         />
 
         <MetricCard
@@ -181,6 +208,7 @@ const LearningMetricsOverview = ({ metrics, realtimeData, onRefresh }) => {
           trend={trends.activePolicies}
           description="Number of active learning policies"
           status={metrics.activePolicies >= 5 ? 'good' : 'warning'}
+          tooltip="Total number of learned policies currently active in the system.<br />More policies indicate better coverage of different query complexity levels."
         />
       </div>
 

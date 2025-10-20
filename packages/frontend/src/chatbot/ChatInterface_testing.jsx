@@ -68,18 +68,8 @@ const ChatInterfaceTesting = () => {
         setSessionId(session.sessionId);
         setSessionHealth('healthy');
 
-        // Set onboarding completion status from session data
-        console.log('[ChatInterface] Session onboarding status:', {
-          onboarding_completed: session.onboarding_completed,
-          onboarding_data: session.onboarding_data
-        });
-
-        if (session.onboarding_completed) {
-          setOnboarding(prev => ({ ...prev, completed: true }));
-          console.log('[ChatInterface] Onboarding already completed for visitor:', session.visitorId);
-        } else {
-          console.log('[ChatInterface] Onboarding not completed, will start when user sends message');
-        }
+        // Check onboarding status from backend
+        await checkOnboardingStatus(session.visitorId);
 
         console.log('[ChatInterface] Session initialized:', session.visitorId);
       } catch (error) {
@@ -111,6 +101,33 @@ const ChatInterfaceTesting = () => {
 
     loadOnboardingConfig();
   }, [sessionManager]); // Run once on mount
+
+  // Function to check onboarding status from backend
+  const checkOnboardingStatus = async (visitorId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/visitors/${visitorId}/onboarding-status`, {
+        headers: {
+          'x-client-id': TEST_CLIENT_ID,
+        },
+      });
+
+      if (response.ok) {
+        const status = await response.json();
+        console.log('[ChatInterface] Onboarding status:', status);
+
+        if (status.onboarding_completed) {
+          setOnboarding(prev => ({ ...prev, completed: true }));
+          console.log('[ChatInterface] Onboarding already completed for visitor:', visitorId);
+        } else {
+          console.log('[ChatInterface] Onboarding not completed, will start when user sends message');
+        }
+      } else {
+        console.warn('[ChatInterface] Failed to check onboarding status:', response.status);
+      }
+    } catch (error) {
+      console.error('[ChatInterface] Error checking onboarding status:', error);
+    }
+  };
 
   useEffect(() => {
     const fetchListings = async () => {
@@ -152,11 +169,8 @@ const ChatInterfaceTesting = () => {
           setSessionId(currentSession.sessionId);
           setSessionHealth('recovered');
 
-          // Set onboarding completion status from recovered session data
-          if (currentSession.onboarding_completed) {
-            setOnboarding(prev => ({ ...prev, completed: true }));
-            console.log('[ChatInterface] Onboarding already completed for recovered session:', currentSession.visitorId);
-          }
+          // Check onboarding status for recovered session
+          await checkOnboardingStatus(currentSession.visitorId);
 
           console.log('[ChatInterface] Session recovered:', currentSession.visitorId);
         }
@@ -201,6 +215,19 @@ const ChatInterfaceTesting = () => {
       case 'invalid':
       case 'no-session': return 'red';
       default: return 'gray';
+    }
+  };
+
+  // Add session health indicator to UI for debugging
+  const getSessionHealthText = () => {
+    switch (sessionHealth) {
+      case 'healthy': return 'Session: OK';
+      case 'recovered': return 'Session: Recovered';
+      case 'loading': return 'Session: Loading';
+      case 'error': return 'Session: Error';
+      case 'invalid': return 'Session: Invalid';
+      case 'no-session': return 'Session: None';
+      default: return 'Session: Unknown';
     }
   };
 
@@ -368,22 +395,7 @@ const ChatInterfaceTesting = () => {
 
       setOnboarding(prev => ({ ...prev, completed: true }));
 
-      // Update session data to reflect completed onboarding
-      const currentSession = sessionManager.getCurrentSession();
-      if (currentSession) {
-        const updatedSession = {
-          ...currentSession,
-          onboarding_completed: true,
-          onboarding_data: {
-            typology: onboarding.answers.typology,
-            budget: onboarding.answers.budget_bucket,
-            name: onboarding.answers.name,
-            email: onboarding.answers.email
-          }
-        };
-        sessionManager.saveSession(updatedSession);
-        console.log('[ChatInterface] Session updated with completed onboarding');
-      }
+      console.log('[ChatInterface] Onboarding completed successfully');
 
       // Show recommendations
       await showRecommendationsFromOnboarding();
@@ -497,7 +509,7 @@ const ChatInterfaceTesting = () => {
               </select>
             </div>
             <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-              Questions: {questionCount} | Events logged: ✅
+              Questions: {questionCount} | Events logged: ✅ | <span style={{ color: getSessionHealthColor() }}>{getSessionHealthText()}</span>
             </div>
           </div>
         </div>

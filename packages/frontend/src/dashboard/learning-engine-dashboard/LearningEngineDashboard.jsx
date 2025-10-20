@@ -8,10 +8,13 @@ import { apiClient } from '../../config/apiClient';
 import LearningMetricsOverview from './components/LearningMetricsOverview';
 import PolicyVisualization from './components/PolicyVisualization';
 import ExplorationAnalytics from './components/ExplorationAnalytics';
+import BatchProcessingSettings from './components/BatchProcessingSettings';
 import ManualControls from './components/ManualControls';
 import AlertPanel from './components/AlertPanel';
 
 const LearningEngineDashboard = () => {
+  console.log('[LearningEngineDashboard] Component initialized');
+
   const [selectedClient, setSelectedClient] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [policies, setPolicies] = useState([]);
@@ -20,31 +23,57 @@ const LearningEngineDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [realtimeData, setRealtimeData] = useState(null);
 
+  console.log('[LearningEngineDashboard] State initialized:', {
+    selectedClient,
+    loading,
+    error,
+    activeTab
+  });
+
   // Fetch initial data when client is selected
   useEffect(() => {
+    console.log('[LearningEngineDashboard] useEffect triggered, selectedClient:', selectedClient);
     if (selectedClient) {
+      console.log('[LearningEngineDashboard] Client selected, fetching data...');
       fetchDashboardData();
       setupRealtimeUpdates();
+    } else {
+      console.log('[LearningEngineDashboard] No client selected, setting loading to false');
+      setLoading(false);
     }
   }, [selectedClient]);
 
   const fetchDashboardData = async () => {
-    if (!selectedClient) return;
+    console.log('[LearningEngineDashboard] fetchDashboardData called, selectedClient:', selectedClient);
+    if (!selectedClient) {
+      console.log('[LearningEngineDashboard] No selectedClient, returning early');
+      return;
+    }
 
     try {
+      console.log('[LearningEngineDashboard] Setting loading to true');
       setLoading(true);
+
+      console.log('[LearningEngineDashboard] Making API calls...');
       const [metricsResponse, policiesResponse] = await Promise.all([
         apiClient.get(`/api/admin/learning/metrics/${selectedClient.client_id}`),
         apiClient.get(`/api/admin/learning/policies/${selectedClient.client_id}`)
       ]);
 
+      console.log('[LearningEngineDashboard] API responses received:', {
+        metricsResponse: metricsResponse.data,
+        policiesResponse: policiesResponse.data
+      });
+
       setMetrics(metricsResponse.data);
       setPolicies(policiesResponse.data.policies || []);
       setError(null);
+      console.log('[LearningEngineDashboard] Data set successfully');
     } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
+      console.error('[LearningEngineDashboard] Failed to fetch dashboard data:', err);
       setError('Failed to load dashboard data');
     } finally {
+      console.log('[LearningEngineDashboard] Setting loading to false');
       setLoading(false);
     }
   };
@@ -53,7 +82,9 @@ const LearningEngineDashboard = () => {
     if (!selectedClient) return;
 
     // Set up Server-Sent Events for real-time updates
-    const eventSource = new EventSource(`/api/analytics/stream/learning/${selectedClient.client_id}`);
+    // Use the full backend URL for EventSource since it needs to connect to the backend directly
+    const backendUrl = 'http://localhost:3007'; // Backend runs on port 3007
+    const eventSource = new EventSource(`${backendUrl}/api/analytics/stream/learning/${selectedClient.client_id}`);
 
     eventSource.onmessage = (event) => {
       try {
@@ -89,21 +120,25 @@ const LearningEngineDashboard = () => {
   };
 
   const handleClientChange = (client) => {
+    console.log('[LearningEngineDashboard] handleClientChange called with client:', client);
     setSelectedClient(client);
     setMetrics(null);
     setPolicies([]);
     setRealtimeData(null);
     setError(null);
+    console.log('[LearningEngineDashboard] State reset for new client');
   };
 
   const tabs = [
     { id: 'overview', label: 'Overview', component: LearningMetricsOverview },
     { id: 'policies', label: 'Policies', component: PolicyVisualization },
     { id: 'exploration', label: 'Exploration', component: ExplorationAnalytics },
+    { id: 'batch-settings', label: 'Batch Settings', component: BatchProcessingSettings },
     { id: 'controls', label: 'Controls', component: ManualControls }
   ];
 
   if (loading) {
+    console.log('[LearningEngineDashboard] Rendering loading state');
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -183,6 +218,7 @@ const LearningEngineDashboard = () => {
               <div className="bg-white shadow rounded-lg">
                 {ActiveComponent && (
                   <ActiveComponent
+                    clientId={selectedClient?.client_id}
                     metrics={metrics}
                     policies={policies}
                     realtimeData={realtimeData}

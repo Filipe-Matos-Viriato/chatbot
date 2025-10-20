@@ -2,16 +2,53 @@
 // Administrative control panel for manual learning engine management and parameter tuning
 // Provides retraining triggers, parameter controls, and system management capabilities
 // LearningEngineDashboard.jsx, real-time-learning-engine.js, apiClient.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { apiClient } from '../../../config/apiClient';
 
-const ManualControls = ({ onRetraining, metrics }) => {
+const ManualControls = ({ onRetraining, metrics, clientId }) => {
   const [retrainingStatus, setRetrainingStatus] = useState('idle');
+
+  // Helper function to get client-specific storage key
+  const getStorageKey = (clientId) => `learning-engine-enabled-${clientId}`;
+
+  // Helper function to safely load from localStorage
+  const loadPersistedState = (clientId, fallback) => {
+    if (!clientId) return fallback;
+    try {
+      const key = getStorageKey(clientId);
+      const stored = localStorage.getItem(key);
+      return stored !== null ? JSON.parse(stored) : fallback;
+    } catch (error) {
+      console.warn('Failed to load learning engine state from localStorage:', error);
+      return fallback;
+    }
+  };
+
+  const [learningEnabled, setLearningEnabled] = useState(() => {
+    // Initialize from localStorage, fallback to true (default enabled)
+    return loadPersistedState(clientId, true);
+  });
   const [parameterUpdates, setParameterUpdates] = useState({
     adaptationRate: metrics?.adaptationRate || 0.1,
     explorationRate: metrics?.explorationRate || 0.1,
     confidenceThreshold: metrics?.confidenceThreshold || 0.8
   });
+
+  // Update parameter values when metrics change (but don't override persisted learning state)
+  useEffect(() => {
+    if (metrics) {
+      setParameterUpdates({
+        adaptationRate: metrics.adaptationRate || 0.1,
+        explorationRate: metrics.explorationRate || 0.1,
+        confidenceThreshold: metrics.confidenceThreshold || 0.8
+      });
+      // Only update learning enabled if we don't have a persisted state
+      const persistedState = loadPersistedState(clientId, null);
+      if (persistedState === null) {
+        setLearningEnabled(metrics.learningEnabled ?? true);
+      }
+    }
+  }, [metrics, clientId]);
   const [updateStatus, setUpdateStatus] = useState('idle');
 
   const handleRetraining = async () => {
@@ -30,10 +67,13 @@ const ManualControls = ({ onRetraining, metrics }) => {
   const handleParameterUpdate = async () => {
     setUpdateStatus('running');
     try {
-      // In real implementation, this would call an API to update parameters
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
-      setUpdateStatus('success');
-      setTimeout(() => setUpdateStatus('idle'), 3000);
+      // TODO: Implement real API call to update learning engine parameters
+      // This would call a backend endpoint to update the RealTimeLearningEngine configuration
+      console.log('Parameter update requested:', parameterUpdates);
+
+      // For now, show that the update is not implemented
+      setUpdateStatus('error');
+      setTimeout(() => setUpdateStatus('idle'), 5000);
     } catch (error) {
       console.error('Parameter update failed:', error);
       setUpdateStatus('error');
@@ -47,6 +87,28 @@ const ManualControls = ({ onRetraining, metrics }) => {
       explorationRate: 0.1,
       confidenceThreshold: 0.8
     });
+  };
+
+  const handleLearningEngineToggle = async () => {
+    const newState = !learningEnabled;
+    try {
+      // TODO: Implement real API call to toggle learning engine
+      // This would call a backend endpoint to enable/disable the RealTimeLearningEngine
+      console.log('Learning engine toggle requested:', newState);
+
+      // Update local state and persist to localStorage with error handling
+      setLearningEnabled(newState);
+
+      if (clientId) {
+        const key = getStorageKey(clientId);
+        localStorage.setItem(key, JSON.stringify(newState));
+      } else {
+        console.warn('Cannot persist learning engine state: clientId not provided');
+      }
+    } catch (error) {
+      console.error('Failed to persist learning engine state:', error);
+      // State is still updated locally, but persistence failed
+    }
   };
 
   const RetrainingSection = () => (
@@ -121,9 +183,18 @@ const ManualControls = ({ onRetraining, metrics }) => {
 
       <div className="space-y-6">
         {/* Adaptation Rate */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+        <div className="relative group">
+          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
             Adaptation Rate: {(parameterUpdates.adaptationRate * 100).toFixed(1)}%
+            <div className="ml-2">
+              <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+                Controls how quickly the learning engine adapts to new data.<br />Higher values (faster learning) may cause instability,<br />lower values provide more stable but slower adaptation.
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+              </div>
+            </div>
           </label>
           <input
             type="range"
@@ -147,9 +218,18 @@ const ManualControls = ({ onRetraining, metrics }) => {
         </div>
 
         {/* Exploration Rate */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+        <div className="relative group">
+          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
             Exploration Rate: {(parameterUpdates.explorationRate * 100).toFixed(1)}%
+            <div className="ml-2">
+              <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+                Percentage of decisions that explore new models instead of using known good ones.<br />Higher exploration finds better models but may reduce short-term performance.
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+              </div>
+            </div>
           </label>
           <input
             type="range"
@@ -173,9 +253,18 @@ const ManualControls = ({ onRetraining, metrics }) => {
         </div>
 
         {/* Confidence Threshold */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+        <div className="relative group">
+          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
             Confidence Threshold: {(parameterUpdates.confidenceThreshold * 100).toFixed(1)}%
+            <div className="ml-2">
+              <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+              </svg>
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+                Minimum confidence level required before applying learned policies.<br />Higher thresholds ensure reliability but may reduce learning opportunities.
+                <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+              </div>
+            </div>
           </label>
           <input
             type="range"
@@ -249,17 +338,18 @@ const ManualControls = ({ onRetraining, metrics }) => {
           </div>
           <div className="flex items-center">
             <span className="text-sm text-gray-500 mr-3">
-              {metrics?.learningEnabled ? 'Enabled' : 'Disabled'}
+              {learningEnabled ? 'Enabled' : 'Disabled'}
             </span>
             <button
               type="button"
+              onClick={handleLearningEngineToggle}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${
-                metrics?.learningEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                learningEnabled ? 'bg-blue-600' : 'bg-gray-200'
               }`}
             >
               <span
                 className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                  metrics?.learningEnabled ? 'translate-x-5' : 'translate-x-0'
+                  learningEnabled ? 'translate-x-5' : 'translate-x-0'
                 }`}
               />
             </button>

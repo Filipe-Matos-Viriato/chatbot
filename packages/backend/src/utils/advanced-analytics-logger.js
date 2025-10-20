@@ -1,6 +1,6 @@
 /**
  * Advanced Analytics Logger for Client-Specific LLM Analytics Dashboard
- * Provides comprehensive metric collection, real-time aggregation, and client-specific data partitioning
+ * Event-driven batch processing with comprehensive metric collection and client-specific data partitioning
  */
 
 import supabase from '../config/supabase.js';
@@ -11,27 +11,36 @@ class AdvancedAnalyticsLogger extends EventEmitter {
     super();
     this.enabled = String(process.env.RAG_ANALYTICS_LOGGING_ENABLED || 'true') === 'true';
     this.aggregationInterval = parseInt(process.env.ANALYTICS_AGGREGATION_INTERVAL || '300000'); // 5 minutes default
+     this.batchTriggerThreshold = parseInt(process.env.ANALYTICS_BATCH_THRESHOLD || '50'); // Process batch when 50 records
+    this.batchTriggerThreshold = parseInt(process.env.ANALYTICS_BATCH_THRESHOLD || '50'); // Process batch when 50 records
     this.clientMetrics = new Map(); // In-memory cache for real-time metrics
     this.aggregationTimer = null;
+    this.pendingRecords = []; // Queue for batch processing
+    this.isProcessingBatch = false;
 
-    // Start real-time aggregation if enabled
+    // Start event-driven aggregation if enabled
     if (this.enabled) {
-      this.startRealTimeAggregation();
+      this.startEventDrivenAggregation();
     }
   }
 
   /**
-   * Start real-time aggregation pipeline
+   * Start event-driven aggregation pipeline
    */
-  startRealTimeAggregation() {
-    console.log('[AdvancedAnalyticsLogger] Starting real-time aggregation pipeline');
+  startEventDrivenAggregation() {
+    console.log('[AdvancedAnalyticsLogger] Starting event-driven aggregation pipeline');
 
-    // Aggregate metrics every 5 minutes
+    // Set up periodic check for batch processing (less frequent than continuous)
     this.aggregationTimer = setInterval(async () => {
       try {
+        // Only process if we have pending records and not already processing
+        if (this.pendingRecords.length > 0 && !this.isProcessingBatch) {
+          await this.processBatch();
+        }
+        // Still do periodic aggregation for any remaining data
         await this.aggregateClientMetrics();
       } catch (error) {
-        console.error('[AdvancedAnalyticsLogger] Error in real-time aggregation:', error);
+        console.error('[AdvancedAnalyticsLogger] Error in event-driven aggregation:', error);
       }
     }, this.aggregationInterval);
 
@@ -39,13 +48,13 @@ class AdvancedAnalyticsLogger extends EventEmitter {
     process.on('SIGINT', () => {
       if (this.aggregationTimer) {
         clearInterval(this.aggregationTimer);
-        console.log('[AdvancedAnalyticsLogger] Real-time aggregation stopped');
+        console.log('[AdvancedAnalyticsLogger] Event-driven aggregation stopped');
       }
     });
   }
 
   /**
-   * Log comprehensive model selection analytics
+   * Log comprehensive model selection analytics (event-driven batch processing)
    * @param {Object} analyticsData - Enhanced analytics data
    */
   async logModelSelection(analyticsData) {
@@ -100,21 +109,21 @@ class AdvancedAnalyticsLogger extends EventEmitter {
         created_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
-        .from('chat_message_analytics')
-        .insert(analyticsRecord);
+      // Add to pending records queue instead of immediate database insert
+      this.pendingRecords.push(analyticsRecord);
 
-      if (error) {
-        console.error('[AdvancedAnalyticsLogger] Failed to log analytics:', error);
-      } else {
-        console.log(`[AdvancedAnalyticsLogger] ✅ Logged enhanced analytics for message ${chatMessageId}`);
+      // Update real-time metrics cache immediately
+      this.updateClientMetricsCache(clientId, analyticsRecord);
 
-        // Update real-time metrics cache
-        this.updateClientMetricsCache(clientId, analyticsRecord);
+      // Emit event for real-time updates
+      this.emit('analyticsLogged', { clientId, analytics: analyticsRecord });
 
-        // Emit event for real-time updates
-        this.emit('analyticsLogged', { clientId, analytics: analyticsRecord });
+      // Check if we should trigger batch processing
+      if (this.pendingRecords.length >= this.batchTriggerThreshold) {
+        this.triggerBatchProcessing();
       }
+
+      console.log(`[AdvancedAnalyticsLogger] ✅ Queued analytics for message ${chatMessageId} (${this.pendingRecords.length} pending)`);
 
     } catch (error) {
       console.error('[AdvancedAnalyticsLogger] Error logging analytics:', error);
@@ -156,6 +165,56 @@ class AdvancedAnalyticsLogger extends EventEmitter {
     const hourStats = clientStats.hourlyStats.get(hour);
     hourStats.requests++;
     hourStats.cost += analyticsRecord.actual_cost || 0;
+  }
+
+  /**
+   * Process pending records in batches
+   */
+  async processBatch() {
+    if (this.isProcessingBatch || this.pendingRecords.length === 0) return;
+
+    this.isProcessingBatch = true;
+    const batchSize = Math.min(this.pendingRecords.length, 100); // Process up to 100 records at a time
+    const batch = this.pendingRecords.splice(0, batchSize);
+
+    try {
+      console.log(`[AdvancedAnalyticsLogger] Processing batch of ${batch.length} analytics records`);
+
+      // Insert batch to database
+      const { error } = await supabase
+        .from('chat_message_analytics')
+        .insert(batch);
+
+      if (error) {
+        console.error('[AdvancedAnalyticsLogger] Failed to insert analytics batch:', error);
+        // Re-queue failed records
+        this.pendingRecords.unshift(...batch);
+      } else {
+        console.log(`[AdvancedAnalyticsLogger] ✅ Processed batch of ${batch.length} analytics records`);
+
+        // Emit batch processed event
+        this.emit('batchProcessed', {
+          batchSize,
+          remaining: this.pendingRecords.length,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('[AdvancedAnalyticsLogger] Error processing analytics batch:', error);
+      // Re-queue failed records
+      this.pendingRecords.unshift(...batch);
+    } finally {
+      this.isProcessingBatch = false;
+    }
+  }
+
+  /**
+   * Trigger batch processing manually
+   */
+  triggerBatchProcessing() {
+    if (!this.isProcessingBatch && this.pendingRecords.length > 0) {
+      this.processBatch();
+    }
   }
 
   /**
@@ -369,14 +428,50 @@ class AdvancedAnalyticsLogger extends EventEmitter {
   }
 
   /**
+   * Process any remaining pending records before shutdown
+   */
+  async flushPendingRecords() {
+    if (this.pendingRecords.length > 0) {
+      console.log(`[AdvancedAnalyticsLogger] Flushing ${this.pendingRecords.length} pending records before shutdown`);
+      while (this.pendingRecords.length > 0) {
+        await this.processBatch();
+      }
+    }
+  }
+
+  /**
    * Stop the analytics logger and clean up resources
    */
-  stop() {
+  async stop() {
+    console.log('[AdvancedAnalyticsLogger] Stopping analytics logger...');
+
+    // Flush any pending records
+    await this.flushPendingRecords();
+
+    // Clear aggregation timer
     if (this.aggregationTimer) {
       clearInterval(this.aggregationTimer);
       this.aggregationTimer = null;
-      console.log('[AdvancedAnalyticsLogger] Analytics logger stopped');
     }
+
+    // Clear pending records to free memory
+    this.pendingRecords = [];
+
+    console.log('[AdvancedAnalyticsLogger] Analytics logger stopped and cleaned up');
+  }
+
+  /**
+   * Get current status of the analytics logger
+   */
+  getStatus() {
+    return {
+      enabled: this.enabled,
+      pendingRecords: this.pendingRecords.length,
+      isProcessingBatch: this.isProcessingBatch,
+      batchTriggerThreshold: this.batchTriggerThreshold,
+      aggregationInterval: this.aggregationInterval,
+      activeClients: this.clientMetrics.size
+    };
   }
 }
 

@@ -1,22 +1,23 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import VisitorSessionManager from '../visitorSessionManager';
 
 // Mock localStorage
 const localStorageMock = {
-  getItem: jest.fn(),
-  setItem: jest.fn(),
-  removeItem: jest.fn(),
-  clear: jest.fn(),
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn(),
 };
 global.localStorage = localStorageMock;
 
 // Mock fetch
-global.fetch = jest.fn();
+global.fetch = vi.fn();
 
 describe('VisitorSessionManager', () => {
   let manager;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     manager = new VisitorSessionManager('test-client', 'http://api.test');
   });
 
@@ -43,20 +44,7 @@ describe('VisitorSessionManager', () => {
       );
     });
 
-    it('should create new session when none exists', async () => {
-      localStorageMock.getItem.mockReturnValue(null);
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ visitor_id: 'new-visitor-123' })
-      });
-
-      const session = await manager.getOrCreateSession();
-
-      expect(session.visitorId).toBe('new-visitor-123');
-      expect(localStorageMock.setItem).toHaveBeenCalled();
-    });
-
-    it('should handle session validation failure', async () => {
+    it('should handle session validation failure gracefully', async () => {
       const existingSession = {
         visitorId: 'visitor-123',
         sessionId: 'session-456',
@@ -73,6 +61,17 @@ describe('VisitorSessionManager', () => {
       const session = await manager.getOrCreateSession();
 
       expect(session.visitorId).toBe('fallback-visitor-456');
+      expect(session.sessionId).toMatch(/^session_/);
+      expect(typeof session.createdAt).toBe('number');
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(global.fetch).toHaveBeenNthCalledWith(1, 'http://api.test/v1/visitor', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ visitorId: 'visitor-123' })
+      }));
+      expect(global.fetch).toHaveBeenNthCalledWith(2, 'http://api.test/v1/sessions', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ clientId: 'test-client' })
+      }));
     });
   });
 
@@ -98,6 +97,79 @@ describe('VisitorSessionManager', () => {
       localStorageMock.getItem.mockReturnValue(JSON.stringify(expiredSession));
 
       expect(manager.loadSession()).toBeNull();
+      expect(localStorageMock.removeItem).toHaveBeenCalledWith('visitor_session_test-client');
+    });
+  });
+
+  describe('validateSession', () => {
+    it('should return true for valid session', async () => {
+      global.fetch.mockResolvedValueOnce({ ok: true });
+
+      const isValid = await manager.validateSession({ visitorId: 'visitor-123' });
+
+      expect(isValid).toBe(true);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'http://api.test/v1/visitor',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ visitorId: 'visitor-123' })
+        })
+      );
+    });
+
+    it('should return false for invalid session', async () => {
+      global.fetch.mockResolvedValueOnce({ ok: false });
+
+      const isValid = await manager.validateSession({ visitorId: 'visitor-123' });
+
+      expect(isValid).toBe(false);
+    });
+
+    it('should handle network errors gracefully', async () => {
+      global.fetch.mockRejectedValueOnce(new Error('Network error'));
+
+      const isValid = await manager.validateSession({ visitorId: 'visitor-123' });
+
+      expect(isValid).toBe(false);
+    });
+  });
+
+  describe('createNewSession', () => {
+    it('should create new session successfully', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ visitor_id: 'new-visitor-123' })
+      });
+
+      const session = await manager.createNewSession();
+
+      expect(session.visitorId).toBe('new-visitor-123');
+      expect(session.sessionId).toMatch(/^session_/);
+      expect(typeof session.createdAt).toBe('number');
+    });
+
+    it('should throw error on API failure', async () => {
+      global.fetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+      await expect(manager.createNewSession()).rejects.toThrow('Failed to create session: 500');
+    });
+  });
+
+  describe('saveSession and clearSession', () => {
+    it('should save session to localStorage', () => {
+      const session = { visitorId: 'test', sessionId: 'session-123' };
+
+      manager.saveSession(session);
+
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        'visitor_session_test-client',
+        expect.stringContaining('"visitorId":"test"')
+      );
+    });
+
+    it('should clear session from localStorage', () => {
+      manager.clearSession();
+
       expect(localStorageMock.removeItem).toHaveBeenCalledWith('visitor_session_test-client');
     });
   });

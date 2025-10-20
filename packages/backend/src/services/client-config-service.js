@@ -1,16 +1,16 @@
 // packages/backend/src/services/client-config-service.js
-// Service for managing client-specific configurations stored in Supabase with caching.
+// Service for managing client-specific configurations stored in Supabase with lazy loading and caching.
 // To provide dynamic, database-driven configuration management for multi-tenant chatbot system.
 // Relevant files: index.js, config/supabase.js
 import supabase from '../config/supabase.js';
 import NodeCache from 'node-cache';
 
 // Initialize cache with a standard TTL of 15 minutes (900 seconds)
-const configCache = new NodeCache({ stdTTL: 900 });
+const configCache = new NodeCache({ stdTTL: 900, checkperiod: 60 }); // Check for expired keys every minute
 
 /**
- * Loads the configuration for a specific client from the database.
- * It uses a cache to avoid repeated database calls.
+ * Loads the configuration for a specific client from the database with lazy loading.
+ * It uses a cache to avoid repeated database calls and implements lazy initialization.
  * @param {string} clientId The ID of the client to load configuration for.
  * @returns {Promise<object>} A promise that resolves to the client's configuration object.
  */

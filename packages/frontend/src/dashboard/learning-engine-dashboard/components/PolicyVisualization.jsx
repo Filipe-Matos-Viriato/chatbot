@@ -24,7 +24,18 @@ const PolicyVisualization = ({ policies, metrics }) => {
 
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Policy Heatmap</h3>
+        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+          Policy Heatmap
+          <div className="ml-2 relative group">
+            <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+              Visual representation of learned policies across query complexity levels.<br />Darker cells indicate higher model weights for specific complexity ranges.
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+            </div>
+          </div>
+        </h3>
         <div className="overflow-x-auto">
           <div className="min-w-full">
             {/* Header */}
@@ -54,7 +65,7 @@ const PolicyVisualization = ({ policies, metrics }) => {
                     return (
                       <div
                         key={model}
-                        className="flex-1 p-2 text-center cursor-pointer hover:bg-gray-100"
+                        className="flex-1 p-2 text-center cursor-pointer hover:bg-gray-100 relative group"
                         onClick={() => setSelectedComplexity(parseFloat(complexity))}
                       >
                         <div
@@ -68,6 +79,12 @@ const PolicyVisualization = ({ policies, metrics }) => {
                         >
                           {weight > 0 ? (weight * 100).toFixed(0) : '-'}
                         </div>
+                        {weight > 0 && (
+                          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max break-words">
+                            {model}: {(weight * 100).toFixed(0)}% weight, {(confidence * 100).toFixed(0)}% confidence
+                            <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -191,7 +208,18 @@ const PolicyVisualization = ({ policies, metrics }) => {
     // Simple 3D-like visualization using CSS transforms
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Confidence Landscape</h3>
+        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+          Confidence Landscape
+          <div className="ml-2 relative group">
+            <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10 max-w-xs">
+              3D visualization of policy confidence across complexity levels.<br />Each dot represents a learned policy, positioned by complexity (X-axis) and confidence (Y-axis).<br />Larger dots indicate more training samples.
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+            </div>
+          </div>
+        </h3>
         <div className="relative h-64 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg overflow-hidden">
           {policies.map((policy, index) => {
             const x = (policy.complexityLevel * 100) - 10; // Position based on complexity
@@ -201,15 +229,19 @@ const PolicyVisualization = ({ policies, metrics }) => {
             return (
               <div
                 key={index}
-                className="absolute w-3 h-3 bg-blue-600 rounded-full transform -translate-x-1/2 -translate-y-1/2"
+                className="absolute w-3 h-3 bg-blue-600 rounded-full transform -translate-x-1/2 -translate-y-1/2 cursor-pointer relative group"
                 style={{
                   left: `${x}%`,
                   top: `${y}%`,
                   width: `${size}px`,
                   height: `${size}px`,
                 }}
-                title={`Complexity: ${policy.complexityLevel.toFixed(2)}, Confidence: ${(policy.confidence * 100).toFixed(1)}%`}
-              ></div>
+              >
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max break-words">
+                  Complexity: {policy.complexityLevel.toFixed(2)}, Confidence: {(policy.confidence * 100).toFixed(1)}%, Samples: {policy.sampleSize}
+                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                </div>
+              </div>
             );
           })}
 

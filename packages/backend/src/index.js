@@ -34,6 +34,7 @@ import userService from './services/user-service.js';
 import unansweredQuestionService from './services/unanswered_question_service.js';
 import communicationService from './services/communication_service.js';
 import analyticsDashboardService from './services/analytics-dashboard-service.js';
+import RealTimeLearningEngine from './utils/real-time-learning-engine.js';
 import { extractListingIdFromUrl as parseListingFromUrl, extractListingIdFromQuery as parseListingFromQuery } from './utils/rag-parsing.js';
 import scoreDecayScheduler from './schedulers/score-decay-scheduler.js';
 
@@ -2231,6 +2232,48 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     }
   });
 
+  // API endpoint to validate visitor session
+  app.post('/v1/visitor', async (req, res) => {
+    try {
+      const { visitorId } = req.body;
+
+      if (!visitorId) {
+        return res.status(400).json({ error: 'visitorId is required' });
+      }
+
+      // Check if visitor exists
+      const { data, error } = await supabase
+        .from('visitors')
+        .select('visitor_id')
+        .eq('visitor_id', visitorId)
+        .single();
+
+      if (error || !data) {
+        return res.status(404).json({ error: 'Visitor not found' });
+      }
+
+      res.json({ valid: true, visitor_id: data.visitor_id });
+    } catch (error) {
+      console.error('Error validating visitor:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // API endpoint to save visitor onboarding data
+  app.post('/v1/visitors/:visitorId/onboarding', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { visitorId } = req.params;
+      const { clientConfig } = req;
+      const onboardingPayload = req.body;
+
+      const result = await visitorService.saveOnboarding(visitorId, clientConfig.clientId, onboardingPayload);
+      res.json(result);
+    } catch (error) {
+      console.error('Error saving onboarding:', error);
+      res.status(500).json({ error: 'Failed to save onboarding.' });
+    }
+  });
+
   // API endpoint to get chat history for a specific visitor
   app.get('/v1/chat-history/:visitorId', clientConfigMiddleware(clientConfigService), async (req, res) => {
     try {
@@ -2444,6 +2487,230 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
       res.status(500).json({ error: 'Failed to improve reply.' });
     }
   });
+  // API endpoints for Batch Processing Settings Management
+
+  // API endpoint to get batch settings for a client
+  app.get('/api/admin/batch-settings/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { clientConfig } = req;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client batch settings.' });
+      }
+
+      console.log(`[Batch Settings API] Fetching batch settings for client: ${clientId}`);
+
+      const batchSettingsService = (await import('./services/batch-settings-service.js')).default;
+      const settings = await batchSettingsService.getAllBatchSettings(clientId);
+
+      res.json({ settings });
+    } catch (error) {
+      console.error(`Error fetching batch settings for client ${req.params.clientId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch batch settings.' });
+    }
+  });
+
+  // API endpoint to update batch settings for a client
+  app.put('/api/admin/batch-settings/:clientId/:systemName', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId, systemName } = req.params;
+      const { clientConfig } = req;
+      const { batch_trigger_threshold, description, is_active } = req.body;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client batch settings.' });
+      }
+
+      // Validate system name
+      if (!['learning_engine', 'analytics_logger'].includes(systemName)) {
+        return res.status(400).json({ error: 'Invalid system name. Must be "learning_engine" or "analytics_logger".' });
+      }
+
+      console.log(`[Batch Settings API] Updating ${systemName} settings for client: ${clientId}`);
+
+      const batchSettingsService = (await import('./services/batch-settings-service.js')).default;
+      const settings = await batchSettingsService.upsertBatchSettings(
+        clientId,
+        systemName,
+        { batch_trigger_threshold, description, is_active },
+        req.userContext?.userId || 'system'
+      );
+
+      res.json({ success: true, settings });
+    } catch (error) {
+      console.error(`Error updating batch settings for client ${req.params.clientId}:`, error);
+      if (error.message.includes('batch_trigger_threshold must be')) {
+        res.status(400).json({ error: error.message });
+      } else {
+        res.status(500).json({ error: 'Failed to update batch settings.' });
+      }
+    }
+  });
+
+  // API endpoint to get batch trigger threshold for a system (used by batch processors)
+  app.get('/api/internal/batch-threshold/:clientId/:systemName', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId, systemName } = req.params;
+      const { clientConfig } = req;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client batch settings.' });
+      }
+
+      // Validate system name
+      if (!['learning_engine', 'analytics_logger'].includes(systemName)) {
+        return res.status(400).json({ error: 'Invalid system name. Must be "learning_engine" or "analytics_logger".' });
+      }
+
+      const batchSettingsService = (await import('./services/batch-settings-service.js')).default;
+      const threshold = await batchSettingsService.getBatchTriggerThreshold(clientId, systemName);
+
+      res.json({ threshold });
+    } catch (error) {
+      console.error(`Error fetching batch threshold for client ${req.params.clientId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch batch threshold.' });
+    }
+  });
+
+  // Initialize learning engine instance with lazy loading
+  let learningEngineInstance = null;
+  let analyticsLoggerInstance = null;
+  
+  const getLearningEngine = () => {
+    if (!learningEngineInstance) {
+      console.log('[Server] Lazy initializing RealTimeLearningEngine');
+      learningEngineInstance = new RealTimeLearningEngine();
+    }
+    return learningEngineInstance;
+  };
+  
+  const getAnalyticsLogger = () => {
+    if (!analyticsLoggerInstance) {
+      console.log('[Server] Lazy initializing AdvancedAnalyticsLogger');
+      // Import synchronously since we're in a CommonJS context
+      const { default: AdvancedAnalyticsLogger } = require('./utils/advanced-analytics-logger.js');
+      analyticsLoggerInstance = new AdvancedAnalyticsLogger();
+    }
+    return analyticsLoggerInstance;
+  };
+
+  // API endpoints for Learning Engine Dashboard
+
+  // API endpoint to get learning metrics for a client
+  app.get('/api/admin/learning/metrics/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const learningEngine = getLearningEngine();
+
+      const metrics = await learningEngine.getMetrics();
+
+      // Add client-specific data
+      const enhancedMetrics = {
+        ...metrics,
+        clientId,
+        lastRetraining: metrics.lastRetraining ? new Date(metrics.lastRetraining).toISOString() : null
+      };
+
+      res.json(enhancedMetrics);
+    } catch (error) {
+      console.error('Error fetching learning metrics:', error);
+      res.status(500).json({ error: 'Failed to fetch learning metrics.' });
+    }
+  });
+
+  // API endpoint to get learning policies for a client
+  app.get('/api/admin/learning/policies/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const learningEngine = getLearningEngine();
+
+      const policies = learningEngine.getPolicies();
+
+      res.json({ policies, clientId });
+    } catch (error) {
+      console.error('Error fetching learning policies:', error);
+      res.status(500).json({ error: 'Failed to fetch learning policies.' });
+    }
+  });
+
+  // API endpoint to trigger manual retraining
+  app.post('/api/admin/learning/retrain/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const learningEngine = getLearningEngine();
+
+      const result = await learningEngine.manualRetrain();
+
+      res.json({
+        success: true,
+        message: 'Retraining triggered successfully',
+        timestamp: result.timestamp,
+        clientId
+      });
+    } catch (error) {
+      console.error('Error triggering retraining:', error);
+      res.status(500).json({ error: 'Failed to trigger retraining.' });
+    }
+  });
+
+  // Server-Sent Events endpoint for real-time learning updates
+  app.get('/api/analytics/stream/learning/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+
+      // Set headers for Server-Sent Events
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control'
+      });
+
+      // Send initial connection message
+      res.write(`data: ${JSON.stringify({ type: 'connected', clientId })}\n\n`);
+
+      // Set up periodic updates (every 30 seconds)
+      const interval = setInterval(async () => {
+        try {
+          const learningEngine = getLearningEngine();
+          const metrics = await learningEngine.getMetrics();
+
+          const updateData = {
+            type: 'metrics_update',
+            clientId,
+            metrics: {
+              signalQuality: metrics.signalQuality,
+              learningSpeed: metrics.learningSpeed,
+              explorationRate: metrics.explorationRate,
+              policyConfidence: metrics.policyConfidence,
+              activePolicies: metrics.activePolicies,
+              totalSignals: metrics.totalSignals,
+              timestamp: new Date().toISOString()
+            }
+          };
+
+          res.write(`data: ${JSON.stringify(updateData)}\n\n`);
+        } catch (error) {
+          console.error('Error sending real-time update:', error);
+        }
+      }, 30000); // 30 seconds
+
+      // Clean up on client disconnect
+      req.on('close', () => {
+        clearInterval(interval);
+        res.end();
+      });
+
+    } catch (error) {
+      console.error('Error setting up learning stream:', error);
+      res.status(500).json({ error: 'Failed to setup learning stream.' });
+    }
+  });
 
   // Global error handler to catch JSON parsing errors
   app.use((err, req, res, next) => {
@@ -2457,6 +2724,38 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
 
   return app;
 };
+
+// Graceful shutdown handler
+const gracefulShutdown = async (signal) => {
+  console.log(`[Server] Received ${signal}, initiating graceful shutdown...`);
+
+  try {
+    // Stop learning engine
+    if (learningEngineInstance) {
+      learningEngineInstance.shutdown();
+    }
+
+    // Stop analytics logger
+    if (analyticsLoggerInstance) {
+      await analyticsLoggerInstance.stop();
+    }
+
+    // Stop score decay scheduler
+    if (scoreDecayScheduler) {
+      scoreDecayScheduler.stop();
+    }
+
+    console.log('[Server] Graceful shutdown completed');
+    process.exit(0);
+  } catch (error) {
+    console.error('[Server] Error during graceful shutdown:', error);
+    process.exit(1);
+  }
+};
+
+// Register shutdown handlers
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Start the server if this file is run directly
 console.log(`[DEBUG] process.argv[1]: ${process.argv[1]}`);

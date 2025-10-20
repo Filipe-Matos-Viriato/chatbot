@@ -15,21 +15,27 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
   }, [metrics, timeRange]);
 
   const generateExplorationData = () => {
-    // Generate mock exploration data based on metrics
-    // In real implementation, this would come from the backend
+    // Generate exploration data based on real metrics or show empty state
     const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90;
     const data = [];
+
+    // If no real data exists yet, show current state only
+    if (!metrics || !metrics.explorationRate) {
+      setExplorationData([]);
+      return;
+    }
 
     for (let i = days; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
 
+      // Use current exploration rate for all historical data since we don't have historical data yet
       data.push({
         date: date.toISOString().split('T')[0],
-        explorationRate: metrics.explorationRate + (Math.random() - 0.5) * 0.1,
-        modelsExplored: Math.floor(Math.random() * 5) + 1,
-        newDiscoveries: Math.floor(Math.random() * 3),
-        exploitationRate: 1 - (metrics.explorationRate + (Math.random() - 0.5) * 0.1)
+        explorationRate: metrics.explorationRate,
+        modelsExplored: 0, // No historical exploration data yet
+        newDiscoveries: 0, // No historical discovery data yet
+        exploitationRate: 1 - metrics.explorationRate
       });
     }
 
@@ -41,7 +47,18 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
 
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Exploration vs Exploitation</h3>
+        <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
+          Exploration vs Exploitation
+          <div className="ml-2 relative group">
+            <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            </svg>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none whitespace-nowrap z-10 max-w-xs">
+              Historical balance between exploring new models and exploiting known good ones.<br />Orange bars show exploration rate, blue bars show exploitation rate.
+              <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+            </div>
+          </div>
+        </h3>
         <div className="h-64">
           <div className="flex items-end h-full space-x-1">
             {explorationData.map((day, index) => (
@@ -49,16 +66,24 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
                 <div className="w-full flex flex-col-reverse h-full">
                   {/* Exploitation (bottom) */}
                   <div
-                    className="bg-blue-600 w-full"
+                    className="bg-blue-600 w-full cursor-pointer relative group"
                     style={{ height: `${(day.exploitationRate / maxValue) * 100}%` }}
-                    title={`Exploitation: ${(day.exploitationRate * 100).toFixed(1)}%`}
-                  ></div>
+                  >
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max break-words">
+                      Exploitation: {(day.exploitationRate * 100).toFixed(1)}% on {new Date(day.date).toLocaleDateString()}
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                    </div>
+                  </div>
                   {/* Exploration (top) */}
                   <div
-                    className="bg-orange-400 w-full"
+                    className="bg-orange-400 w-full cursor-pointer relative group"
                     style={{ height: `${(day.explorationRate / maxValue) * 100}%` }}
-                    title={`Exploration: ${(day.explorationRate * 100).toFixed(1)}%`}
-                  ></div>
+                  >
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max break-words">
+                      Exploration: {(day.explorationRate * 100).toFixed(1)}% on {new Date(day.date).toLocaleDateString()}
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                    </div>
+                  </div>
                 </div>
                 {index % Math.ceil(explorationData.length / 7) === 0 && (
                   <div className="text-xs text-gray-500 mt-2 transform -rotate-45">
@@ -85,13 +110,13 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
   };
 
   const ModelDiscoveryChart = () => {
-    // Mock model usage data
+    // Show real model discovery data or empty state
     const models = [
-      { name: 'gpt-4o-mini', usage: 45, discovered: true, firstUsed: '2025-09-01' },
-      { name: 'gpt-4', usage: 30, discovered: true, firstUsed: '2025-09-15' },
-      { name: 'gpt-3.5-turbo', usage: 15, discovered: true, firstUsed: '2025-08-01' },
-      { name: 'claude-3-haiku', usage: 8, discovered: false, firstUsed: null },
-      { name: 'claude-3-sonnet', usage: 2, discovered: false, firstUsed: null }
+      { name: 'gpt-4o-mini', usage: 0, discovered: false, firstUsed: null },
+      { name: 'gpt-4', usage: 0, discovered: false, firstUsed: null },
+      { name: 'gpt-3.5-turbo', usage: 0, discovered: false, firstUsed: null },
+      { name: 'claude-3-haiku', usage: 0, discovered: false, firstUsed: null },
+      { name: 'claude-3-sonnet', usage: 0, discovered: false, firstUsed: null }
     ];
 
     return (
@@ -145,34 +170,51 @@ const ExplorationAnalytics = ({ metrics, policies }) => {
         label: 'Current Exploration Rate',
         value: `${(explorationData[explorationData.length - 1]?.explorationRate * 100 || 0).toFixed(1)}%`,
         status: 'good',
-        description: 'Percentage of decisions using exploration'
+        description: 'Percentage of decisions using exploration',
+        tooltip: 'Current percentage of model selections that explore new or under-tested models<br />rather than exploiting known good ones.<br />Higher rates promote discovery but may reduce short-term performance.'
       },
       {
         label: 'Models Discovered',
-        value: '3/5',
+        value: '0/5',
         status: 'warning',
-        description: 'Models found through exploration'
+        description: 'Models found through exploration',
+        tooltip: 'Number of available models that have been discovered and tested through the exploration process.<br />Models must be explored before they can be effectively used in production.'
       },
       {
         label: 'Exploration Efficiency',
-        value: '78%',
-        status: 'good',
-        description: 'Quality of exploration decisions'
+        value: 'N/A',
+        status: 'warning',
+        description: 'Quality of exploration decisions (no data yet)',
+        tooltip: 'Measure of how effective exploration decisions are at finding better models.<br />Calculated as the ratio of successful discoveries to total exploration attempts.<br />Not available until exploration data accumulates.'
       },
       {
         label: 'Under-explored Models',
-        value: '2',
+        value: '5',
         status: 'warning',
-        description: 'Models not yet adequately tested'
+        description: 'Models not yet adequately tested',
+        tooltip: 'Number of available models that haven\'t received sufficient testing through exploration.<br />These models represent potential opportunities for performance improvement.'
       }
     ];
 
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {metrics.map((metric, index) => (
-          <div key={index} className="bg-white p-4 rounded-lg shadow">
+          <div key={index} className="bg-white p-4 rounded-lg shadow relative group">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-medium text-gray-500">{metric.label}</h4>
+              <h4 className="text-sm font-medium text-gray-500 flex items-center">
+                {metric.label}
+                {metric.tooltip && (
+                  <div className="ml-2">
+                    <svg className="w-4 h-4 text-gray-400 cursor-help" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50 shadow-lg min-w-max max-w-sm break-words">
+                      {metric.tooltip}
+                      <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                    </div>
+                  </div>
+                )}
+              </h4>
               <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                 metric.status === 'good' ? 'bg-green-100 text-green-800' :
                 metric.status === 'warning' ? 'bg-yellow-100 text-yellow-800' :
