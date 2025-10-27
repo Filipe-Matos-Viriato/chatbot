@@ -67,6 +67,9 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Define embedding model constant
+const embeddingModel = "text-embedding-3-small";
+
 // Configure multer for in-memory file storage
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -2306,6 +2309,110 @@ const createApp = (dependencies = {}, applyClientConfigMiddleware = true, testMi
     } catch (error) {
       console.error(`Error fetching chat history for visitor ${req.params.visitorId}:`, error);
       res.status(500).json({ error: 'Failed to fetch chat history.' });
+    }
+  });
+
+  // API endpoints for Terminology Management
+  app.get('/api/admin/terminology/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { clientConfig } = req;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client terminology.' });
+      }
+
+      const terminologyManager = (await import('./services/terminology-manager.js')).default;
+      const terminology = await terminologyManager.getClientTerminology(clientId);
+
+      res.json({
+        clientId,
+        terminology: {
+          primaryDialect: terminology.primaryDialect,
+          termMappings: terminology.termMappings,
+          customRules: terminology.customRules,
+          enabled: terminology.enabled
+        }
+      });
+    } catch (error) {
+      console.error(`Error fetching terminology for client ${req.params.clientId}:`, error);
+      res.status(500).json({ error: 'Failed to fetch terminology configuration.' });
+    }
+  });
+
+  app.put('/api/admin/terminology/:clientId', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientId } = req.params;
+      const { clientConfig } = req;
+      const { primaryDialect, termMappings, customRules, enabled } = req.body;
+
+      // Ensure the requested clientId matches the authenticated client's ID
+      if (clientId !== clientConfig.clientId) {
+        return res.status(403).json({ error: 'Unauthorized access to client terminology.' });
+      }
+
+      // Validate input
+      if (primaryDialect && !['european', 'brazilian'].includes(primaryDialect)) {
+        return res.status(400).json({ error: 'primaryDialect must be "european" or "brazilian".' });
+      }
+
+      if (termMappings && !Array.isArray(termMappings)) {
+        return res.status(400).json({ error: 'termMappings must be an array.' });
+      }
+
+      if (customRules && !Array.isArray(customRules)) {
+        return res.status(400).json({ error: 'customRules must be an array.' });
+      }
+
+      const terminologyManager = (await import('./services/terminology-manager.js')).default;
+      const updatedTerminology = await terminologyManager.updateClientTerminology(clientId, {
+        primary_dialect: primaryDialect,
+        term_mappings: termMappings,
+        custom_rules: customRules,
+        enabled: enabled !== false
+      });
+
+      res.json({
+        success: true,
+        terminology: {
+          primaryDialect: updatedTerminology.primaryDialect,
+          termMappings: updatedTerminology.termMappings,
+          customRules: updatedTerminology.customRules,
+          enabled: updatedTerminology.enabled
+        }
+      });
+    } catch (error) {
+      console.error(`Error updating terminology for client ${req.params.clientId}:`, error);
+      res.status(500).json({ error: 'Failed to update terminology configuration.' });
+    }
+  });
+
+  app.post('/api/admin/terminology/test', clientConfigMiddleware(clientConfigService), async (req, res) => {
+    try {
+      const { clientConfig } = req;
+      const { text, context } = req.body;
+
+      if (!text || text.trim().length === 0) {
+        return res.status(400).json({ error: 'Text is required for testing.' });
+      }
+
+      const terminologyManager = (await import('./services/terminology-manager.js')).default;
+      const terminology = await terminologyManager.getClientTerminology(clientConfig.clientId);
+
+      const PostProcessingEngine = (await import('./utils/post-processing-engine.js')).default;
+      const postProcessor = new PostProcessingEngine(terminology);
+      const result = postProcessor.testReplacement(text, context);
+
+      res.json({
+        originalText: result.originalText,
+        localizedText: result.localizedText,
+        termsReplaced: result.termsReplaced,
+        processingTimeMs: result.processingTimeMs
+      });
+    } catch (error) {
+      console.error('Error testing terminology replacement:', error);
+      res.status(500).json({ error: 'Failed to test terminology replacement.' });
     }
   });
 

@@ -21,6 +21,7 @@ import AdaptivePresentationEngine from './utils/adaptive-presentation-engine.js'
 import ModelRouter from './utils/model-router.js';
 import PerformanceTracker from './utils/performance-tracker.js';
 import analyticsLogger from './utils/analytics-logger.js';
+import PostProcessingEngine from './utils/post-processing-engine.js';
 import supabase from './config/supabase.js';
 
 // Initialize clients
@@ -305,6 +306,49 @@ async function performHybridSearch(searchVector, clientConfig, externalContext =
 }
 
 // parsing helpers now imported from ./utils/rag-parsing.js
+
+/**
+ * Builds terminology guidance for Portuguese localization
+ * @param {Object} terminologyConfig - Client terminology configuration
+ * @returns {string} Formatted guidance text for system prompt
+ */
+function buildTerminologyGuidance(terminologyConfig) {
+  if (!terminologyConfig.enabled || !terminologyConfig.termMappings || terminologyConfig.termMappings.length === 0) {
+    return '';
+  }
+
+  const dialect = terminologyConfig.primaryDialect === 'european' ? 'EUROPEU' : 'BRASILEIRO';
+  let guidance = `\n\nINSTRUÇÕES DE LOCALIZAÇÃO - PORTUGUÊS ${dialect}:`;
+
+  // Add critical terms guidance
+  const criticalTerms = terminologyConfig.termMappings.filter(mapping =>
+    mapping.sourceTerm && mapping.targetTerm
+  );
+
+  if (criticalTerms.length > 0) {
+    guidance += `\nTermos críticos a utilizar:`;
+    criticalTerms.forEach(mapping => {
+      guidance += `\n- Sempre usar "${mapping.targetTerm}" em vez de "${mapping.sourceTerm}"`;
+    });
+
+    guidance += `\n\nExemplos de uso correto:`;
+    criticalTerms.slice(0, 3).forEach(mapping => { // Limit to first 3 examples
+      guidance += `\n- ❌ "${mapping.sourceTerm}" → ✅ "${mapping.targetTerm}"`;
+    });
+  }
+
+  // Add context rules if available
+  if (terminologyConfig.customRules && terminologyConfig.customRules.length > 0) {
+    guidance += `\n\nRegras contextuais:`;
+    terminologyConfig.customRules.forEach(rule => {
+      if (rule.description) {
+        guidance += `\n- ${rule.description}`;
+      }
+    });
+  }
+
+  return guidance;
+}
 
 /**
  * Determines the type of query for context-aware question generation
@@ -812,6 +856,9 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
      entities: queryFilters.intentAnalysis?.entities || []
    };
 
+   // NEW: Enrich user context for personalized questions
+   const enrichedUserContext = await enrichUserContext(visitorId, clientConfig.clientId);
+
    // Prepare user context for presentation engine
    const userContextForPresentation = {
      engagementLevel: enrichedUserContext.engagementLevel,
@@ -1068,12 +1115,9 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
        truncatedChatHistory = "Nenhum histórico anterior disponível";
    }
  
-   // NEW: Enrich user context for personalized questions
-   const enrichedUserContext = await enrichUserContext(visitorId, clientConfig.clientId);
- 
    // NEW: Build context-aware question generation instructions
    let questionGenerationContext = '';
- 
+
    if (enrichedUserContext.hasHistory && enrichedUserContext.leadScore > 0) {
      // Only inject context when meaningful data exists
      const contextParts = [];
@@ -1086,7 +1130,7 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
      if (enrichedUserContext.preferences?.budget) {
        contextParts.push(`Orçamento: €${enrichedUserContext.preferences.budget.toLocaleString('pt-PT')}`);
      }
- 
+
      if (contextParts.length > 0) {
        questionGenerationContext = `\nCONTEXTO UTILIZADOR: ${contextParts.join(', ')}`;
      }
@@ -1256,6 +1300,14 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
    // Dynamic intent-based instructions from database configuration
    if (queryFilters.intents && queryFilters.intents.length > 0) {
      systemPrompt += `\n\n${queryFilters.intents.join('\n\n')}`;
+   }
+
+   // Add Portuguese localization guidance to system prompt
+   if (clientConfig.terminologyConfig && clientConfig.terminologyConfig.enabled) {
+     const terminologyGuidance = buildTerminologyGuidance(clientConfig.terminologyConfig);
+     if (terminologyGuidance) {
+       systemPrompt += `\n\n${terminologyGuidance}`;
+     }
    }
  
  
@@ -1436,24 +1488,50 @@ async function generateResponse(query, clientConfig, queryEmbeddingVector, exter
        // Validate response completeness
        const isCompleteResponse = cleanedResponse.length > 50 && !raw.endsWith('...') && !raw.endsWith(':');
        const hasQuestions = suggestedQuestions.length > 0;
- 
+
        if (!isCompleteResponse || !hasQuestions) {
          console.warn(`[${clientConfig.clientName}] Incomplete response detected: complete=${isCompleteResponse}, questions=${hasQuestions}`);
          // Could trigger retry with simplified prompt
        }
- 
+
+       // Apply Portuguese localization post-processing
+       let localizedResponse = cleanedResponse;
+       let localizationResult = null;
+
+       if (clientConfig.terminologyConfig && clientConfig.terminologyConfig.enabled) {
+         try {
+           const postProcessor = new PostProcessingEngine(clientConfig.terminologyConfig);
+           localizationResult = postProcessor.processText(cleanedResponse, 'response', visitorId);
+
+           if (localizationResult.termsReplaced.length > 0) {
+             localizedResponse = localizationResult.localizedText;
+             console.log(`[${clientConfig.clientName}] 🇵🇹 LOCALIZATION: Replaced ${localizationResult.termsReplaced.length} terms in ${localizationResult.processingTimeMs}ms`);
+             localizationResult.termsReplaced.forEach(replacement => {
+               console.log(`[${clientConfig.clientName}]   "${replacement.originalTerm}" → "${replacement.replacedTerm}" (${replacement.occurrences}x)`);
+             });
+           }
+         } catch (error) {
+           console.error(`[${clientConfig.clientName}] ❌ Post-processing failed:`, error.message);
+           // Continue with original response if localization fails
+         }
+       }
+
        // Detailed response analysis after parsing
        const cleanedResponseTokens = encode(cleanedResponse).length;
+       const localizedResponseTokens = encode(localizedResponse).length;
        const questionsTokens = encode(JSON.stringify(suggestedQuestions)).length;
- 
+
        console.log(`[${clientConfig.clientName}] 📊 DETAILED RESPONSE BREAKDOWN:`);
        console.log(`[${clientConfig.clientName}]   Cleaned Response: ${cleanedResponseTokens} tokens`);
+       if (localizationResult) {
+         console.log(`[${clientConfig.clientName}]   Localized Response: ${localizedResponseTokens} tokens (+${localizedResponseTokens - cleanedResponseTokens} from localization)`);
+       }
        console.log(`[${clientConfig.clientName}]   Questions JSON: ${questionsTokens} tokens`);
        console.log(`[${clientConfig.clientName}]   Questions Generated: ${suggestedQuestions.length}`);
        console.log(`[${clientConfig.clientName}]   Response Quality: ${isCompleteResponse ? 'COMPLETE' : 'INCOMPLETE'} | ${hasQuestions ? 'HAS_QUESTIONS' : 'NO_QUESTIONS'}`);
- 
+
        const previousAssistantText = (chatMessagesArray.slice().reverse().find(m => m.role === 'assistant')?.content) || '';
-       const processedResponse = removeRedundantClosingCTA(cleanedResponse, previousAssistantText);
+       const processedResponse = removeRedundantClosingCTA(localizedResponse, previousAssistantText);
  
        // Return response, suggested questions, and debug payload
        return {

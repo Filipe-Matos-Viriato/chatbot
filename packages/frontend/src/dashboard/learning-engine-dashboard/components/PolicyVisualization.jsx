@@ -229,7 +229,7 @@ const PolicyVisualization = ({ policies, metrics }) => {
             return (
               <div
                 key={index}
-                className="absolute w-3 h-3 bg-blue-600 rounded-full transform -translate-x-1/2 -translate-y-1/2 cursor-pointer relative group"
+                className="absolute w-3 h-3 bg-blue-600 rounded-full transform -translate-x-1/2 -translate-y-1/2 cursor-pointer group"
                 style={{
                   left: `${x}%`,
                   top: `${y}%`,

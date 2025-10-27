@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import ClientManagementTab from './admin-dashboard/ClientManagementTab';
+import PortugueseFineTuningTab from './portuguese-fine-tuning-tab/PortugueseFineTuningTab';
 
 const AdminDashboard = () => {
   return (
@@ -38,6 +39,16 @@ const AdminDashboard = () => {
                 }
               >
                 Learning Engine
+              </NavLink>
+            </li>
+            <li className="mb-2">
+              <NavLink
+                to="/admin/portuguese-fine-tuning"
+                className={({ isActive }) =>
+                  isActive ? "text-blue-800 font-bold" : "text-blue-600 hover:text-blue-800"
+                }
+              >
+                Portuguese Fine Tuning
               </NavLink>
             </li>
             {/* Add other admin tabs here */}

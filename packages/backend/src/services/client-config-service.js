@@ -1,9 +1,10 @@
 // packages/backend/src/services/client-config-service.js
 // Service for managing client-specific configurations stored in Supabase with lazy loading and caching.
 // To provide dynamic, database-driven configuration management for multi-tenant chatbot system.
-// Relevant files: index.js, config/supabase.js
+// Relevant files: index.js, config/supabase.js, terminology-manager.js
 import supabase from '../config/supabase.js';
 import NodeCache from 'node-cache';
+import terminologyManager from './terminology-manager.js';
 
 // Initialize cache with a standard TTL of 15 minutes (900 seconds)
 const configCache = new NodeCache({ stdTTL: 900, checkperiod: 60 }); // Check for expired keys every minute
@@ -89,7 +90,12 @@ async function getClientConfig(clientId) {
     questionTemplates: data.question_templates,
     // Add question generation prompts from database
     enhanced_question_generation_prompt: data.enhanced_question_generation_prompt,
-    basic_suggested_questions_prompt: data.basic_suggested_questions_prompt
+    basic_suggested_questions_prompt: data.basic_suggested_questions_prompt,
+    // Add terminology configuration for Portuguese localization
+    terminologyConfig: await terminologyManager.getClientTerminology(data.client_id).catch(error => {
+      console.warn(`[ClientConfig] Failed to load terminology config for ${data.client_id}:`, error.message);
+      return terminologyManager.getDefaultConfig();
+    })
   };
 
   configCache.set(cacheKey, clientConfig);
